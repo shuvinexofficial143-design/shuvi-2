@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Shuvi 2 · Creative Studio</title>
+</head>
+<body>
+<div id="studio">
+  <header class="topbar">
+    <div class="brand"><span class="symbol">◆</span> SHUVI <strong>2</strong></div>
+    <div class="top-note">AI Creative Studio <span class="phase">M0 · Foundation</span></div>
+    <div class="top-right">Local-first Windows Studio</div>
+  </header>
+  <div class="body">
+    <aside class="toolrail" aria-label="Studios">
+      <div class="rail-title">STUDIOS</div>
+      <button class="studio active" data-studio="video">▣ <span>Video</span></button>
+      <button class="studio" data-studio="motion">✧ <span>Motion</span></button>
+      <button class="studio" data-studio="photo" disabled>▧ <span>Photo</span></button>
+      <button class="studio" data-studio="vector" disabled>◈ <span>Vector</span></button>
+      <div class="rail-bottom">Source pinned<br/>Runtime not built</div>
+    </aside>
+    <main class="workspace">
+      <div class="sectionbar"><div><span class="eyebrow">WORKSPACE</span><h1 id="studio-title">Video Studio</h1></div><span id="engine-health" class="health">Checking engine…</span></div>
+      <div class="preview"><div class="screen"><div class="preview-icon">▶</div><h2>Live Editor Integration Pending</h2><p>यह Canvas अभी Video Preview नहीं है। FilmCraft और EffectCraft को इस Window में Embed करना अगला Engine Milestone है।</p></div></div>
+      <div class="timeline">
+        <div class="timeline-top"><strong>Timeline</strong><span>00:00:00:00</span></div>
+        <div class="track"><span>V1 · Video</span><div class="track-lane">No clips imported</div></div>
+        <div class="track"><span>V2 · Graphics</span><div class="track-lane"></div></div>
+        <div class="track"><span>A1 · Audio</span><div class="track-lane"></div></div>
+      </div>
+      <div class="diagnostics"><strong>Native bridge test</strong><button id="srt-test">Verify SRT serialization</button><code id="test-output">Not tested</code></div>
+    </main>
+    <aside class="chat">
+      <div class="chat-heading"><div><strong>✦ Shuvi AI</strong><span>Creative Copilot</span></div><span class="offline">Not connected</span></div>
+      <div id="chat-thread" class="thread" aria-live="polite">
+        <div class="message assistant">नया Shuvi 2 Desktop Shell तैयार किया जा रहा है। अभी AI Provider या Editing Engine जुड़ा नहीं है। आप यहाँ Command Draft कर सकते हैं, लेकिन वह Execute नहीं होगा।</div>
+      </div>
+      <form id="chat-form" class="chat-form"><label for="prompt">Your instruction</label><textarea id="prompt" rows="4" placeholder="उदाहरण: 5 मिनट की Video में Captions लगाओ…"></textarea><button type="submit">Save local draft (not executed) →</button></form>
+    </aside>
+  </div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
