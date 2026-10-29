@@ -68,6 +68,23 @@ fn executable_path(value: OsString) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// The explicit trusted absolute path wins for tests/development. The Windows
+/// video build packages a sidecar next to the Shuvi executable; no PATH search.
+fn configured_cli_path() -> Result<PathBuf, String> {
+    if let Some(configured) = std::env::var_os(CLI_ENV) {
+        return executable_path(configured);
+    }
+    let app_exe = std::env::current_exe()
+        .map_err(|e| format!("Cannot locate Shuvi executable: {e}"))?;
+    let app_dir = app_exe.parent()
+        .ok_or("Shuvi executable has no containing directory")?;
+    let name = if cfg!(windows) { "filmcraft-cli.exe" } else { "filmcraft-cli" };
+    let sidecar = app_dir.join(name);
+    executable_path(sidecar.into_os_string()).map_err(|_| {
+        format!("FilmCraft CLI is unavailable; build the video-enabled Shuvi package or set {CLI_ENV}")
+    })
+}
+
 fn run_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
     let mut child = Command::new(cli)
         .args(args)
@@ -105,9 +122,7 @@ fn run_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
 
 /// Real engine call + project round-trip, not a mocked command.
 pub fn smoke_probe() -> Result<VideoProbe, String> {
-    let configured = std::env::var_os(CLI_ENV)
-        .ok_or_else(|| format!("{CLI_ENV} is not configured; FilmCraft is not installed/built"))?;
-    let cli = executable_path(configured)?;
+    let cli = configured_cli_path()?;
     let scratch = Scratch::create()?;
     let project = scratch.0.join("sequence.fcproj");
     let project_string = project.to_str().ok_or("Project temp path is not UTF-8")?;
@@ -143,6 +158,15 @@ mod tests {
         assert!(executable_path(OsString::from("filmcraft-cli.exe")).is_err());
         let path = std::env::current_exe().expect("current test binary");
         assert!(executable_path(path.into_os_string()).is_err());
+    }
+
+    #[test]
+    fn sidecar_filename_and_absolute_location_are_validated() {
+        let scratch = Scratch::create().expect("scratch");
+        let missing = scratch.0.join("filmcraft-cli.exe");
+        assert!(executable_path(missing.into_os_string()).is_err());
+        // Never resolve via current directory or PATH: path must be absolute.
+        assert!(executable_path(OsString::from("bin/filmcraft-cli.exe")).is_err());
     }
 
     #[test]
