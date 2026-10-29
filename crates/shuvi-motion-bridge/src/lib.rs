@@ -4,6 +4,9 @@
 use effectcraft_engine::{Session, project::ItemId};
 use serde_json::json;
 
+mod persistence;
+pub use persistence::ProjectReceipt;
+
 /// Approved basic composition parameters, rather than arbitrary AI-authored engine JSON.
 #[derive(Debug, Clone)]
 pub struct CompositionSpec {
