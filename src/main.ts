@@ -12,6 +12,8 @@ const prompt = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 
 let selectedStudio: "video" | "motion" = "video";
 const videoStudio = mountVideoStudio();
+// Video is the default tab; hide the M0 placeholder immediately.
+videoStudio.setActive(true);
 let engines: EngineStatus[] = [];
 
 function showHealth(): void {

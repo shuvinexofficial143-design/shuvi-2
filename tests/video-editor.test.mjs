@@ -14,6 +14,10 @@ test("FilmCraft real sequence.inspect video/audio track shapes map to timeline s
   assert.equal(sequenceDuration(seq),2);
   assert.deepEqual(timelineClips(seq).map(c=>[c.clipId,c.track,c.kind,c.start,c.duration]),[[100,"V1","video",0,1],[101,"A1","audio",1,1]]);
 });
+test("custom names never become invalid engine track addresses",()=>{
+  const seq={video:[{name:"My Cinematic Track",items:[{clip:7,item:4,name:"movie",start:0,duration:TICKS_PER_SECOND}]}]};
+  assert.equal(timelineClips(seq)[0].track,"V1");
+});
 test("no fabricated timeline, invalid values ignored and expected timecode",()=>{
   assert.deepEqual(timelineClips({video:[{items:[{clip:0,item:2,start:0,duration:NaN}]}]}),[]);
   assert.equal(formatTimecode(65.025),"00:01:05.025");

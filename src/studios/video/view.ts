@@ -114,9 +114,13 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     }else for(const kind of ["video","audio"] as const){
       const list=seq[kind]??[];
       for(let index=0;index<list.length;index++){
-        const name=String(list[index]?.name??(kind==="video"?"V":"A")+(index+1));
+        const name=(kind==="video"?"V":"A")+(index+1);
+        const display=String(list[index]?.name??"");
+
         const row=document.createElement("div");row.className="v-track-row";
-        const label=document.createElement("span");label.textContent=name;
+        const label=document.createElement("span");
+        label.textContent=name;
+        if(display&&display!==name)label.title=display;
         const track=document.createElement("div");track.className="v-track-lane";
         for(const clip of clips.filter(c=>c.kind===kind&&c.track===name)){
           const btn=document.createElement("button");btn.type="button";btn.className="v-clip"+(clip.clipId===clipId?" v-selected":"");
@@ -141,6 +145,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       "Select a real clip by clicking its timeline block";
     panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{b.disabled=busy});
     lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{b.disabled=busy||!snapshot});
+    panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input,select").forEach(control=>{control.disabled=busy;});
+    lane.querySelectorAll<HTMLButtonElement>(".v-clip").forEach(control=>{control.disabled=busy;});
   }
   async function load():Promise<VideoProjectSnapshot>{
     const p=paths();const found=await inspectVideoProject(p.selectedRoot,p.projectPath);
@@ -155,6 +161,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
   async function handle(action:string):Promise<void>{
     if(busy||!active)return;
     busy=true;draw();
+    inform("Running native "+action+"… No result is claimed until verification finishes.");
     try {
       if(action==="probe"){
         const result=await probeVideoEngine();

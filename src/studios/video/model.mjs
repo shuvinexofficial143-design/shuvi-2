@@ -38,7 +38,9 @@ export function timelineClips(sequence) {
     for (let i = 0; i < tracks.length; i++) {
       const track = tracks[i];
       if (!track || !Array.isArray(track.items)) continue;
-      const trackName = String(track.name ?? (kind === "video" ? "V" : "A") + (i + 1));
+      // Track name can be arbitrary ("Video 1", localized/custom); stable
+      // FilmCraft address is positional V1..V16/A1..A16 for the editing API.
+      const trackName = (kind === "video" ? "V" : "A") + (i + 1);
       for (const entry of track.items) {
         if (!entry || !Number.isSafeInteger(entry.clip) || !Number.isSafeInteger(entry.item)) continue;
         if (!Number.isFinite(entry.start) || !Number.isFinite(entry.duration) || entry.duration < 0) continue;
