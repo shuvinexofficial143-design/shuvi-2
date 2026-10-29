@@ -44,6 +44,6 @@ test("UI rejects unverified native preview rather than drawing fake frame",()=>{
   assert.match(ts, /frame\.source !== "native-effectcraft"/);
   assert.match(ts, /"data:image\/png;base64,"\+frame\.pngBase64/);
   assert.match(ts, /Native Save\/Reopen did not verify/);
-  assert.match(ts, /data-failure/);
+  assert.match(ts, /el\\.dataset\\.failure = String\\(failed\\)/);
   assert.doesNotMatch(ts, /"data:image\/svg/);
 });
