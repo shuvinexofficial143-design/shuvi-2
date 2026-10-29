@@ -86,6 +86,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");

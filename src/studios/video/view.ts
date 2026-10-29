@@ -1,4 +1,5 @@
 import "./view.css";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { probeVideoEngine } from "./engine";
 import { inspectVideoProject, type VideoProjectSnapshot } from "./snapshot";
 import { importVideoMedia } from "./media";
@@ -23,6 +24,13 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       <label>FilmCraft project (.fcproj)<input data-v="project" placeholder="C:\Videos\Project\edit.fcproj"></label>
       <label>Import media (MP4/MOV/WAV)<input data-v="source" placeholder="C:\Videos\Project\clip.mp4"></label>
       <label>Export MP4 (new filename)<input data-v="output" placeholder="C:\Videos\Project\final.mp4"></label>
+    </div>
+    <div class="v-choose">
+      <button data-choose="folder">Browse Folder</button>
+      <button data-choose="project">Open .fcproj</button>
+      <button data-choose="newProject">New Project Path</button>
+      <button data-choose="source">Browse Media</button>
+      <button data-choose="output">Save MP4 As</button>
     </div>
     <div class="v-actions"><button data-action="probe">Verify Engine</button><button data-action="open">Open / Refresh</button><button data-action="import">Import Media</button><button data-action="sequence">Create Sequence</button><button data-action="preview">Render Frame</button><button data-action="export">Export MP4</button></div>
     <div class="v-middle">
@@ -143,7 +151,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     e<HTMLElement>("selected").textContent=selected?
       "Native clip #"+selected.clipId+" · "+selected.track+" · "+selected.name:
       "Select a real clip by clicking its timeline block";
-    panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{b.disabled=busy});
+    panel.querySelectorAll<HTMLButtonElement>("button[data-action],button[data-choose]").forEach(b=>{b.disabled=busy});
     lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{b.disabled=busy||!snapshot});
     panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input,select").forEach(control=>{control.disabled=busy;});
     lane.querySelectorAll<HTMLButtonElement>(".v-clip").forEach(control=>{control.disabled=busy;});
@@ -217,6 +225,39 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     }catch(error){inform(String(error),true);}
     finally{busy=false;draw();}
   }
+  async function choose(which:string):Promise<void>{
+    if(busy||!active)return;
+    try{
+      let selected:string|null=null;
+      if(which==="folder"){
+        selected=await open({directory:true,multiple:false,title:"Select Video Studio project folder"});
+        if(selected)e<HTMLInputElement>("root").value=selected;
+      }else if(which==="project"){
+        selected=await open({directory:false,multiple:false,title:"Open existing FilmCraft project",
+          filters:[{name:"FilmCraft Project",extensions:["fcproj"]}]});
+        if(selected)e<HTMLInputElement>("project").value=selected;
+      }else if(which==="newProject"){
+        selected=await save({title:"Choose new FilmCraft project path",
+          filters:[{name:"FilmCraft Project",extensions:["fcproj"]}]});
+        if(selected)e<HTMLInputElement>("project").value=selected;
+      }else if(which==="source"){
+        selected=await open({directory:false,multiple:false,title:"Import real video/audio/photo",
+          filters:[{name:"FilmCraft Media",extensions:["mp4","m4v","mov","mkv","webm","avi","wav","wave","m4a","mp3","png","jpg","jpeg"]}]});
+        if(selected)e<HTMLInputElement>("source").value=selected;
+      }else if(which==="output"){
+        selected=await save({title:"Choose new MP4 export destination",
+          filters:[{name:"H.264 MP4",extensions:["mp4"]}]});
+        if(selected)e<HTMLInputElement>("output").value=selected;
+      }
+      // Infer the folder only when still empty; users may override for multi-file projects.
+      if(selected && which!=="folder" && !value("root")){
+        e<HTMLInputElement>("root").value=selected.replace(/[\\/][^\\/]+$/,"");
+      }
+      if(selected)inform("Selected native path · "+selected+" · no editor operation executed yet");
+    }catch(err){inform("Native dialog unavailable: "+String(err),true);}
+  }
+  panel.querySelectorAll<HTMLButtonElement>("button[data-choose]").forEach(b=>
+    b.addEventListener("click",()=>{void choose(b.dataset.choose??"");}));
   panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
   lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
   e<HTMLSelectElement>("media").addEventListener("change",()=>{
