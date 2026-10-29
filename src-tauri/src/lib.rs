@@ -25,6 +25,15 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Actual FilmCraft Program frame PNG; never substitute a mock render.
+#[tauri::command]
+async fn video_preview_frame(
+    request: video::preview::PreviewRequest,
+) -> Result<video::preview::PreviewReceipt, String> {
+    tauri::async_runtime::spawn_blocking(move || video::preview::render(request))
+        .await.map_err(|e| format!("Preview worker failed: {e}"))?
+}
+
 /// Explicit user-scoped timeline request, with project revision verification.
 #[tauri::command]
 async fn video_timeline_apply(
@@ -58,7 +67,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

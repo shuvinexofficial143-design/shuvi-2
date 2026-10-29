@@ -55,6 +55,12 @@ jobs:
           $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
           cargo test --manifest-path src-tauri/Cargo.toml --lib video::timeline::tests::real_timeline_placement_split_move_delete -- --exact --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw "V04 real timeline test failed." }
+      - name: Render a real FilmCraft Program frame PNG from imported MP4
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::preview::tests::real_program_frame_png -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "V05 PNG preview smoke failed." }
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
       - name: Build Windows NSIS experimental Shuvi video package

@@ -101,7 +101,7 @@ fn mapped_action(a: &TimelineAction) -> Result<Value, String> {
     Ok(cmd)
 }
 
-fn checked_project(root: &str, file: &str) -> Result<std::path::PathBuf, String> {
+pub(super) fn checked_project(root: &str, file: &str) -> Result<std::path::PathBuf, String> {
     if !Path::new(root).is_absolute() || !Path::new(file).is_absolute() {
         return Err("Owner-selected root and project must be absolute".into());
     }
