@@ -17,6 +17,10 @@ videoStudio.setActive(true);
 let engines: EngineStatus[] = [];
 
 function showHealth(): void {
+  if (selectedStudio === "video") {
+    health.textContent = "FilmCraft · click Verify Engine for real runtime check";
+    return;
+  }
   const found = engines.find((engine) => engine.name === selectedStudio);
   health.textContent = found?.runtimeReady
     ? "Engine ready"
@@ -49,7 +53,9 @@ document.querySelector<HTMLFormElement>("#chat-form")!.addEventListener("submit"
   const value = prompt.value.trim();
   if (!value) return;
   appendMessage("user", value);
-  appendMessage("assistant", "Draft saved only in this window. No AI provider or editing engine is connected, so no edit was executed.");
+  appendMessage("assistant", selectedStudio === "video"
+    ? "AI provider not connected. This message is a draft only; use the FilmCraft controls in Video Studio for verified manual edits."
+    : "Draft saved only in this window. No AI provider or motion editing engine is connected; no edit executed.");
   prompt.value = "";
 });
 

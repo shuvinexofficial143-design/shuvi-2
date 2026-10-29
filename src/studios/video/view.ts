@@ -15,6 +15,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
   if(!preview||!timeline)throw Error("Missing Shuvi Studio mount");
   const oldPreview=Array.from(preview.children).filter((n):n is HTMLElement=>n instanceof HTMLElement);
   const oldTimeline=Array.from(timeline.children).filter((n):n is HTMLElement=>n instanceof HTMLElement);
+  const initialChat=document.querySelector<HTMLElement>("#chat-thread .message.assistant");
+  const initialChatText=initialChat?.textContent??"";
   const panel=document.createElement("section");
   panel.className="v-editor";
   panel.innerHTML=String.raw`
@@ -280,5 +282,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     panel.hidden=!next;lane.hidden=!next;
     oldPreview.forEach(n=>{n.hidden=next});
     oldTimeline.forEach(n=>{n.hidden=next});
+    if(initialChat)initialChat.textContent=next
+      ? "Shuvi AI chat is not connected yet. Manual Video editing runs through the real FilmCraft engine after an explicit button click."
+      : initialChatText;
   }};
 }
