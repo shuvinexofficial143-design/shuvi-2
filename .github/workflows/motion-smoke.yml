@@ -32,6 +32,19 @@ jobs:
           $actual = git -C vendor/effectcraft rev-parse HEAD
           $expected = 'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'
           if ($actual -ne $expected) { throw "EffectCraft pin mismatch: $actual" }
+      - name: Assert patched PDF parser resolves to upstream reviewed commit
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --format-version 1 --manifest-path crates/shuvi-motion-bridge/Cargo.toml | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $syntax = @($metadata.packages | Where-Object { $_.name -eq 'hayro-syntax' })
+          if ($syntax.Count -ne 1) { throw "Expected exactly one hayro-syntax package; found $($syntax.Count)" }
+          $source = $syntax[0].source
+          $pin = '92d392cff132eaf53e13afff77f38b5c11b73aa0'
+          if (-not $source -or -not $source.Contains('storytold/craft-libs') -or -not $source.Contains($pin)) {
+            throw "Guarded upstream hayro-syntax patch missing: $source"
+          }
+          Write-Host "PASS: guarded hayro-syntax comes from reviewed upstream source"
       - name: Test actual EffectCraft engine bridge
         run: cargo test --manifest-path crates/shuvi-motion-bridge/Cargo.toml --all-targets
       - name: Execute headless real composition smoke
