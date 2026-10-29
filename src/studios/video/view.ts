@@ -42,6 +42,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         <label>Sequence FPS<input data-v="fps" type="number" value="30" step="1" min="1" max="120"></label>
         <label>Playhead seconds<input data-v="seconds" type="number" value="0.25" step=".04" min="0" max="86400"></label>
         <label>Track (V1 / A1)<input data-v="track" value="V1"></label>
+        <label>Frame preview scale<select data-v="previewScale"><option value="0.25">25% (faster)</option><option value="0.5">50% (clearer)</option></select></label>
+        <label>Export scale<select data-v="exportScale"><option value="1">100% original sequence</option><option value="0.5">50% (faster)</option><option value="0.25">25% (small)</option></select></label>
+        <label class="v-inline"><input data-v="audio" type="checkbox" checked> Include audio in export</label>
         <label>Trim frames (+/-)<input data-v="frames" type="number" value="-3" step="1"></label>
         <label>Trim edge<select data-v="edge"><option value="out">Out</option><option value="in">In</option></select></label>
         <label class="v-inline"><input data-v="ripple" type="checkbox"> Ripple edit</label>
@@ -200,7 +203,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         const audio=track.startsWith("A");
         await edit({type:"place",itemId:id,track,seconds:requireNumber(value("seconds"),0,86400),video:!audio,audio});
       }else if(action==="preview"){
-        const frame=await renderVideoPreview({...request(),seconds:requireNumber(value("seconds"),0,86400),scale:0.25});
+        const frame=await renderVideoPreview({...request(),seconds:requireNumber(value("seconds"),0,86400),scale:requireNumber(e<HTMLSelectElement>("previewScale").value,0.1,0.5)});
         if(disposeFrame)disposeFrame();
         disposeFrame=applyPreviewToImage(e<HTMLImageElement>("image"),frame);
         e<HTMLImageElement>("image").hidden=false;
@@ -209,7 +212,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       }else if(action==="export"){
         const outputPath=value("output");
         if(!localWindowsPath(outputPath)||!outputPath.toLowerCase().endsWith(".mp4"))throw Error("Choose a new absolute .mp4 filename");
-        const out=await exportVideoMp4({...request(),outputPath,scale:1,includeAudio:true});
+        const out=await exportVideoMp4({...request(),outputPath,scale:requireNumber(e<HTMLSelectElement>("exportScale").value,0.25,1),includeAudio:e<HTMLInputElement>("audio").checked});
         inform("Verified MP4 · "+out.codec+" · "+out.outputBytes+" bytes · "+out.outputPath);
       }else{
         const clip=clips.find(c=>c.clipId===clipId);
