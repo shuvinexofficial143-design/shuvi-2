@@ -17,6 +17,8 @@ fn native_text_and_shape_are_editable_in_one_comp() {
     let s=b.add_shape(c,"Rectangle",ShapeKind::Rectangle,320.0,220.0,
         280.0,100.0,"#00ff77").unwrap();
     assert_eq!(t.kind,"Text");
+    assert_eq!(b.edit_text(c,t.id,"Updated Shuvi Title").unwrap().id,t.id);
+    assert!(b.edit_text(c,s.id,"Wrong Layer").is_err());
     assert_eq!(s.kind,"Shape");
     assert_ne!(t.id,s.id);
     assert_eq!(b.list_layers(c).unwrap().len(),2);
