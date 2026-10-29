@@ -1,0 +1,38 @@
+name: Shuvi 2 Motion native smoke
+
+on:
+  push:
+    branches:
+      - feature/shuvi2-motion-studio
+  pull_request:
+    paths:
+      - 'crates/shuvi-motion-bridge/**'
+      - 'docs/motion/**'
+      - '.github/workflows/motion-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  motion-engine-windows:
+    name: Real EffectCraft comp.new on Windows
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout pinned EffectCraft submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install upstream-required Rust 1.95
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Verify source pin
+        shell: pwsh
+        run: |
+          $actual = git -C vendor/effectcraft rev-parse HEAD
+          $expected = 'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'
+          if ($actual -ne $expected) { throw "EffectCraft pin mismatch: $actual" }
+      - name: Test actual EffectCraft engine bridge
+        run: cargo test --manifest-path crates/shuvi-motion-bridge/Cargo.toml --all-targets
+      - name: Execute headless real composition smoke
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-smoke
