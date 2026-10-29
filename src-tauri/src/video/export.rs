@@ -160,6 +160,7 @@ mod tests {
         assert!(export_mp4(ExportRequest{
             selected_root:tmp.0.to_string_lossy().into_owned(),project_path:project.to_string_lossy().into_owned(),
             expected_revision:edited.after_revision,
+            expected_project_sha256:edited.project_sha256.clone(),
             output_path:output.to_string_lossy().into_owned(),scale:1.0,include_audio:false
         }).is_err(),"Must not overwrite");
     }
