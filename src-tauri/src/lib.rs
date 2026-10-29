@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 mod subtitles;
+mod motion;
 
 // Source-pinned does NOT imply installed, compiled, loaded, or operational.
 // False means no verified direct engine integration is available yet.
@@ -28,7 +29,8 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions])
+        .manage(motion::MotionHost::new())
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, motion::motion_command])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }
