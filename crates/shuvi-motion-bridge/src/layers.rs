@@ -105,3 +105,32 @@ impl MotionBridge {
         Ok(layer)
     }
 }
+
+impl MotionBridge {
+    /// Edit an existing actual EffectCraft source-text document in the SAME session.
+    /// This is a native layer.setText edit, not an overlay painted by the UI.
+    pub fn edit_text(&mut self,comp_id:u64,layer_id:u64,text:&str)
+        ->Result<LayerSnapshot,String>{
+        if text.trim().is_empty()||text.len()>4096||text.contains('\0'){
+            return Err("invalid editable text".into());
+        }
+        let comp=self.session.project.comp(ItemId(comp_id)).ok_or("composition not found")?;
+        let layer=comp.layer(LayerId(layer_id)).ok_or("layer not found")?;
+        if !matches!(layer.source,effectcraft_engine::project::LayerSource::Text){
+            return Err("target is not a text layer".into());
+        }
+        let before=self.session.revision;
+        self.session.execute_checked("layer.setText",json!({
+            "comp":comp_id,"layer":layer_id,"text":text
+        })).map_err(|e|format!("native layer.setText failed: {e}"))?;
+        let layer=self.session.project.comp(ItemId(comp_id))
+            .and_then(|c|c.layer(LayerId(layer_id))).ok_or("text layer vanished")?;
+        let doc=layer.props.prop("text/sourceText").ok_or("sourceText missing")?;
+        let effectcraft_engine::keyframe::Value::Text(ref actual)=doc.value else {
+            return Err("native text property invalid".into());
+        };
+        if actual.text!=text{return Err("native text edit not reflected in project".into());}
+        if self.session.revision==before{return Err("native text edit did not record a change".into());}
+        self.inspect_layer(comp_id,layer_id)
+    }
+}
