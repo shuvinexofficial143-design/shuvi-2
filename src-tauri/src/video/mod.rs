@@ -64,8 +64,8 @@ fn executable_path(value: OsString) -> Result<PathBuf, String> {
         return Err("FilmCraft CLI path is not a file".into());
     }
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if !matches!(name, "filmcraft-cli" | "filmcraft-cli.exe") {
-        return Err("FilmCraft CLI executable must be named filmcraft-cli[.exe]".into());
+    if !matches!(name, "filmcraft-cli" | "filmcraft-cli.exe" | "filmcraft-cli-x86_64-pc-windows-msvc.exe") {
+        return Err("FilmCraft CLI must be named filmcraft-cli[.exe] or the pinned Windows Tauri sidecar name".into());
     }
     Ok(path)
 }
@@ -173,6 +173,10 @@ mod tests {
         assert!(executable_path(missing.into_os_string()).is_err());
         // Never resolve via current directory or PATH: path must be absolute.
         assert!(executable_path(OsString::from("bin/filmcraft-cli.exe")).is_err());
+        let staged = scratch.0.join("filmcraft-cli-x86_64-pc-windows-msvc.exe");
+        std::fs::write(&staged, b"test-only placeholder").expect("fixture file");
+        // Validation accepts the expected Tauri staged filename, never PATH lookup.
+        assert_eq!(executable_path(staged.as_os_str().to_os_string()).unwrap(), staged.canonicalize().unwrap());
     }
 
     #[test]
