@@ -37,6 +37,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       <div class="v-monitor"><img data-v="image" alt="Real FilmCraft Program frame" hidden><span data-v="empty">Frame preview pending · click Render Frame after placing footage</span></div>
       <div class="v-options">
         <label>Imported media<select data-v="media"><option value="">Import first</option></select></label>
+        <label>Sequence Width<input data-v="width" type="number" value="1280" step="1" min="16" max="7680"></label>
+        <label>Sequence Height<input data-v="height" type="number" value="720" step="1" min="16" max="4320"></label>
+        <label>Sequence FPS<input data-v="fps" type="number" value="30" step="1" min="1" max="120"></label>
         <label>Playhead seconds<input data-v="seconds" type="number" value="0.25" step=".04" min="0" max="86400"></label>
         <label>Track (V1 / A1)<input data-v="track" value="V1"></label>
         <label>Trim frames (+/-)<input data-v="frames" type="number" value="-3" step="1"></label>
@@ -185,7 +188,11 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         await load();
         inform("Imported real media #"+result.itemId+" · "+result.container+" · "+formatTimecode(result.durationSeconds));
       }else if(action==="sequence"){
-        await edit({type:"createSequence",name:"Shuvi Video Studio",width:1280,height:720,fps:30});
+        const width=requireNumber(value("width"),16,7680);
+        const height=requireNumber(value("height"),16,4320);
+        const fps=requireNumber(value("fps"),1,120);
+        if (![width,height,fps].every(Number.isInteger))throw Error("Sequence dimensions and frame rate must be whole numbers");
+        await edit({type:"createSequence",name:"Shuvi Video Studio",width,height,fps});
       }else if(action==="place"){
         const id=Number(e<HTMLSelectElement>("media").value),track=value("track").toUpperCase();
         if(!Number.isSafeInteger(id)||id<=0)throw Error("Select a real media item");
