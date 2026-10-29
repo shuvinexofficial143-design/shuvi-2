@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import "./styles.css";
+import { mountVideoStudio } from "./studios/video/view";
 
 type EngineStatus = { name: string; sourcePinned: boolean; runtimeReady: boolean };
 
@@ -10,6 +11,7 @@ const thread = document.querySelector<HTMLElement>("#chat-thread")!;
 const prompt = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 
 let selectedStudio: "video" | "motion" = "video";
+const videoStudio = mountVideoStudio();
 let engines: EngineStatus[] = [];
 
 function showHealth(): void {
@@ -27,6 +29,7 @@ document.querySelectorAll<HTMLButtonElement>("button[data-studio]").forEach((but
     selectedStudio = next;
     title.textContent = next === "video" ? "Video Studio" : "Motion Studio";
     document.querySelectorAll("button[data-studio]").forEach((b) => b.classList.toggle("active", b === button));
+    videoStudio.setActive(next === "video");
     showHealth();
   });
 });
