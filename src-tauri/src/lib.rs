@@ -1,9 +1,9 @@
 use serde::Serialize;
 
 mod subtitles;
+mod video;
 
 // Source-pinned does NOT imply installed, compiled, loaded, or operational.
-// False means no verified direct engine integration is available yet.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineStatus {
@@ -25,10 +25,18 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Opt-in real FilmCraft headless smoke, never a fabricated readiness signal.
+#[tauri::command]
+async fn video_engine_probe() -> Result<video::VideoProbe, String> {
+    tauri::async_runtime::spawn_blocking(video::smoke_probe)
+        .await
+        .map_err(|e| format!("Video engine probe worker failed: {e}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

@@ -1,0 +1,35 @@
+name: Shuvi 2 video V01 real FilmCraft smoke
+on:
+  pull_request:
+    paths:
+      - "src-tauri/src/video/**"
+      - "src-tauri/src/lib.rs"
+      - "src/studios/video/**"
+      - "docs/video/**"
+      - ".github/workflows/video-v01.yml"
+      - ".gitmodules"
+      - "vendor/filmcraft"
+  workflow_dispatch:
+
+jobs:
+  real-filmcraft-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            vendor/filmcraft
+            src-tauri
+      - name: Compile pinned headless FilmCraft CLI
+        run: cargo build --locked --manifest-path vendor/filmcraft/Cargo.toml -p filmcraft-cli
+      - name: Real engine create-save-readback smoke
+        env:
+          SHUVI_FILMCRAFT_CLI_PATH: ${{ github.workspace }}\vendor\filmcraft\target\debug\filmcraft-cli.exe
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib video::tests::real_filmcraft_smoke -- --exact --ignored --nocapture
