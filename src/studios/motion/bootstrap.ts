@@ -129,12 +129,19 @@ function paintUi():void {
      <label>Layer name <input id="motion-layer-name" value="Motion Title"/></label>
      <label>Text <input id="motion-text" value="Hello from Shuvi 2"/></label>
      <button id="motion-add-text">Add editable text</button>
+     <button id="motion-edit-text">Edit selected text</button>
      <label>Shape <select id="motion-shape-kind"><option value="rect">Rectangle</option>
        <option value="ellipse">Ellipse</option><option value="rounded">Rounded</option>
        <option value="star">Star</option><option value="polygon">Polygon</option></select></label>
      <button id="motion-add-shape">Add real shape</button>
    </div>
    <div class="motion-fields">
+     <label>Position X <input id="motion-pos-x" type="number" value="320"/></label>
+     <label>Y <input id="motion-pos-y" type="number" value="180"/></label>
+     <button id="motion-set-position">Set position</button>
+     <label>Scale X % <input id="motion-scale-x" type="number" value="100"/></label>
+     <label>Y % <input id="motion-scale-y" type="number" value="100"/></label>
+     <button id="motion-set-scale">Set scale</button>
      <label>Rotation <input id="motion-rotation" type="number" value="0"/></label>
      <button id="motion-set-rotation">Set rotation</button>
      <label>Opacity % <input id="motion-opacity" type="number" value="100" min="0" max="100"/></label>
@@ -170,6 +177,23 @@ function bind():void {
       x:c.width/2,y:c.height/2,width:Math.min(250,c.width/2),height:Math.min(110,c.height/2),
       fill:"#22aaff"});
     activeLayer=layer;await afterEdit();
+  });
+  bindClick("#motion-edit-text","Editing native Source Text",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    await request({action:"editText",compId:c.id,layerId:l.id,text:value("#motion-text")});
+    await afterEdit();
+  });
+  bindClick("#motion-set-position","Setting position",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    await request({action:"setTransform",compId:c.id,layerId:l.id,
+      kind:"position",x:number("#motion-pos-x"),y:number("#motion-pos-y")});
+    await afterEdit();
+  });
+  bindClick("#motion-set-scale","Setting scale",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    await request({action:"setTransform",compId:c.id,layerId:l.id,
+      kind:"scale",x:number("#motion-scale-x"),y:number("#motion-scale-y")});
+    await afterEdit();
   });
   bindClick("#motion-set-rotation","Setting rotation",async()=>{
     const c=ensureComp();const l=ensureLayer();
