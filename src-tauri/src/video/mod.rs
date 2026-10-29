@@ -7,6 +7,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub mod media;
+pub mod timeline;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -92,6 +93,13 @@ fn run_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
 }
 
 fn run_json_bounded(cli: &Path, args: &[&str], timeout: Duration) -> Result<Value, String> {
+    let text = run_text_bounded(cli, args, timeout)?;
+    serde_json::from_str(text.trim())
+        .map_err(|e| format!("FilmCraft response is not valid JSON: {e}"))
+}
+
+/// FilmCraft CLI run emits JSONL, unlike inspect/probe.
+fn run_text_bounded(cli: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     let mut child = Command::new(cli)
         .args(args)
         .stdin(Stdio::null())
@@ -122,8 +130,7 @@ fn run_json_bounded(cli: &Path, args: &[&str], timeout: Duration) -> Result<Valu
     }
     let output_text = std::str::from_utf8(&output.stdout)
         .map_err(|_| "FilmCraft response is not UTF-8".to_string())?;
-    serde_json::from_str(output_text.trim())
-        .map_err(|e| format!("FilmCraft response is not valid JSON: {e}"))
+    Ok(output_text.to_owned())
 }
 
 /// Real engine call + project round-trip, not a mocked command.

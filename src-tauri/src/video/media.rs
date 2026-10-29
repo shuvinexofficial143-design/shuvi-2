@@ -32,12 +32,12 @@ pub struct VideoImportedMedia {
     pub project_readback: Value,
 }
 
-struct ImportLock {
+pub(super) struct ImportLock {
     _file: File,
     path: PathBuf,
 }
 impl ImportLock {
-    fn acquire(project: &Path) -> Result<Self, String> {
+    pub(super) fn acquire(project: &Path) -> Result<Self, String> {
         let path = project.with_extension("fcproj.shuvi-import.lock");
         let file = OpenOptions::new()
             .write(true).create_new(true).open(&path)

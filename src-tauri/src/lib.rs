@@ -25,6 +25,15 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Explicit user-scoped timeline request, with project revision verification.
+#[tauri::command]
+async fn video_timeline_apply(
+    request: video::timeline::TimelineRequest,
+) -> Result<video::timeline::TimelineReceipt, String> {
+    tauri::async_runtime::spawn_blocking(move || video::timeline::apply(request))
+        .await.map_err(|e| format!("Timeline worker failed: {e}"))?
+}
+
 /// Explicitly owner-selected import scoped to selected_root. No AI permission
 /// delegation is implied by accepting these paths.
 #[tauri::command]
@@ -49,7 +58,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }
