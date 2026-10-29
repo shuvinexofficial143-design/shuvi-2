@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 pub mod media;
 pub mod timeline;
 pub mod preview;
+pub mod export;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

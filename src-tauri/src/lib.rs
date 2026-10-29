@@ -25,6 +25,15 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Verify a real H264 MP4 written by FilmCraft; refuse replacement of existing files.
+#[tauri::command]
+async fn video_export_mp4(
+    request: video::export::ExportRequest,
+) -> Result<video::export::ExportReceipt, String> {
+    tauri::async_runtime::spawn_blocking(move || video::export::export_mp4(request))
+        .await.map_err(|e| format!("Export worker failed: {e}"))?
+}
+
 /// Actual FilmCraft Program frame PNG; never substitute a mock render.
 #[tauri::command]
 async fn video_preview_frame(
@@ -67,7 +76,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }
