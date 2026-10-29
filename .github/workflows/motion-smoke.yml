@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion native smoke
+name: Shuvi 2 Motion native engine + persistence
 
 on:
   push:
@@ -49,3 +49,5 @@ jobs:
         run: cargo test --manifest-path crates/shuvi-motion-bridge/Cargo.toml --all-targets
       - name: Execute headless real composition smoke
         run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-smoke
+      - name: Verify actual native save and reopen across sessions
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-persistence-smoke
