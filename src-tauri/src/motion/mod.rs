@@ -178,4 +178,20 @@ mod tests{
         let after=host.execute(MotionRequest::Status).unwrap();
         assert_eq!(before["projectRevision"],after["projectRevision"]);
     }
+    #[test]
+    fn frontend_json_contract_uses_only_typed_camel_case_actions(){
+        let valid=serde_json::json!({
+            "action":"createComposition","name":"IPC Name",
+            "width":640,"height":360,"fps":30.0,"durationSeconds":5.0
+        });
+        assert!(serde_json::from_value::<MotionRequest>(valid).is_ok());
+        let render=serde_json::json!({
+            "action":"render","compId":1,"time":0.0,
+            "maxSide":640,"transparent":true
+        });
+        assert!(serde_json::from_value::<MotionRequest>(render).is_ok());
+        let untrusted=serde_json::json!({"action":"shell","command":"unsafe"});
+        assert!(serde_json::from_value::<MotionRequest>(untrusted).is_err());
+    }
+
 }
