@@ -6,6 +6,12 @@ use serde_json::json;
 
 mod persistence;
 pub use persistence::ProjectReceipt;
+mod layers;
+pub use layers::{LayerSnapshot,ShapeKind};
+mod animation;
+pub use animation::{Property,Transform};
+mod render;
+pub use render::Frame;
 
 /// Approved basic composition parameters, rather than arbitrary AI-authored engine JSON.
 #[derive(Debug, Clone)]
