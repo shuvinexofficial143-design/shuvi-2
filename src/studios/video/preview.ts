@@ -3,12 +3,14 @@ export type PreviewRequest = {
   selectedRoot: string;
   projectPath: string;
   expectedRevision: number;
+  expectedProjectSha256: string;
   seconds: number;
   scale: number;
 };
 export type PreviewReceipt = {
   projectPath: string;
   projectRevision: number;
+  projectSha256: string;
   seconds: number;
   width: number;
   height: number;

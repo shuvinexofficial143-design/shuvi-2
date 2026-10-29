@@ -11,6 +11,7 @@ pub struct ExportRequest {
     pub selected_root: String,
     pub project_path: String,
     pub expected_revision: u64,
+    pub expected_project_sha256: String,
     pub output_path: String,
     pub scale: f32,
     pub include_audio: bool,
@@ -19,6 +20,7 @@ pub struct ExportRequest {
 #[serde(rename_all="camelCase")]
 pub struct ExportReceipt {
     pub project_revision: u64,
+    pub project_sha256: String,
     pub output_path: String,
     pub output_bytes: u64,
     pub duration_ticks: i64,
@@ -71,6 +73,10 @@ pub fn export_mp4(request:ExportRequest) -> Result<ExportReceipt,String> {
     let dest=checked_destination(&request.selected_root,&request.output_path)?;
     if dest==project {return Err("Project and output must differ".into());}
     let _lock=super::media::ImportLock::acquire(&project)?;
+    let fingerprint=super::project_sha256(&project)?;
+    if fingerprint!=request.expected_project_sha256 {
+        return Err("STALE_PROJECT_CONTENT: export project changed".into());
+    }
     let cli=super::configured_cli_path()?;
     let project_str=project.to_str().ok_or("Invalid project path")?;
     let state=super::run_json_bounded(&cli,&["--compact","--project",project_str,"inspect","project"],EXPORT_TIMEOUT)?;
@@ -98,9 +104,12 @@ pub fn export_mp4(request:ExportRequest) -> Result<ExportReceipt,String> {
     let codec=video["codec"].as_str().ok_or("MP4 codec missing")?.to_string();
     if !codec.to_ascii_lowercase().contains("264") {return Err(format!("Unexpected output codec: {codec}"));}
     // hard_link creates destination only if it does NOT exist, avoiding silent clobber.
+    if super::project_sha256(&project)? != fingerprint {
+        return Err("Project changed during export; refusing to publish old render".into());
+    }
     fs::hard_link(&staging,&dest).map_err(|e|format!("Cannot publish verified MP4 without overwrite: {e}"))?;
     Ok(ExportReceipt{
-        project_revision:rev,output_path:dest.to_string_lossy().into_owned(),
+        project_revision:rev,project_sha256:fingerprint,output_path:dest.to_string_lossy().into_owned(),
         output_bytes,duration_ticks:duration,width,height,codec,output_probe:verified,engine_receipt,
     })
 }
@@ -131,6 +140,7 @@ mod tests {
         let edited=super::super::timeline::apply(super::super::timeline::TimelineRequest{
             selected_root:root.clone(),project_path:project.to_string_lossy().into_owned(),
             expected_revision:imported.project_revision.unwrap(),
+            expected_project_sha256:imported.project_sha256.clone(),
             actions:vec![
                 super::super::timeline::TimelineAction::CreateSequence{name:"H264 Export".into(),width:64,height:64,fps:12},
                 super::super::timeline::TimelineAction::Place{item_id:imported.item_id,track:"V1".into(),seconds:0.,video:true,audio:false}
@@ -140,6 +150,7 @@ mod tests {
         let receipt=export_mp4(ExportRequest{
             selected_root:root,project_path:project.to_string_lossy().into_owned(),
             expected_revision:edited.after_revision,
+            expected_project_sha256:edited.project_sha256.clone(),
             output_path:output.to_string_lossy().into_owned(),scale:1.0,include_audio:false
         }).unwrap();
         assert_eq!((receipt.width,receipt.height),(64,64));

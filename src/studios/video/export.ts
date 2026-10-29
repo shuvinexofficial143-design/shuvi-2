@@ -3,12 +3,14 @@ export type ExportRequest={
   selectedRoot:string;
   projectPath:string;
   expectedRevision:number;
+  expectedProjectSha256:string;
   outputPath:string;
   scale:number;
   includeAudio:boolean;
 };
 export type ExportReceipt={
   projectRevision:number;
+  projectSha256:string;
   outputPath:string;
   outputBytes:number;
   durationTicks:number;

@@ -18,6 +18,7 @@ pub struct VideoImportedMedia {
     /// Scope itemId to projectPath; it is not globally unique.
     pub item_id: u64,
     pub project_path: String,
+    pub project_sha256: String,
     pub source_path: String,
     pub source_bytes: u64,
     pub container: String,
@@ -145,6 +146,7 @@ pub fn import_media(selected_root: String, project_path: String, source_path: St
     Ok(VideoImportedMedia {
         item_id,
         project_path: project_text.to_string(),
+        project_sha256: super::project_sha256(&project)?,
         source_path: media_text.to_string(),
         source_bytes,
         container: metadata.get("container").and_then(Value::as_str).unwrap_or("unknown").into(),

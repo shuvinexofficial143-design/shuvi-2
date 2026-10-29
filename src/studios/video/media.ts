@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type VideoImportedMedia = {
   itemId: number;
   projectPath: string;
+  projectSha256: string;
   sourcePath: string;
   sourceBytes: number;
   container: string;

@@ -14,6 +14,7 @@ export type TimelineRequest = {
   selectedRoot: string;
   projectPath: string;
   expectedRevision: number;
+  expectedProjectSha256: string;
   actions: TimelineAction[];
 };
 
@@ -21,6 +22,7 @@ export type TimelineReceipt = {
   projectPath: string;
   beforeRevision: number;
   afterRevision: number;
+  projectSha256: string;
   commands: { id: string; ok: boolean; result?: unknown }[];
   sequenceReadback: unknown;
   projectReadback: unknown;

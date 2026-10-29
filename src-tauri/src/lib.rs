@@ -25,6 +25,16 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Refresh exact project SHA-256 before AI-planned edits or manual operations.
+#[tauri::command]
+async fn video_project_snapshot(
+    selected_root:String,
+    project_path:String,
+) -> Result<video::snapshot::ProjectSnapshot,String> {
+    tauri::async_runtime::spawn_blocking(move || video::snapshot::inspect(selected_root,project_path))
+        .await.map_err(|e|format!("Video snapshot worker failed: {e}"))?
+}
+
 /// Verify a real H264 MP4 written by FilmCraft; refuse replacement of existing files.
 #[tauri::command]
 async fn video_export_mp4(
@@ -76,7 +86,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

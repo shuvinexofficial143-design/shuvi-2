@@ -3,6 +3,7 @@
 //! save/reopen/inspect. No model text or shell command is executed.
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +11,7 @@ pub mod media;
 pub mod timeline;
 pub mod preview;
 pub mod export;
+pub mod snapshot;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -26,6 +28,19 @@ pub struct VideoProbe {
     pub saved_project_bytes: u64,
     pub create_result: Value,
     pub sequence_readback: Value,
+}
+
+/// This is a *content* fingerprint, not FilmCraft's per-process revision counter.
+/// A new FilmCraft CLI process restarts the session revision, so callers must
+/// compare this digest to detect intervening manual edits before AI actions.
+pub(super) fn project_sha256(path: &Path) -> Result<String, String> {
+    let data = std::fs::read(path).map_err(|e| format!("Cannot fingerprint project: {e}"))?;
+    if data.is_empty() || data.len() > 64 * 1024 * 1024 {
+        return Err("Cannot fingerprint empty/oversized project".into());
+    }
+    let mut hash = Sha256::new();
+    hash.update(data);
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 struct Scratch(PathBuf);
@@ -167,6 +182,18 @@ pub fn smoke_probe() -> Result<VideoProbe, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_detects_project_mutations() {
+        let scratch = Scratch::create().unwrap();
+        let p = scratch.0.join("tiny.fcproj");
+        std::fs::write(&p, b"original").unwrap();
+        let a = project_sha256(&p).unwrap();
+        std::fs::write(&p, b"changed").unwrap();
+        let b = project_sha256(&p).unwrap();
+        assert_eq!(a.len(), 64);
+        assert_ne!(a, b);
+    }
 
     #[test]
     fn rejects_relative_or_misnamed_executable() {

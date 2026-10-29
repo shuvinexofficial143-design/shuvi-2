@@ -19,6 +19,7 @@ pub struct TimelineRequest {
     pub selected_root: String,
     pub project_path: String,
     pub expected_revision: u64,
+    pub expected_project_sha256: String,
     pub actions: Vec<TimelineAction>,
 }
 
@@ -41,6 +42,7 @@ pub struct TimelineReceipt {
     pub project_path: String,
     pub before_revision: u64,
     pub after_revision: u64,
+    pub project_sha256: String,
     pub commands: Vec<Value>,
     pub sequence_readback: Value,
     pub project_readback: Value,
@@ -129,6 +131,10 @@ pub fn apply(request: TimelineRequest) -> Result<TimelineReceipt, String> {
     let actions: Vec<Value> = request.actions.iter().map(mapped_action).collect::<Result<_,_>>()?;
     let project = checked_project(&request.selected_root, &request.project_path)?;
     let _lock = super::media::ImportLock::acquire(&project)?;
+    let source_digest = super::project_sha256(&project)?;
+    if source_digest != request.expected_project_sha256 {
+        return Err("STALE_PROJECT_CONTENT: project bytes changed since planning. Refresh/replan.".into());
+    }
     let cli = super::configured_cli_path()?;
     let project_str = project.to_str().ok_or("Project path cannot be UTF-8 encoded")?;
     let before = super::run_json_bounded(&cli, &["--compact","--project",project_str,"inspect","project"], TIMEOUT)?;
@@ -156,6 +162,9 @@ pub fn apply(request: TimelineRequest) -> Result<TimelineReceipt, String> {
         backup_file.write_all(&before_bytes).map_err(|e| e.to_string())?;
         backup_file.sync_all().map_err(|e| e.to_string())?;
     }
+    if fs::read(&project).map_err(|e| e.to_string())? != before_bytes {
+        return Err("EXTERNAL_PROJECT_EDIT: original changed during preparation; no commands dispatched".into());
+    }
     let script_str = script.to_str().ok_or("Script filename is not UTF-8")?;
     let output = super::run_text_bounded(&cli, &["--compact","--project",project_str,"--save","run",script_str], TIMEOUT)?;
     let receipts: Vec<Value> = output.lines().filter(|line| !line.trim().is_empty())
@@ -175,6 +184,7 @@ pub fn apply(request: TimelineRequest) -> Result<TimelineReceipt, String> {
     }
     Ok(TimelineReceipt {
         project_path: project_str.into(), before_revision: revision, after_revision: new_revision,
+        project_sha256: super::project_sha256(&project)?,
         commands:receipts,sequence_readback:seq,project_readback:after,
         backup_path:backup.to_string_lossy().into_owned()
     })
@@ -210,8 +220,8 @@ mod tests {
         fs::write(&source, include_bytes!("../../../tests/video/blue-64x64-12fps.mp4")).unwrap();
         let project=tmp.0.join("edit.fcproj");
         let imported=super::super::media::import_media(root.clone(),project.to_string_lossy().into_owned(),source.to_string_lossy().into_owned()).unwrap();
-        let mkreq=|revision,actions| TimelineRequest {selected_root:root.clone(),project_path:project.to_string_lossy().into_owned(),expected_revision:revision,actions};
-        let ready=apply(mkreq(imported.project_revision.unwrap(),vec![
+        let mkreq=|revision,hash:String,actions| TimelineRequest {selected_root:root.clone(),project_path:project.to_string_lossy().into_owned(),expected_revision:revision,expected_project_sha256:hash,actions};
+        let ready=apply(mkreq(imported.project_revision.unwrap(),imported.project_sha256.clone(),vec![
             TimelineAction::CreateSequence{name:"Verified".into(),width:64,height:64,fps:12},
             TimelineAction::Place{item_id:imported.item_id,track:"V1".into(),seconds:0.0,video:true,audio:false},
         ])).unwrap();
@@ -219,17 +229,19 @@ mod tests {
         assert_eq!(clips.as_array().unwrap().len(),1);
         assert!(ready.backup_path.ends_with(".fcproj"));
         let left=clips[0]["clip"].as_u64().unwrap();
-        let cut=apply(mkreq(ready.after_revision,vec![TimelineAction::Split{clip_id:left,seconds:0.5}])).unwrap();
+        let cut=apply(mkreq(ready.after_revision,ready.project_sha256.clone(),vec![TimelineAction::Split{clip_id:left,seconds:0.5}])).unwrap();
         let items=cut.sequence_readback["video"][0]["items"].as_array().unwrap();
         assert_eq!(items.len(),2);
         let right=items.iter().find_map(|v|(v["clip"].as_u64()!=Some(left)).then(||v["clip"].as_u64()).flatten()).unwrap();
-        let moved=apply(mkreq(cut.after_revision,vec![
+        let moved=apply(mkreq(cut.after_revision,cut.project_sha256.clone(),vec![
             TimelineAction::Move{clip_id:right,track:"V1".into(),seconds:2.0,insert:false},
         ])).unwrap();
         assert_eq!(moved.sequence_readback["video"][0]["items"].as_array().unwrap().len(),2);
-        let deleted=apply(mkreq(moved.after_revision,vec![
+        let deleted=apply(mkreq(moved.after_revision,moved.project_sha256.clone(),vec![
             TimelineAction::Delete{clip_id:right,ripple:false},TimelineAction::Undo,TimelineAction::Redo
         ])).unwrap();
         assert_eq!(deleted.sequence_readback["video"][0]["items"].as_array().unwrap().len(),1);
+        let stale = apply(mkreq(deleted.after_revision, "0".repeat(64), vec![TimelineAction::Undo]));
+        assert!(stale.unwrap_err().contains("STALE_PROJECT_CONTENT"));
     }
 }

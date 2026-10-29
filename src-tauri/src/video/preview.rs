@@ -13,6 +13,7 @@ pub struct PreviewRequest {
     pub selected_root: String,
     pub project_path: String,
     pub expected_revision: u64,
+    pub expected_project_sha256: String,
     pub seconds: f64,
     pub scale: f32,
 }
@@ -22,6 +23,7 @@ pub struct PreviewRequest {
 pub struct PreviewReceipt {
     pub project_path: String,
     pub project_revision: u64,
+    pub project_sha256: String,
     pub seconds: f64,
     pub width: u32,
     pub height: u32,
@@ -48,6 +50,10 @@ pub fn render(request: PreviewRequest) -> Result<PreviewReceipt, String> {
     let project = super::timeline::checked_project(&request.selected_root,&request.project_path)?;
     // Serialized alongside imports and edits; an edit cannot change project mid-render.
     let _lock = super::media::ImportLock::acquire(&project)?;
+    let fingerprint=super::project_sha256(&project)?;
+    if fingerprint!=request.expected_project_sha256 {
+        return Err("STALE_PROJECT_CONTENT: preview project changed".into());
+    }
     let cli=super::configured_cli_path()?;
     let path=project.to_str().ok_or("Invalid UTF-8 project path")?;
     let before=super::run_json_bounded(&cli,&["--compact","--project",path,"inspect","project"],RENDER_TIMEOUT)?;
@@ -69,7 +75,8 @@ pub fn render(request: PreviewRequest) -> Result<PreviewReceipt, String> {
     if after["revision"].as_u64()!=Some(revision) {
         return Err("Project revision changed during preview; frame discarded".into());
     }
-    Ok(PreviewReceipt{project_path:path.into(),project_revision:revision,seconds:request.seconds,width,height,png_bytes:bytes})
+    if super::project_sha256(&project)? != fingerprint {return Err("Project changed during preview; discard frame".into());}
+    Ok(PreviewReceipt{project_path:path.into(),project_revision:revision,project_sha256:fingerprint,seconds:request.seconds,width,height,png_bytes:bytes})
 }
 
 #[cfg(test)]
@@ -101,6 +108,7 @@ mod tests {
         let edited=super::super::timeline::apply(super::super::timeline::TimelineRequest{
             selected_root:root.clone(),project_path:project.to_string_lossy().into_owned(),
             expected_revision:imported.project_revision.unwrap(),
+            expected_project_sha256:imported.project_sha256.clone(),
             actions:vec![
                 super::super::timeline::TimelineAction::CreateSequence{name:"Preview".into(),width:64,height:64,fps:12},
                 super::super::timeline::TimelineAction::Place{item_id:imported.item_id,track:"V1".into(),seconds:0.0,video:true,audio:false}
@@ -108,7 +116,7 @@ mod tests {
         }).unwrap();
         let frame=render(PreviewRequest{
             selected_root:root,project_path:project.to_string_lossy().into_owned(),
-            expected_revision:edited.after_revision,seconds:0.25,scale:0.5
+            expected_revision:edited.after_revision,expected_project_sha256:edited.project_sha256.clone(),seconds:0.25,scale:0.5
         }).unwrap();
         assert_eq!((frame.width,frame.height),(32,32));
         assert!(frame.png_bytes.len()>80);
