@@ -53,3 +53,12 @@ jobs:
         run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-persistence-smoke
       - name: Verify native scene rendering and project reopen
         run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-editor-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Upload native project and preview frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-proof
+          path: proof/motion/
+          if-no-files-found: error
+          retention-days: 14
