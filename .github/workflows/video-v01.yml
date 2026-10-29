@@ -43,6 +43,12 @@ jobs:
           $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
           cargo test --manifest-path src-tauri/Cargo.toml --lib video::tests::real_filmcraft_smoke -- --exact --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw "FilmCraft round-trip test failed." }
+      - name: Real H.264 MP4 import/metadata/save/reload test
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::media::tests::real_mp4_import_round_trip -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "V03 real media import test failed." }
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
       - name: Build Windows NSIS experimental Shuvi video package

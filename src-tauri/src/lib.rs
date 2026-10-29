@@ -25,6 +25,19 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Explicitly owner-selected import scoped to selected_root. No AI permission
+/// delegation is implied by accepting these paths.
+#[tauri::command]
+async fn video_import_media(
+    selected_root: String,
+    project_path: String,
+    source_path: String,
+) -> Result<video::media::VideoImportedMedia, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        video::media::import_media(selected_root, project_path, source_path)
+    }).await.map_err(|e| format!("Video import worker failed: {e}"))?
+}
+
 /// Opt-in real FilmCraft headless smoke, never a fabricated readiness signal.
 #[tauri::command]
 async fn video_engine_probe() -> Result<video::VideoProbe, String> {
@@ -36,7 +49,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

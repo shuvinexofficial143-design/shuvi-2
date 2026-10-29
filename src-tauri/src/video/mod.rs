@@ -5,6 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+pub mod media;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -86,6 +88,10 @@ fn configured_cli_path() -> Result<PathBuf, String> {
 }
 
 fn run_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
+    run_json_bounded(cli, args, LIMIT)
+}
+
+fn run_json_bounded(cli: &Path, args: &[&str], timeout: Duration) -> Result<Value, String> {
     let mut child = Command::new(cli)
         .args(args)
         .stdin(Stdio::null())
@@ -97,7 +103,7 @@ fn run_json(cli: &Path, args: &[&str]) -> Result<Value, String> {
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
-            Ok(None) if start.elapsed() < LIMIT => thread::sleep(Duration::from_millis(25)),
+            Ok(None) if start.elapsed() < timeout => thread::sleep(Duration::from_millis(25)),
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
