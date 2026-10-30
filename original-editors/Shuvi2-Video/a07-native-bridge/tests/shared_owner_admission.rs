@@ -5,7 +5,7 @@ use filmcraft_engine::Session;
 use serde_json::{json,Value};
 use shuvi_ai_provider::{
     guard::{OwnerConsent,Scope,GuardError,Version},
-    host::{OwnerConsentRequest,GuardedHost,TaskBinding},
+    host::{OwnerConsentRequest,TaskBinding},
     plan::{ReserveWire,independently_hash},
     ipc::GuardedWireRequest,
     transactional::TransactionalLedger,
@@ -410,7 +410,7 @@ fn parallel_sqlite_fixtures_use_different_directories_and_do_not_delete_each_oth
     let all:Vec<_>=threads.into_iter().map(|h|h.join().unwrap()).collect();
     let mut unique=std::collections::HashSet::new();
     for path in all {
-        assert!(unique.insert(path));
+        assert!(unique.insert(path.clone()));
         assert!(!path.exists(), "temporary SQLite folder must be cleaned up");
     }
 }
