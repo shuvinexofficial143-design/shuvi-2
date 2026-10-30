@@ -141,6 +141,18 @@ async function test(){
       result.frames={originalBytes:original.length,blurredBytes:blurred.length,maskedBytes:masked.length};
       await screenshot("m11_02-effect-mask.png");
     });
+    await step("real native Undo and Redo restore exact rendered mask pixels",async()=>{
+      const masked=await attr("#motion-native-frame","src");
+      await click("#motion-undo");
+      await ready("Undoing native edit · native verification complete",60000);
+      const undone=await attr("#motion-native-frame","src");
+      assert.notEqual(undone,masked,"native Undo did not revert mask frame");
+      await click("#motion-redo");
+      await ready("Redoing native edit · native verification complete",60000);
+      const redone=await attr("#motion-native-frame","src");
+      assert.equal(redone,masked,"native Redo failed to restore exact mask frame");
+      result.undoRedoVerified=true;
+    });
     await step("save persistent .ecproj and export real PNG to owner temp workspace",async()=>{
       await fill("#motion-workspace",root);
       await fill("#motion-filename","webview_e2e.ecproj");
