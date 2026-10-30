@@ -72,3 +72,9 @@ test("PNG frame export uses owner-scoped native bytes not browser-drawn fake out
   assert.match(ipc,/e\.export_png_frame\(/);
   assert.match(ipc,/verifiedFromDisk/);
 });
+
+test("changing selected native layer refreshes masks/effects and current layer revision",()=>{
+  assert.ok(ts.includes('activeLayer=layers.find(item=>item.id===activeLayer?.id)??null'));
+  assert.ok(ts.includes('await refreshEffectMaskControls();'));
+  assert.ok(ts.includes('Selecting native layer'));
+});
