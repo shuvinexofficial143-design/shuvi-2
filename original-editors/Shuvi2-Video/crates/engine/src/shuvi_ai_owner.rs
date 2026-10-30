@@ -76,6 +76,8 @@ pub(crate) struct NativeEditReadback {
     pub(crate) cuts: u64,
     pub(crate) before_clips: usize,
     pub(crate) after_clips: usize,
+    /// Exact independently inspected right-half clip ID, if one named clip was split.
+    pub(crate) created_clip_id: Option<u64>,
 }
 
 fn timeline_clip_count(sequence: &Value) -> Result<usize> {
@@ -100,7 +102,7 @@ fn timeline_clip_count(sequence: &Value) -> Result<usize> {
 /// AI Director branch: this video-owned *adapter* does not copy either.
 /// This parser is PRIVATE and never grants model-originated execution.
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 enum A07VideoProposal {
     #[serde(rename = "video.split")]
     VideoSplit { clip_id: u64, seconds: f64 },
@@ -148,6 +150,9 @@ fn clip_target_in(sequence: &Value, clip_id: u64, tick: i64) -> Result<(String, 
                 if tick <= start || tick >= end {
                     return Err(EngineError::Other("SPLIT_OUT_OF_RANGE: tick must lie inside exact native clip".into()));
                 }
+                if track["locked"].as_bool() != Some(false) {
+                    return Err(EngineError::Other("A07_CLIP_LOCKED: refuse to edit a locked or unverifiable track".into()));
+                }
                 let track_id = track["id"].as_u64().ok_or_else(|| EngineError::Other("native track missing id".into()))?;
                 return Ok((kind.to_string(), track_id));
             }
@@ -176,6 +181,61 @@ fn confirm_other_tracks_unchanged(before: &Value, after: &Value, kind: &str, tar
         }
     }
     Ok(())
+}
+
+
+/// Stronger than revision/count: inspect the named clip's unchanged source,
+/// original left-hand ID and new right-hand ID at the exact native cut tick.
+/// Unaffected clips must remain byte-for-byte equal in the query values.
+/// This is not a SHA-256 proof; A07 must still hash the canonical native
+/// affected objects before committing its durable action receipt.
+fn confirm_named_split(
+    before: &Value,
+    after: &Value,
+    kind: &str,
+    track_id: u64,
+    clip_id: u64,
+    tick: i64,
+) -> Result<u64> {
+    let find_track = |sequence: &Value| -> Result<&Value> {
+        sequence[kind].as_array()
+            .and_then(|tracks| tracks.iter().find(|t| t["id"].as_u64() == Some(track_id)))
+            .ok_or_else(|| EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: exact track is missing".into()))
+    };
+    let old_track = find_track(before)?;
+    let new_track = find_track(after)?;
+    let old_items = old_track["items"].as_array().ok_or_else(|| EngineError::Other("native source items missing".into()))?;
+    let new_items = new_track["items"].as_array().ok_or_else(|| EngineError::Other("native edited items missing".into()))?;
+    let old_clip = old_items.iter().find(|c| c["clip"].as_u64() == Some(clip_id))
+        .ok_or_else(|| EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: source clip missing".into()))?;
+    let left = new_items.iter().find(|c| c["clip"].as_u64() == Some(clip_id))
+        .ok_or_else(|| EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: left clip missing".into()))?;
+    let right_candidates: Vec<&Value> = new_items.iter().filter(|c|
+        c["clip"].as_u64().is_some_and(|id| !old_items.iter().any(|old| old["clip"].as_u64() == Some(id)))
+    ).collect();
+    if right_candidates.len() != 1 {
+        return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: right clip missing or ambiguous".into()));
+    }
+    let right = right_candidates[0];
+    if left["start"] != old_clip["start"] ||
+        left["end"].as_i64() != Some(tick) ||
+        right["start"].as_i64() != Some(tick) ||
+        right["end"] != old_clip["end"] ||
+        left["item"] != old_clip["item"] ||
+        right["item"] != old_clip["item"] ||
+        left["sourceIn"] != old_clip["sourceIn"] ||
+        left["reverse"] != old_clip["reverse"] ||
+        right["reverse"] != old_clip["reverse"] ||
+        new_items.len() != old_items.len() + 1
+    {
+        return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: wrong split object or boundaries".into()));
+    }
+    for existing in old_items.iter().filter(|c| c["clip"].as_u64() != Some(clip_id)) {
+        if new_items.iter().find(|c| c["clip"] == existing["clip"]) != Some(existing) {
+            return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: unrelated clip changed".into()));
+        }
+    }
+    right["clip"].as_u64().ok_or_else(|| EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: new clip identity missing".into()))
 }
 
 /// Testable real native editing primitive, deliberately NOT exported from the
@@ -231,8 +291,12 @@ pub(crate) fn execute_owner_only(
         EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: sequence disappeared; do not retry blindly".into())
     })?;
     let after_clips = timeline_clip_count(after_sequence)?;
+    let mut created_clip_id = None;
     if let Some((kind, target_track)) = clip_target {
         confirm_other_tracks_unchanged(original_sequence, after_sequence, &kind, target_track)?;
+        if let TypedVideoEdit::SplitClipAt { clip_id, tick } = action {
+            created_clip_id = Some(confirm_named_split(original_sequence, after_sequence, &kind, target_track, clip_id, tick)?);
+        }
         if after_clips != before_clips + 1 || cuts != 1 {
             return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: expected exactly one target clip split".into()));
         }
@@ -252,6 +316,7 @@ pub(crate) fn execute_owner_only(
         cuts,
         before_clips,
         after_clips,
+        created_clip_id,
     })
 }
 
@@ -353,6 +418,9 @@ mod tests {
         let result = execute_owner_only(&mut session, &fence, action).unwrap();
         assert_eq!(result.cuts, 1);
         assert_eq!(result.after_clips, result.before_clips + 1);
+        let new_id = result.created_clip_id.expect("real right-half native clip ID");
+        assert_ne!(new_id, clip);
+        assert!(session.active_sequence().unwrap().find_item(ClipId(new_id)).is_some());
         let after = shuvi_ai_readonly::snapshot(&mut session).unwrap();
         // The only changed native track is confirmed inside the adapter;
         // Undo restores the full previous sequence.
@@ -377,6 +445,35 @@ mod tests {
             assert_eq!((session.revision, session.journal.len()), baseline);
             assert_eq!(session.state.selection, original_selection);
         }
+    }
+
+
+    #[test]
+    fn shuvi_a07_locked_native_track_refuses_before_any_edit() {
+        let mut session = demo();
+        let tick = session.sequence_rate().tick_of(48).0;
+        let clip_id = session.active_sequence().unwrap().video_tracks[0].items.iter()
+            .find(|c| c.start.0 < tick && tick < c.end().0).unwrap().id.0;
+        // Model can name this clip, but the trusted editor decides it is locked.
+        let sequence_id = session.state.active_sequence.unwrap();
+        std::sync::Arc::make_mut(&mut session.project)
+            .sequence_mut(sequence_id).unwrap().video_tracks[0].locked = true;
+        let fence = SessionFence::capture(&session).unwrap();
+        let before = (session.revision, session.journal.len());
+        let err = execute_owner_only(&mut session, &fence, TypedVideoEdit::SplitClipAt {clip_id,tick}).unwrap_err();
+        assert!(err.to_string().contains("A07_CLIP_LOCKED"), "{err}");
+        assert_eq!((session.revision, session.journal.len()), before);
+    }
+
+    #[test]
+    fn shuvi_a07_seconds_are_snapped_to_native_sequence_framerate() {
+        let session = demo();
+        let proposal = json!({"type":"video.split","clipId":17,"seconds":2.0});
+        let TypedVideoEdit::SplitClipAt { clip_id, tick } = parse_a07_video_split(proposal, &session).unwrap()
+            else { panic!("valid A07 action must map to exact typed split") };
+        assert_eq!(clip_id, 17);
+        let expected = session.sequence_rate().snap_nearest(Tick((2.0 * TICKS_PER_SECOND as f64).round() as i64)).0;
+        assert_eq!(tick, expected);
     }
 
     #[test]

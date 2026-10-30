@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI04 A07 Typed Native Contract
+name: Shuvi 2 Video - AI05 Harden Exact Clip Readback
 on:
   push:
     branches:
