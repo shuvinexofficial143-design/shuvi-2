@@ -170,6 +170,28 @@ try{
   await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
   note("redo","Verified independent CLI session restored same FilmCraft project clip");
 
+  // Real mouse pointer drag: actual FilmCraft typed "move" saves .fcproj.
+  // Verify the saved file SHA changes only after native readback; undo restores.
+  const originalBeforeDrag=readFileSync(project);
+  const dragClip=page.locator(".v-lanes .v-clip").first();
+  const bounding=await dragClip.boundingBox();
+  const laneBounds=await page.locator(".v-lanes .v-track-lane").first().boundingBox();
+  if(!bounding||!laneBounds||laneBounds.width<=120)throw Error("Real track geometry unavailable for drag E2E");
+  const x=bounding.x+Math.min(50,bounding.width/2);
+  const y=bounding.y+bounding.height/2;
+  const dx=Math.max(25,Math.min(95,laneBounds.width*0.18));
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x+dx,y,{steps:8});
+  await page.mouse.up();
+  await visibleStatus("Verified real timeline move",180000);
+  if(readFileSync(project).equals(originalBeforeDrag))throw Error("Drag did not save changed .fcproj bytes");
+  note("drag","Real pointer drag moved saved FilmCraft timeline clip, not just its DOM");
+  await clickAction("undo","Verified persistent FilmCraft undo",120000);
+  if(!readFileSync(project).equals(originalBeforeDrag))throw Error("Undo did not restore exact pre-drag project bytes");
+  note("drag-undo","Verified native SHA-identical rollback after pointer drag");
+
+
   // Offline Hindi parser, no API key and no paid model call.
   await page.locator(".v-lanes .v-clip").first().click();
   const previous=readFileSync(project);

@@ -243,6 +243,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
           btn.style.width=String(Math.max(3,Math.min(100-clip.start/seconds*100,clip.duration/seconds*100)))+"%";
           btn.title="#"+clip.clipId+" · "+formatTimecode(clip.start)+" · "+formatTimecode(clip.duration)+
             " · Drag horizontally on same track to request a real FilmCraft move";
+          let suppressClick=false;
           let pointerStartX:number|null=null;
           let activePointer:number|null=null;
           btn.addEventListener("pointerdown",event=>{
@@ -259,6 +260,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
             const deltaPixels=event.clientX-pointerStartX;
             pointerStartX=null;activePointer=null;
             if(Math.abs(deltaPixels)<8||busy||!active)return;
+            // Windows dispatches a synthetic click after a pointer drag.
+            // It must not re-select/repaint the old clip while native editing.
+            suppressClick=true;
             const fps=sequenceFps(snapshot?.sequence);
             if(!fps){inform("Cannot drag: native FilmCraft FPS is unavailable",true);return;}
             const destination=clipDragDestination({
@@ -270,6 +274,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
             void moveClipByDrag(clip,destination);
           });
           btn.addEventListener("click",()=>{
+            if(suppressClick){suppressClick=false;return;}
             clipId=clip.clipId;
             e<HTMLInputElement>("seconds").value=String(Number((clip.start+clip.duration/2).toFixed(3)));
             e<HTMLInputElement>("track").value=clip.track;
@@ -335,6 +340,10 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       const state=await load();
       if(state.projectSha256!==receipt.projectSha256)
         throw Error("FilmCraft clip move readback mismatch");
+      const verified=clips.find(c=>c.clipId===clip.clipId);
+      const fps=sequenceFps(state.sequence);
+      if(!verified||!fps||Math.abs(verified.start-seconds) > (0.51/fps))
+        throw Error("Native clip did not move to the requested frame in saved FilmCraft timeline");
       clipId=clip.clipId;
       inform("Verified real timeline move · clip #"+clip.clipId+" → "+formatTimecode(seconds));
     }catch(error){
