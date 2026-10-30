@@ -16,6 +16,7 @@ const actionMap=[
   ["#motion-redo","Redoing native edit"],
   ["#motion-save","Saving native project"],
   ["#motion-export-png","Exporting native PNG"],
+  ["#motion-export-sequence","Exporting native PNG sequence"],
   ["#motion-open","Opening native project"],
 ];
 test("WebDriver controls are actually mounted by real Motion pane",()=>{
