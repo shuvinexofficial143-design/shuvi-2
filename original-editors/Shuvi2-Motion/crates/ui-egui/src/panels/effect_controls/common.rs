@@ -47,7 +47,7 @@ pub fn reveal_applied(app: &mut EffectcraftApp, params: &serde_json::Value) {
         // Show that layer (dropped on an unselected one), keeping the new effect selected.
         let props = app.session.state.selected_props.clone();
         match app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"layers": [l.0]})) {
-            Ok(_) => app.session.state.selected_props = props,
+            Ok(_) => { if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.selected_props = props; Ok(()) }) { app.ui.status = e; } },
             Err(e) => app.ui.status = e.to_string(),
         }
     }

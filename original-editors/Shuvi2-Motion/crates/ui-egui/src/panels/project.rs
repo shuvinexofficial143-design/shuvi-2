@@ -290,10 +290,10 @@ fn keyboard_nav(app: &mut EffectcraftApp, ctx: &egui::Context) -> Option<ItemId>
                 let Some((to, _)) = rows.get(next).copied() else { continue };
                 if shift {
                     let anchor = ctx.data(|d| d.get_temp::<ItemId>(anchor_id())).and_then(pos).or(cur).unwrap_or(next);
-                    app.session.state.project_selection = rows.get(anchor.min(next)..=anchor.max(next)).unwrap_or_default().iter().map(|(i, _)| *i).collect();
+                    if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = rows.get(anchor.min(next)..=anchor.max(next)).unwrap_or_default().iter().map(|(i, _)| *i).collect(); Ok(()) }) { app.ui.status = e; }
                     to
                 } else {
-                    app.session.state.project_selection = vec![to];
+                    if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = vec![to]; Ok(()) }) { app.ui.status = e; }
                     ctx.data_mut(|d| d.insert_temp(anchor_id(), to));
                     to
                 }
@@ -314,7 +314,7 @@ fn keyboard_nav(app: &mut EffectcraftApp, ctx: &egui::Context) -> Option<ItemId>
                     continue;
                 }
                 let Some(parent) = parent.filter(|p| pos(*p).is_some()) else { continue };
-                app.session.state.project_selection = vec![parent];
+                if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = vec![parent]; Ok(()) }) { app.ui.status = e; }
                 ctx.data_mut(|d| d.insert_temp(anchor_id(), parent));
                 parent
             }
@@ -375,7 +375,7 @@ pub(crate) fn reveal(app: &mut EffectcraftApp, ctx: &egui::Context, items: &[Ite
         }
     }
     app.ui.project_search.clear();
-    app.session.state.project_selection = items;
+    if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = items; Ok(()) }) { app.ui.status = e; }
     // Force the panel's selection scroll on its next draw, even when the item was already selected.
     ctx.data_mut(|d| d.remove_temp::<Option<u64>>(selection_seen_id()));
     app.show_panel(crate::dock::PanelKind::Project);
@@ -710,16 +710,19 @@ fn select_click(app: &mut EffectcraftApp, ui: &egui::Ui, ctx: &egui::Context, id
         && let Some(a) = anchor.and_then(|a| rows.iter().position(|(i, _)| *i == a))
     {
         let b = rows.iter().position(|(i, _)| *i == id).unwrap_or(a);
-        app.session.state.project_selection = rows.get(a.min(b)..=a.max(b)).unwrap_or_default().iter().map(|(i, _)| *i).collect();
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = rows.get(a.min(b)..=a.max(b)).unwrap_or_default().iter().map(|(i, _)| *i).collect(); Ok(()) }) { app.ui.status = e; }
     } else if m.command {
-        if app.session.state.project_selection.contains(&id) {
-            app.session.state.project_selection.retain(|i| *i != id);
-        } else {
-            app.session.state.project_selection.push(id);
-        }
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| {
+            if app.session.state.project_selection.contains(&id) {
+                app.session.state.project_selection.retain(|i| *i != id);
+            } else {
+                app.session.state.project_selection.push(id);
+            }
+            Ok(())
+        }) { app.ui.status = e; }
         ctx.data_mut(|d| d.insert_temp(anchor_key, id));
     } else {
-        app.session.state.project_selection = vec![id];
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = vec![id]; Ok(()) }) { app.ui.status = e; }
         ctx.data_mut(|d| d.insert_temp(anchor_key, id));
     }
 }
@@ -834,7 +837,7 @@ fn footer(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, foot: 
             p.rect_stroke(r, 4.0, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
             if ctx.input(|i| i.pointer.any_released()) {
                 if !app.session.state.project_selection.contains(&ItemId(*iid)) {
-                    app.session.state.project_selection = vec![ItemId(*iid)];
+                    if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = vec![ItemId(*iid)]; Ok(()) }) { app.ui.status = e; }
                 }
                 actions.push(("file.newCompFromSelection".into(), json!({})));
                 egui::DragAndDrop::clear_payload(&ctx);
@@ -1289,7 +1292,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         // Right-clicking an item selects it (After Effects): the menu's File commands act on the
         // selection.
         if resp.secondary_clicked() && !selected {
-            app.session.state.project_selection = vec![*id];
+            if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = vec![*id]; Ok(()) }) { app.ui.status = e; }
         }
         crate::widgets::context_menu(&resp, |ui| item_menu(app, ui, &ctx, it, *id, selected, &mut actions));
     }

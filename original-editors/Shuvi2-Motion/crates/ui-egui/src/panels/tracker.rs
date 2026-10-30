@@ -195,7 +195,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         ctx.data_mut(|d| d.remove::<u64>(source_id()));
         match chosen.and_then(|l| comp.layer(l)).and_then(|l| l.trackers().next().map(|(g, _)| (l.id, g.uid))) {
             Some((l, g)) => run(app, &ctx, "track.select", json!({"layer": l.0, "tracker": g})),
-            None => app.session.state.current_track = None,
+            None => { if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.current_track = None; Ok(()) }) { app.ui.status = e; } },
         }
     }
     y += ROW;

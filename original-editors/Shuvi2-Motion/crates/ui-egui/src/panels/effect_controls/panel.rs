@@ -260,15 +260,18 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         app.auto.add(&format!("effectControls.effect.{}", g.uid), r, &g.name);
         if hresp.clicked() || hresp.drag_started() || hresp.secondary_clicked() {
             let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
-            if add && hresp.clicked() {
-                if selected {
-                    app.session.state.selected_props.retain(|(l, u)| !(*l == layer.id && *u == g.uid));
-                } else {
-                    app.session.state.selected_props.push((layer.id, g.uid));
+            if let Err(e) = app.motion_owner_gate.manual_transaction(|| {
+                if add && hresp.clicked() {
+                    if selected {
+                        app.session.state.selected_props.retain(|(l, u)| !(*l == layer.id && *u == g.uid));
+                    } else {
+                        app.session.state.selected_props.push((layer.id, g.uid));
+                    }
+                } else if !selected || hresp.clicked() {
+                    app.session.state.selected_props = vec![(layer.id, g.uid)];
                 }
-            } else if !selected || hresp.clicked() {
-                app.session.state.selected_props = vec![(layer.id, g.uid)];
-            }
+                Ok(())
+            }) { app.ui.status = e; }
         }
         if hresp.drag_started() {
             ctx.data_mut(|d| d.insert_temp(drag_id, g.uid));

@@ -35,7 +35,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     };
     let Some(item) = app.session.project.item(view.item).cloned() else {
-        app.session.state.footage_panel = None;
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.footage_panel = None; Ok(()) }) { app.ui.status = e; }
         return;
     };
     let footage = match &item.kind {
