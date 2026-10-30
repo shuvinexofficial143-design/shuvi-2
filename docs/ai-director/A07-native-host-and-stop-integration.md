@@ -90,7 +90,7 @@ This branch modifies ONLY the AI Director-owned paths.
 
 New tests are in `src-tauri/src/ai_director/tests/native_host.rs`
 (9 host-on-SQLite cases with **explicit test-double NativeOwner**) and
-`tests/ai-director-a07.test.mjs` (8 JS native-Stop/approval/race cases
+`tests/ai-director-a07.test.mjs` (9 JS native-Stop/approval/race cases
 with explicitly stubbed IPC). These are real source and on-disk
 SQLite tests, **NOT** a live Windows desktop edit.
 
@@ -105,3 +105,13 @@ No merged app, live API credential, real FilmCraft/EffectCraft AI edit,
 native WebView2 owner-click acceptance, crash-power-loss guarantee or
 signed installer is claimed from this code alone. Keep Draft PR #4
 unmerged pending 2.0.5 integration and Windows E2E proof.
+
+## A07 race hardening
+
+- Native approval refuses to display persisted owner consent if the live project,
+  session or revision does not match the original immutable SQLite plan.
+- If SQLite Stop commits while the native owner-approval window is pending, the
+  window may close with an error instead of a granted/denied response. The
+  connected Director now preserves the committed `cancelled` state rather
+  than incorrectly overriding it with a `blocked` status. A regression
+  test explicitly forces this race with a rejected approval promise.
