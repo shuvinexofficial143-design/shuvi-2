@@ -30,6 +30,7 @@ impl EffectcraftApp {
             session,
             ui,
             shuvi_ai: panels::shuvi_ai::ShuviAiState::default(),
+            motion_owner_gate: crate::shuvi_owner_gate::MotionOwnerGate::default(),
             workspace_store,
             tokens: Tokens::for_kind(Default::default()),
             auto: Default::default(),
