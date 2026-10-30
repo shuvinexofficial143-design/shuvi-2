@@ -1,0 +1,47 @@
+name: Shuvi 2 Motion Native Owner Route Audit (M-AI14)
+on:
+  push:
+    branches:
+      - feature/shuvi2-original-motion-ai
+    paths:
+      - original-editors/Shuvi2-Motion/crates/ui-egui/src/**
+      - .github/scripts/check_motion_owner_routes.py
+      - .github/workflows/motion-owner-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: motion-owner-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-owner-route-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact Motion branch source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Independently audit manual native command wiring
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check_motion_owner_routes.py --out motion-owner-route-audit.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('motion-owner-route-audit.json').read_text())
+          assert data['productionAiEditingEnabled'] is False
+          assert data['completeDesktopMutationLock'] is False
+          assert data['guardedManualCommandMeasured'] >= 106
+          print("Explicit remaining bypass candidates:",len(data['remainingDirectSessionCalls']))
+          PY
+      - name: Publish source-linked audit of guarded and unresolved native mutation routes
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shuvi2-Motion-MAI14-OwnerGate-SourceAudit
+          path: motion-owner-route-audit.json
+          retention-days: 21
+          if-no-files-found: error
