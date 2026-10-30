@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: shuvi-original-native-verify-v11-${{ github.ref }}
+  group: shuvi-original-native-verify-motion-text-v13-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   original-editor-cargo-check:
@@ -81,3 +81,40 @@ jobs:
         run: |
           cargo test --manifest-path original-editors/Shuvi2-Video/a07-native-bridge/Cargo.toml --test shared_owner_admission -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Original FilmCraft native owner+AI split test FAILED (not live Windows human UI)' }
+
+  original-effectcraft-native-text-owner:
+    name: Original EffectCraft native text mutation and manual-owner exclusion
+    runs-on: windows-2022
+    timeout-minutes: 105
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          targets: x86_64-pc-windows-msvc
+      - name: Verify original EffectCraft owner source is EXACT upstream Git tree
+        shell: pwsh
+        run: |
+          node scripts/release/assert-original-source-tree.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned original EffectCraft source identity mismatch' }
+      - name: Apply reviewed source-only EffectCraft owner-gate result type repair
+        shell: pwsh
+        run: |
+          node scripts/release/apply-reviewed-native-overlays.mjs motion
+          if ($LASTEXITCODE -ne 0) { throw 'EffectCraft native owner compatibility overlay rejected' }
+      - name: REAL original EffectCraft in-process text edit, object readback and no-duplicate native revision tests
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: |
+          cargo test --manifest-path original-editors/Shuvi2-Motion/Cargo.toml -p effectcraft-ui-egui shuvi_motion_owner::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Original EffectCraft native text edit/readback or stale/duplicate guard FAILED' }
+      - name: REAL original EffectCraft shared manual/native owner exclusion tests
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: |
+          cargo test --manifest-path original-editors/Shuvi2-Motion/Cargo.toml -p effectcraft-ui-egui shuvi_owner_gate::tests -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Original EffectCraft manual owner lock, nested reentry or restore guard FAILED' }
