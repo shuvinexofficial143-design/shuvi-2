@@ -182,6 +182,12 @@ pub fn targets_source(app: &FilmcraftApp, params: &Value) -> bool {
 
 /// Execute a UI or engine command by id.
 pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value) -> Result<Value, String> {
+    // V-AI13: menu and external-control entry may not run while the
+    // native manual command lane is claimed. More direct panel editing
+    // paths remain unaudited; therefore A07 AI execution is disabled.
+    if app.shuvi_manual_admission.is_claimed() {
+        return Err("SHUVI_NATIVE_OWNER_BUSY: command entry blocked".into());
+    }
     if id == "edit.selectAll" && (crate::panels::graphics::select_all_edited_text(app) || crate::panels::effect_controls::select_all_keyframes(app)) {
         return Ok(Value::Null);
     }
@@ -232,7 +238,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
         };
         // The preference is updated in memory before it is written, so a failed write (read-only
         // or full disk) still switches the interface; it only can't be remembered for next time.
-        let saved = app.session.execute("prefs.set", json!({"key": "general.interfaceLanguage", "value": language.code()}));
+        let saved = app.shuvi_manual_execute("prefs.set", json!({"key": "general.interfaceLanguage", "value": language.code()}));
         app.ui.language = language;
         crate::i18n::set_current(language);
         if let Err(e) = saved {
@@ -373,7 +379,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
                 let frame = view.rate.frame_at(app.session.state.source_playhead).saturating_add(count.saturating_mul(direction));
                 view.rate.tick_of(frame)
             };
-            return app.session.execute("source.setPlayhead", json!({"time": time.0})).map_err(|e| e.to_string());
+            return app.shuvi_manual_execute("source.setPlayhead", json!({"time": time.0})).map_err(|e| e.to_string());
         }
         "playback.forward" => {
             let s = if app.playback.playing && app.playback.speed > 0.0 { (app.playback.speed * 2.0).min(8.0) } else { 1.0 };
@@ -604,7 +610,7 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
     {
         return app.file_dialog(id, &params);
     }
-    let r = app.session.execute(id, params).map_err(|e| e.to_string());
+    let r = app.shuvi_manual_execute(id, params).map_err(|e| e.to_string());
     if let Err(e) = &r {
         app.ui.status = e.clone();
     }
@@ -741,7 +747,7 @@ fn paste_clipboard_media(app: &mut FilmcraftApp, insert: bool) -> Option<Result<
         },
     };
     let params = json!({"paths": paths, "insert": insert, "place": app.ui.focused == PanelKind::Timeline, "bin": app.import_bin().0});
-    Some(app.session.execute("edit.pasteMedia", params).map_err(|e| e.to_string()))
+    Some(app.shuvi_manual_execute("edit.pasteMedia", params).map_err(|e| e.to_string()))
 }
 
 /// Upper bound on the RGBA copy made from a clipboard image, matching the screenshot per-image

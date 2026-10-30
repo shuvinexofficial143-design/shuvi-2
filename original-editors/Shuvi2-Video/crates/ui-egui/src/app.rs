@@ -33,6 +33,7 @@ impl FilmcraftApp {
         let ime_active_sequence = session.state.active_sequence;
         Self {
             session,
+            shuvi_manual_admission: Default::default(),
             ui: UiState { language, ..UiState::default() },
             tokens: Tokens::for_kind(ThemeKind::Dark),
             frames,

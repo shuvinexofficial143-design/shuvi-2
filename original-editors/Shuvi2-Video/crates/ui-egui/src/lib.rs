@@ -53,6 +53,7 @@ pub mod links;
 pub mod menus;
 pub mod native_dialogs;
 pub mod panels;
+mod shuvi_manual_admission;
 pub mod perf;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod play_ahead;
@@ -168,6 +169,9 @@ pub(crate) enum ImeComposition {
 
 pub struct FilmcraftApp {
     pub session: Session,
+    /// V-AI13 partial production command lane. Only covered command entry
+    /// paths are admitted; direct original GUI panel edits still need migration.
+    shuvi_manual_admission: shuvi_manual_admission::ManualCommandAdmission,
     pub ui: UiState,
     pub tokens: Tokens,
     pub frames: Arc<FrameServer>,

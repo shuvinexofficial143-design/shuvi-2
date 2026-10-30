@@ -494,7 +494,7 @@ pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest)
                 Err(e) => err(e),
             }
         }
-        "engine.commands" => match app.session.execute("command.list", json!({})) {
+        "engine.commands" => match app.shuvi_manual_execute("command.list", json!({})) {
             Ok(v) => ok(v),
             Err(e) => err(e),
         },
