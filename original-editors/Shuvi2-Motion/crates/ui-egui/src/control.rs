@@ -86,13 +86,13 @@ fn waits(command: &str, params: &Value) -> bool {
 /// so the browser's UI keeps drawing while it runs.
 fn execute_engine(app: &mut EffectcraftApp, id: &str, params: Value) -> Result<Outcome, String> {
     if !app.session.offloads() || !waits(id, &params) {
-        return app.session.execute_checked(id, params).map(ok).map_err(|e| e.to_string());
+        return app.motion_owner_gate.manual_control_command(&mut app.session, id, params).map(ok);
     }
     let before: Vec<String> = app.session.jobs().into_iter().map(|j| j.id).collect();
     let log_cursor = app.session.offload_log_start.saturating_add(app.session.offload_log.len());
     let mut p = params.clone();
     p["wait"] = json!(false);
-    let result = app.session.execute_checked(id, p).map_err(|e| e.to_string())?;
+    let result = app.motion_owner_gate.manual_control_command(&mut app.session, id, p)?;
     let jobs: Vec<String> = app.session.jobs().into_iter().map(|j| j.id).filter(|j| !before.contains(j)).collect();
     if jobs.is_empty() {
         return Ok(ok(result));
