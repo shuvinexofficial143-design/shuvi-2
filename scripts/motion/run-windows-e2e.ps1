@@ -31,7 +31,10 @@ if (!(Test-Path $edgetool)) {
     cargo install --git https://github.com/chippers/msedgedriver-tool
     if ($LASTEXITCODE -ne 0) { throw "msedgedriver-tool installation failed" }
 }
-$driverDir = Join-Path $project "proof/motion-desktop/driver"
+# Keep downloaded third-party EdgeDriver executable OUT of the real screenshot proof.
+# Artifact upload should contain only app test receipts / screenshots / diagnostic logs.
+$driverRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
+$driverDir = Join-Path $driverRoot "shuvi-motion-msedgedriver"
 New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
 Push-Location $driverDir
 try {
