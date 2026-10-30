@@ -90,35 +90,35 @@ async function test(){
     await step("create real native composition",async()=>{
       await fill("#motion-name","Shuvi Windows E2E Project");
       await click("#motion-create");
-      await ready("native verification complete",60000);
+      await ready("Creating composition · native verification complete",60000);
       assert.match(await text("#motion-frame-info"),/drawn pixels/);
     });
     await step("create real editable shape and verify PNG preview",async()=>{
       await fill("#motion-layer-name","WebDriver Shape");
       await click("#motion-add-shape");
-      await ready("native verification complete",60000);
+      await ready("Creating shape · native verification complete",60000);
       assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
       const listed=await text("#motion-layer-list");
       assert.match(listed,/WebDriver Shape/);
     });
     await step("apply native effect then native mask",async()=>{
       await click("#motion-add-effect");
-      await ready("native verification complete",60000);
+      await ready("Applying native effect · native verification complete",60000);
       assert.match(await text("#motion-effect-list"),/Gaussian Blur/);
       await click("#motion-add-mask");
-      await ready("native verification complete",60000);
+      await ready("Creating native polygon mask · native verification complete",60000);
       assert.match(await text("#motion-mask-list"),/Mask 1/);
     });
     await step("save persistent .ecproj and export real PNG to owner temp workspace",async()=>{
       await fill("#motion-workspace",root);
       await fill("#motion-filename","webview_e2e.ecproj");
       await click("#motion-save");
-      await ready("native verification complete",60000);
+      await ready("Saving native project · native verification complete",60000);
       const project=await stat(path.join(root,"webview_e2e.ecproj"));
       assert.ok(project.size>100,"Native project missing or empty");
       await fill("#motion-png-filename","webview_e2e.png");
       await click("#motion-export-png");
-      await ready("native verification complete",60000);
+      await ready("Exporting native PNG · native verification complete",60000);
       const png=await readFile(path.join(root,"webview_e2e.png"));
       assert.ok(png.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
         "Exported frame was not an actual PNG");
