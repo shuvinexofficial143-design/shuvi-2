@@ -23,3 +23,9 @@
 .motion-layer{background:#242b3a;border:1px solid #42506d;color:#cbd9f3;padding:7px 9px;border-radius:5px;font-size:11px}
 .motion-layer.selected{border-color:#b4a2f9;background:#3d335a}
 @media(max-width:1050px){.motion-toolbar{flex-direction:column;align-items:flex-start}#motion-status{max-width:100%;text-align:left}.motion-time{flex-wrap:wrap}}
+
+.motion-history{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.motion-history button{background:#40395d;border:1px solid #7768a6;border-radius:6px;
+  color:#eee4ff;padding:5px 10px;font-size:11px;cursor:pointer}
+.motion-history button:disabled{cursor:not-allowed;opacity:.35}
+#motion-history-status{font-size:10px;color:#9daac4}
