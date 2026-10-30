@@ -28,6 +28,7 @@ fn track(s:&str)->bool {
     !s[1..].starts_with('0')&&s[1..].parse::<u8>().is_ok_and(|n|(1..=16).contains(&n))
 }
 impl Snapshot {
+    pub(crate) fn is_valid(&self)->bool {self.valid()}
     fn valid(&self)->bool {
         !self.project_id.is_empty()&&self.project_id.len()<=1024&&
         !self.session_id.is_empty()&&self.session_id.len()<=128&&
@@ -57,6 +58,7 @@ pub enum Action {
     MotionSetMaskProperty {comp_id:u64,layer_id:u64,uid:u64,property:String,value:f64},
 }
 impl Action {
+    pub(crate) fn is_valid(&self,editor:&Editor)->bool {self.valid(editor)}
     fn valid(&self,editor:&Editor)->bool {
         use Action::*;
         match self {
@@ -123,6 +125,8 @@ pub trait OwnerConsent {fn grant(&mut self,scope:&Scope)->bool;}
 pub trait NativeOwner {
     fn snapshot(&mut self)->Result<Snapshot,String>;
     fn apply(&mut self,action:&Action)->Result<(),String>;
+    // SHA-256 of a canonical independently inspected affected native object.
+    fn object_proof_sha256(&mut self,action:&Action)->Result<String,String>;
     // Inspect the actual affected clip/layer/comp after applying, not merely
     // a session revision. A false or missing native proof is UNCERTAIN.
     fn verify_action(&mut self,action:&Action)->Result<bool,String>;
@@ -131,7 +135,7 @@ pub trait NativeOwner {
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct Receipt {
     pub task_id:String,pub index:usize,pub key:String,pub before:Snapshot,
-    pub after:Snapshot,pub native_verified:bool,
+    pub after:Snapshot,pub native_verified:bool,pub object_proof_sha256:String,
 }
 fn digest<T:Serialize>(value:&T)->Result<String,GuardError> {
     let data=serde_json::to_vec(value).map_err(|_|GuardError::Invalid)?;
@@ -236,10 +240,28 @@ impl Ledger {
         if owner.verify_action(&p.actions[index]).ok()!=Some(true) {
             return Err(GuardError::NativeOutcomeUncertain);
         }
-        let receipt=Receipt{task_id:id.into(),index,key,before:expected,after,native_verified:true};
+        let proof=owner.object_proof_sha256(&p.actions[index])
+            .map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if !hex64(&proof){return Err(GuardError::NativeOutcomeUncertain);}
+        let receipt=Receipt{task_id:id.into(),index,key,before:expected,after,
+            native_verified:true,object_proof_sha256:proof};
         persist_new(&dir.join(format!("step_{index:02}.verified")),
             &serde_json::to_vec(&receipt).map_err(|_|GuardError::Io)?)?;
         Ok(receipt)
+    }
+    pub fn execute_bound<O:NativeOwner>(&self,id:&str,index:usize,
+        expected:&Snapshot,action:&Action,owner:&mut O)->Result<Receipt,GuardError>{
+        let plan=self.scope(id)?;
+        if plan.actions.get(index)!=Some(action){return Err(GuardError::Invalid);}
+        let stored=if index==0{plan.snapshot.clone()}else{
+            let prior:Receipt=load(&self.dir(id)?.join(format!("step_{:02}.verified",index-1)))?;
+            if !prior.native_verified||prior.task_id!=id||prior.index!=index-1 {
+                return Err(GuardError::DuplicateOrUncertain);
+            }
+            prior.after
+        };
+        if stored!=*expected{return Err(GuardError::StaleProject);}
+        self.execute(id,index,owner)
     }
     pub fn recover(&self,id:&str)->Result<Vec<&'static str>,GuardError>{
         let p=self.scope(id)?;
