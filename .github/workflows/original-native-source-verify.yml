@@ -37,6 +37,13 @@ jobs:
         run: |
           node scripts/release/assert-original-source-tree.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Original source is NOT exact pinned tree' }
+      - name: Apply reviewed release-only native compatibility overlay
+        shell: pwsh
+        run: |
+          if ('${{ matrix.editor }}' -eq 'EffectCraft') {
+            node scripts/release/apply-reviewed-native-overlays.mjs motion
+            if ($LASTEXITCODE -ne 0) { throw 'Motion native compatibility overlay rejected' }
+          }
       - name: Verify real original egui Rust UI compilation (NOT installed GUI E2E)
         shell: pwsh
         env:
@@ -44,3 +51,33 @@ jobs:
         run: |
           cargo check --manifest-path ${{ matrix.manifest }} -p ${{ matrix.package }} --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw 'Real original editor native UI cargo check FAILED' }
+
+  original-filmcraft-a07-owner-native-split:
+    name: Original FilmCraft native GUI + canonical A07 owner-split tests
+    runs-on: windows-2022
+    timeout-minutes: 105
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          targets: x86_64-pc-windows-msvc
+      - name: Pin all original source IDs before test overlay
+        shell: pwsh
+        run: |
+          node scripts/release/assert-original-source-tree.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original source identity changed' }
+      - name: Apply minimal Video A07 Rust test ownership repair
+        shell: pwsh
+        run: |
+          node scripts/release/apply-reviewed-native-overlays.mjs videoA07
+          if ($LASTEXITCODE -ne 0) { throw 'Original Video owner bridge overlay rejected' }
+      - name: Test ORIGINAL FilmCraft GUI owner and real native split against imported canonical AI A08
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: |
+          cargo test --manifest-path original-editors/Shuvi2-Video/a07-native-bridge/Cargo.toml --test shared_owner_admission -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Original FilmCraft native owner+AI split test FAILED (not live Windows human UI)' }

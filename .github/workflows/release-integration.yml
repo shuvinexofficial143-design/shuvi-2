@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: shuvi2-release-integration-original-a08-u09-v09-${{ github.ref }}
+  group: shuvi2-release-integration-native-owner-v10-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   integrated-windows-native-and-e2e:
@@ -66,6 +66,11 @@ jobs:
       - name: Build actual FilmCraft Windows native sidecar
         shell: pwsh
         run: ./scripts/video/build-engine.ps1
+      - name: Release-only A08 test fixture isolation for parallel Windows SQLite ledger
+        shell: pwsh
+        run: |
+          node scripts/release/apply-reviewed-native-overlays.mjs ai
+          if ($LASTEXITCODE -ne 0) { throw 'A08 test fixture overlay rejected; no native edits attempted' }
       - name: Verify canonical A08 native AI Director provider and guarded ledger
         shell: pwsh
         run: |
