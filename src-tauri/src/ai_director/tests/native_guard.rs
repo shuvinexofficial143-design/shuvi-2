@@ -33,6 +33,9 @@ impl NativeOwner for FakeOwner {
     fn verify_action(&mut self,_action:&Action)->Result<bool,String> {
         Ok(self.verify)
     }
+    fn object_proof_sha256(&mut self,_action:&Action)->Result<String,String> {
+        Ok("c".repeat(64))
+    }
 }
 fn motion()->Scope{
     Scope {
