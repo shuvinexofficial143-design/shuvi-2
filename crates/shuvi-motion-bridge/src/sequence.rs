@@ -1,6 +1,6 @@
 //! M15: bounded, real native EffectCraft PNG image sequence; never overwrite owner files.
 //! This is NOT MP4, animation playback or a browser-painted fake frame.
-use std::{fs, io::Write, path::{Path,PathBuf}};
+use std::{fs, io::Write, path::{Path,PathBuf}, time::{SystemTime,UNIX_EPOCH}};
 use serde_json::json;
 use crate::MotionBridge;
 
@@ -37,10 +37,26 @@ impl MotionBridge{
         if !last_time.is_finite()||last_time>=actual.duration_seconds-0.0000001{
             return Err("requested native frames exceed the composition duration".into());
         }
-        // The entire directory name is owner-selected and validated, and create_dir
-        // is atomic/exclusive. No existing folder, file or symlink may be replaced.
+        // Render into a uniquely created staging folder first. The final owner
+        // directory does not appear until *all* native frames and the disk-backed
+        // manifest are complete. Existing output folders/files/symlinks are refused.
         let directory=destination(workspace,basename)?;
-        fs::create_dir(&directory).map_err(|e|format!("cannot create new sequence folder without overwriting: {e}"))?;
+        if directory.symlink_metadata().is_ok(){
+            return Err("cannot create new sequence folder without overwriting: destination exists".into());
+        }
+        let parent=directory.parent().ok_or("owner workspace has no parent")?;
+        let stamp=SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|e|format!("sequence staging clock failure: {e}"))?.as_nanos();
+        let staging=(0..8).find_map(|attempt|{
+            let candidate=parent.join(format!(
+                ".{basename}.shuvi-staging-{}-{stamp}-{attempt}",std::process::id()
+            ));
+            match fs::create_dir(&candidate){
+                Ok(())=>Some(Ok(candidate)),
+                Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>None,
+                Err(e)=>Some(Err(format!("cannot create exclusive sequence staging directory: {e}")))
+            }
+        }).ok_or("cannot reserve a unique native sequence staging directory")??;
         let mut written:Vec<PathBuf>=Vec::new();
         let outcome=(||->Result<SequenceReceipt,String>{
             let mut first_checksum=0_u64;
@@ -50,7 +66,7 @@ impl MotionBridge{
                 let t=start+(f64::from(i)/fps);
                 let frame=self.render_preview(comp,t,max_side,transparent)?;
                 let png=frame.png()?;
-                let path=directory.join(format!("frame_{i:04}.png"));
+                let path=staging.join(format!("frame_{i:04}.png"));
                 let mut file=fs::OpenOptions::new().write(true).create_new(true)
                     .open(&path).map_err(|e|format!("cannot exclusively create native frame {i}: {e}"))?;
                 written.push(path.clone());
@@ -64,7 +80,7 @@ impl MotionBridge{
             }
             // Final manifest is written only after every real renderer frame and
             // readback succeeds. Incomplete sequences never receive an OK manifest.
-            let manifest=directory.join("sequence.json");
+            let manifest=staging.join("sequence.json");
             let record=json!({
                 "ok":true,"source":"native-effectcraft","fps":fps,
                 "firstTime":start,"frames":frames,"maxSide":max_side,
@@ -78,7 +94,7 @@ impl MotionBridge{
             written.push(manifest);
             manifest_file.write_all(&encoded).map_err(|e|e.to_string())?;
             manifest_file.sync_all().map_err(|e|e.to_string())?;
-            let readback=fs::read(directory.join("sequence.json")).map_err(|e|e.to_string())?;
+            let readback=fs::read(staging.join("sequence.json")).map_err(|e|e.to_string())?;
             if readback!=encoded{return Err("sequence JSON receipt disk mismatch".into());}
             Ok(SequenceReceipt{
                 directory:directory.clone(),frame_count:frames,first_time:start,fps,
@@ -86,11 +102,23 @@ impl MotionBridge{
                 verified_from_disk:true,project_revision:actual.project_revision,
             })
         })();
+        // The entire folder is published with a single same-volume rename.
+        // Windows refuses replacement of an existing target directory; the
+        // pre-rename check also catches owner-created files/symlinks. Staging
+        // never contains the final success path before the last disk readback.
+        let outcome=outcome.and_then(|receipt|{
+            if directory.symlink_metadata().is_ok(){
+                return Err("cannot publish native sequence: owner target already exists".into());
+            }
+            fs::rename(&staging,&directory)
+                .map_err(|e|format!("cannot publish verified native sequence without replacing owner target: {e}"))?;
+            Ok(receipt)
+        });
         if outcome.is_err(){
-            // Remove ONLY files this operation itself created. If another process
-            // placed files into the directory, leave them untouched.
+            // Delete only files created in OUR unique stage; never delete anything
+            // discovered in an existing owner directory.
             for path in written.iter().rev(){let _=fs::remove_file(path);}
-            let _=fs::remove_dir(&directory);
+            let _=fs::remove_dir(&staging);
         }
         outcome
     }
