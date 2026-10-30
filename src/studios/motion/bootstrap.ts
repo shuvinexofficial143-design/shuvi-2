@@ -8,6 +8,8 @@ import "./motion.css";
 type RecordJson = Record<string, unknown>;
 type Comp = { id:number;name:string;width:number;height:number;fps:number;durationSeconds:number };
 type Layer = { id:number;name:string;kind:string;opacity:number;rotation:number;keyframes:number };
+type Effect = { uid:number;id:string;name:string;enabled:boolean };
+type Mask = { uid:number;name:string;closed:boolean;vertices:[number,number][] };
 const preview = document.querySelector<HTMLElement>(".preview")!;
 const timeline = document.querySelector<HTMLElement>(".timeline")!;
 const health = document.querySelector<HTMLElement>("#engine-health")!;
@@ -18,6 +20,8 @@ const videoTab = document.querySelector<HTMLButtonElement>('button[data-studio="
 let mounted = false;
 let activeComp: Comp | null = null;
 let activeLayer: Layer | null = null;
+let activeEffect: Effect | null = null;
+let activeMask: Mask | null = null;
 let currentTime = 0;
 let busy = false;
 
@@ -74,7 +78,7 @@ async function listLayers():Promise<void> {
     btn.textContent = layer.kind+" · "+layer.name+" · #"+layer.id+(layer.keyframes ? " · "+layer.keyframes+" keys" : "");
     btn.className = "motion-layer"+(activeLayer?.id === layer.id?" selected":"");
     btn.addEventListener("click",()=>{
-      activeLayer=layer;
+      activeLayer=layer;activeEffect=null;activeMask=null;
       node<HTMLInputElement>("#motion-rotation").value=String(layer.rotation);
       node<HTMLInputElement>("#motion-opacity").value=String(layer.opacity);
       void listLayers();
@@ -94,8 +98,47 @@ async function renderFrame():Promise<void> {
   node<HTMLElement>("#motion-frame-info").textContent=
     frame.width+"×"+frame.height+" · "+frame.visiblePixels+" drawn pixels · Rev "+frame.revision;
 }
+async function refreshEffectMaskControls():Promise<void>{
+  const effectsEl=node<HTMLElement>("#motion-effect-list");
+  const masksEl=node<HTMLElement>("#motion-mask-list");
+  effectsEl.replaceChildren();
+  masksEl.replaceChildren();
+  if(!activeLayer||!activeComp){
+    effectsEl.textContent="Select a layer to edit its effects";
+    masksEl.textContent="Select a layer to edit its masks";
+    activeEffect=null;activeMask=null;return;
+  }
+  const query={compId:activeComp.id,layerId:activeLayer.id};
+  const effects=await request<Effect[]>({action:"listEffects",...query});
+  const masks=await request<Mask[]>({action:"listMasks",...query});
+  activeEffect=effects.find(f=>f.uid===activeEffect?.uid)??null;
+  activeMask=masks.find(m=>m.uid===activeMask?.uid)??null;
+  if(!effects.length)effectsEl.textContent="No effects";
+  for(const effect of effects){
+    const button=document.createElement("button");
+    button.type="button";
+    button.textContent=effect.name+(effect.enabled?" · on":" · off");
+    button.className="motion-layer"+(activeEffect?.uid===effect.uid?" selected":"");
+    button.addEventListener("click",()=>{
+      activeEffect=effect;
+      node<HTMLSelectElement>("#motion-effect-kind").value=
+        effect.id==="ec.blur.gaussian"?"gaussianBlur":"brightnessContrast";
+      void refreshEffectMaskControls();
+    });
+    effectsEl.append(button);
+  }
+  if(!masks.length)masksEl.textContent="No masks";
+  for(const mask of masks){
+    const button=document.createElement("button");
+    button.type="button";button.textContent=mask.name+" · "+mask.vertices.length+" points";
+    button.className="motion-layer"+(activeMask?.uid===mask.uid?" selected":"");
+    button.addEventListener("click",()=>{activeMask=mask;void refreshEffectMaskControls();});
+    masksEl.append(button);
+  }
+}
 async function afterEdit():Promise<void> {
   await listLayers();
+  await refreshEffectMaskControls();
   await renderFrame();
 }
 function bindClick(selector:string,label:string,action:()=>Promise<void>):void {
@@ -150,6 +193,35 @@ function paintUi():void {
    </div>
    <div id="motion-layer-list" class="motion-layers">No native layers yet</div>
    <div class="motion-fields">
+     <strong>Native Effects</strong>
+     <label>Effect <select id="motion-effect-kind">
+       <option value="gaussianBlur">Gaussian Blur</option>
+       <option value="brightnessContrast">Brightness &amp; Contrast</option>
+     </select></label>
+     <button id="motion-add-effect">Apply native effect</button>
+     <label>Parameter <select id="motion-fx-param">
+       <option value="blurriness">Blurriness</option>
+       <option value="brightness">Brightness</option>
+       <option value="contrast">Contrast</option>
+     </select></label>
+     <label>Value <input id="motion-fx-value" type="number" value="20"/></label>
+     <button id="motion-set-effect">Set selected effect parameter</button>
+     <button id="motion-toggle-effect">Enable/disable</button>
+     <button id="motion-remove-effect">Remove effect</button>
+   </div>
+   <div id="motion-effect-list" class="motion-layers">Select a layer</div>
+   <div class="motion-fields">
+     <strong>Native Polygon Masks</strong>
+     <label>Width <input id="motion-mask-width" type="number" min="4" value="160"/></label>
+     <label>Height <input id="motion-mask-height" type="number" min="4" value="85"/></label>
+     <button id="motion-add-mask">Add closed rectangular mask</button>
+     <label>First vertex X <input id="motion-mask-x" type="number" value="-90"/></label>
+     <label>Y <input id="motion-mask-y" type="number" value="-45"/></label>
+     <button id="motion-edit-mask">Edit mask vertex</button>
+     <button id="motion-remove-mask">Remove mask</button>
+   </div>
+   <div id="motion-mask-list" class="motion-layers">Select a layer</div>
+   <div class="motion-fields">
      <label>Workspace folder (already exists)
        <input id="motion-workspace" placeholder="C:\\Users\\you\\Documents\\Shuvi" aria-label="Owner-selected workspace folder"/></label>
      <label>Project filename <input id="motion-filename" value="my_motion.ecproj"/></label>
@@ -162,7 +234,7 @@ function bind():void {
     const comp=await request<Comp>({action:"createComposition",name:value("#motion-name"),
       width:number("#motion-width"),height:number("#motion-height"),
       fps:number("#motion-fps"),durationSeconds:number("#motion-duration")});
-    activeComp=comp;activeLayer=null;currentTime=0;updateSlider();await afterEdit();
+    activeComp=comp;activeLayer=null;activeEffect=null;activeMask=null;currentTime=0;updateSlider();await afterEdit();
   });
   bindClick("#motion-add-text","Creating editable text",async()=>{
     const c=ensureComp();
@@ -214,6 +286,55 @@ function bind():void {
     await request({action:"easeKeys",compId:c.id,layerId:l.id,property:"opacity",times:[0,end]});
     await afterEdit();
   });
+  bindClick("#motion-add-effect","Applying native effect",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    activeEffect=await request<Effect>({action:"addEffect",compId:c.id,layerId:l.id,
+      effect:value("#motion-effect-kind")});
+    await afterEdit();
+  });
+  bindClick("#motion-set-effect","Editing native effect parameter",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    if(!activeEffect)throw new Error("Select an effect instance first");
+    const effect=activeEffect.id==="ec.blur.gaussian"?"gaussianBlur":"brightnessContrast";
+    await request({action:"setEffectParameter",compId:c.id,layerId:l.id,
+      uid:activeEffect.uid,effect,parameter:value("#motion-fx-param"),
+      value:number("#motion-fx-value")});
+    await afterEdit();
+  });
+  bindClick("#motion-toggle-effect","Toggling native effect",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    if(!activeEffect)throw new Error("Select an effect first");
+    await request({action:"toggleEffect",compId:c.id,layerId:l.id,
+      uid:activeEffect.uid,enabled:!activeEffect.enabled});
+    await afterEdit();
+  });
+  bindClick("#motion-remove-effect","Removing native effect",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    if(!activeEffect)throw new Error("Select an effect first");
+    await request({action:"removeEffect",compId:c.id,layerId:l.id,uid:activeEffect.uid});
+    activeEffect=null;await afterEdit();
+  });
+  bindClick("#motion-add-mask","Creating native polygon mask",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    const w=number("#motion-mask-width"),h=number("#motion-mask-height");
+    if(!Number.isFinite(w)||!Number.isFinite(h)||w<4||h<4)throw new Error("Invalid mask bounds");
+    const vertices:[number,number][]=[[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]];
+    activeMask=await request<Mask>({action:"addPolygonMask",compId:c.id,layerId:l.id,vertices});
+    await afterEdit();
+  });
+  bindClick("#motion-edit-mask","Moving native mask vertex",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    if(!activeMask)throw new Error("Select a mask first");
+    await request({action:"setMaskVertex",compId:c.id,layerId:l.id,uid:activeMask.uid,
+      index:0,point:[number("#motion-mask-x"),number("#motion-mask-y")]});
+    await afterEdit();
+  });
+  bindClick("#motion-remove-mask","Removing native mask",async()=>{
+    const c=ensureComp();const l=ensureLayer();
+    if(!activeMask)throw new Error("Select a mask first");
+    await request({action:"removeMask",compId:c.id,layerId:l.id,uid:activeMask.uid});
+    activeMask=null;await afterEdit();
+  });
   bindClick("#motion-render","Rendering native preview",renderFrame);
   node<HTMLInputElement>("#motion-time").addEventListener("input",(event)=>{
     currentTime=Number((event.target as HTMLInputElement).value);
@@ -237,7 +358,7 @@ function bind():void {
     });
     if(!opened.verifiedFromDisk)throw new Error("Native project reopen failed");
     activeComp=opened.compositions[0]??null;
-    activeLayer=null;currentTime=0;updateSlider();
+    activeLayer=null;activeEffect=null;activeMask=null;currentTime=0;updateSlider();
     if(activeComp)await afterEdit();
   });
 }
