@@ -22,7 +22,14 @@ Typed Tauri IPC actions through the existing single-owner worker:
 `toggleEffect`, `removeEffect`, `addPolygonMask`,
 `listMasks`, `setMaskVertex`, `removeMask`.
 The native Motion tab adds corresponding controls and layer-scoped
-effect/mask listings. All actions alter the one project shared by
+effect/mask listings.
+
+M08 also adds `exportPng`: a single-frame **true EffectCraft RGBA**
+render to a user-provided existing workspace directory. The PNG basename
+has an explicit allowlist, file creation uses `create_new` to refuse
+clobber, bytes are re-read from disk and decoded pixels must equal the
+native RGBA frame. UI can request a transparent PNG export at the current
+playhead; it does not invent pixels in browser JS. All actions alter the one project shared by
 manual editing, preview render and save/open.
 
 The polygon mask accepts 3–64 bounded finite layer-space vertices,
@@ -52,12 +59,12 @@ M08 unit/integration tests must prove:
    save/reopen with identical pixels, supports vertex change/remove.
 6. Invalid effect kinds, unsafe values and invalid polygon vertices
    are rejected without changing the native revision.
-7. Tauri worker accepts **only typed camelCase actions** and preserves
+7. Native frame PNG export preserves RGBA pixels on disk, rejects path traversal\n   and refuses overwriting an existing output.\n8. Tauri worker accepts **only typed camelCase actions** and preserves
    one project Session; frontend UI tests require real IPC bindings.
 
 Windows Actions run `motion-effects-proof` and upload its output to
 `shuvi-motion-proof`: a native `.ecproj`, original/effected/masked
-PNG frames and an `m08_receipt.json`. A proof run is marked PASS only
+PNG frames, a separately verified exported PNG and an `m08_receipt.json`. A proof run is marked PASS only
 after verifying output and the exact branch SHA.
 
 ## Known limitations
