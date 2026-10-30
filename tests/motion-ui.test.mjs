@@ -261,7 +261,11 @@ test("M15 real native multi-frame PNG export is bounded, typed and disk verified
   assert.ok(ipc.includes('e.export_png_sequence('));
   assert.ok(nativeSequence.includes('const MAX_FRAMES:u32=120'));
   assert.ok(nativeSequence.includes('const MAX_SIDE:u32=640'));
-  assert.ok(nativeSequence.includes('create_dir(&directory)'));
+  assert.ok(nativeSequence.includes('fs::rename(&staging,&directory)'));
+  assert.ok(nativeSequence.includes('fs::create_dir(&candidate)'));
+  assert.ok(nativeSequence.includes('directory.symlink_metadata().is_ok()'));
+  assert.ok(nativeSequence.includes('fs::remove_dir(&staging)'));
+  assert.ok(nativeSequence.includes('let manifest=staging.join("sequence.json")'));
   assert.ok(nativeSequence.includes('create_new(true)'));
   assert.ok(nativeSequence.includes('if saved!=png'));
   assert.ok(nativeSequence.includes('sequence.json'));
@@ -272,4 +276,14 @@ test("M15 real native multi-frame PNG export is bounded, typed and disk verified
   assert.ok(motionCi.includes('--bin motion-sequence-proof'));
   assert.ok(desktopE2e.includes('click("#motion-export-sequence")'));
   assert.ok(desktopE2e.includes('result.sequenceVerified=true'));
+});
+
+test("M16 release requires real 3-frame sequence and exact SHA256 equality before unsigned NSIS",()=>{
+  assert.ok(windowsProof.includes("sequenceVerified"));
+  assert.ok(windowsProof.includes("sequenceFrames -ne 3"));
+  assert.ok(windowsProof.includes("sequenceFirstSha256"));
+  assert.ok(windowsProof.includes("coldRestartSha256"));
+  assert.ok(desktopE2e.includes("assert.deepEqual(png,exportedPng"));
+  assert.ok(desktopE2e.includes("result.sequenceFirstSha256="));
+  assert.ok(desktopE2e.includes("assert.equal(result.sequenceFirstSha256,result.exportSha256)"));
 });
