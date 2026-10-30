@@ -16,10 +16,15 @@ pub struct SidebarState {
     /// Latest real inspection from the SAME Session used by manual editor commands.
     pub readback: Option<NativeVideoSnapshot>,
     pub last_error: Option<String>,
+    /// Local JSON preflight input only: never sent to a provider or executed.
+    pub preview_input: String,
+    /// In-memory diagnostics, invalidated on manual native project change.
+    pub preview_feedback: Option<String>,
 }
 
 impl SidebarState {
     pub fn refresh(&mut self, session: &mut filmcraft_engine::Session) {
+        self.preview_feedback = None;
         match snapshot(session) {
             Ok(value) => {
                 self.readback = Some(value);
@@ -97,6 +102,30 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, _rect: Rect) {
             }
             ui.add_enabled(false, egui::Button::new("Send to AI"));
         });
+
+        ui.separator();
+        ui.strong("Native action preflight (read-only)");
+        ui.small("Inspect an A07 JSON proposal against the current FilmCraft clip. This does not approve or perform an edit.");
+        ui.add(TextEdit::multiline(&mut state.preview_input)
+            .desired_rows(2)
+            .hint_text(r#"{"type":"video.split","clipId":7,"seconds":2.0}"#));
+        if state.preview_input.chars().count() > MAX_DRAFT_CHARS {
+            state.preview_input = state.preview_input.chars().take(MAX_DRAFT_CHARS).collect();
+        }
+        if ui.add_enabled(!state.preview_input.trim().is_empty(), egui::Button::new("Inspect action (no edit)")).clicked() {
+            let result = serde_json::from_str::<serde_json::Value>(&state.preview_input)
+                .map_err(|_| "Invalid A07 JSON".to_string())
+                .and_then(|proposal| filmcraft_engine::shuvi_ai_readonly::a07_preflight_video_split(&mut app.session, proposal)
+                    .map(|view| format!("Verified current native clip {} on {} track {} at tick {} (revision {}). No edit performed.", view.clip_id, view.track_kind, view.track_id, view.tick, view.revision))
+                    .map_err(|error| error.to_string()));
+            state.preview_feedback = Some(match result {
+                Ok(message) => message,
+                Err(error) => format!("Rejected: {error}"),
+            });
+        }
+        if let Some(feedback) = &state.preview_feedback {
+            ui.label(feedback);
+        }
         ui.separator();
         ui.strong("Task scope / progress");
         ScrollArea::vertical().max_height(125.0).show(ui, |ui| {
@@ -131,6 +160,15 @@ mod shuvi_ai_tests {
         sidebar.refresh(&mut session);
         assert_eq!(sidebar.readback.as_ref().and_then(|x| x.active_sequence), session.state.active_sequence.map(|id| id.0));
         assert!(!sidebar.is_stale(&session));
+    }
+
+    #[test]
+    fn preview_diagnostics_reset_when_native_readback_is_refreshed() {
+        let mut session = filmcraft_engine::Session::default();
+        let mut sidebar = SidebarState { preview_feedback: Some("stale".into()), ..Default::default() };
+        sidebar.refresh(&mut session);
+        assert!(sidebar.preview_feedback.is_none());
+        assert!(!filmcraft_engine::shuvi_ai_readonly::readiness().ai_mutations_enabled);
     }
 
     #[test]

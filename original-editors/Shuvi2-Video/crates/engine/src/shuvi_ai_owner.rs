@@ -161,6 +161,43 @@ fn clip_target_in(sequence: &Value, clip_id: u64, tick: i64) -> Result<(String, 
     Err(EngineError::Other("A07_CLIP_NOT_FOUND: no exact clip ID in active sequence".into()))
 }
 
+
+pub(crate) fn preflight_a07_video_split(
+    session: &mut Session,
+    proposal: Value,
+) -> Result<shuvi_ai_readonly::NativeA07SplitPreview> {
+    let before = shuvi_ai_readonly::snapshot(session)?;
+    let action = parse_a07_video_split(proposal, session)?;
+    let TypedVideoEdit::SplitClipAt { clip_id, tick } = action else {
+        return Err(EngineError::Other("A07_ACTION_REJECTED: unsupported native preflight action".into()));
+    };
+    let sequence = before.sequence.as_ref().ok_or(EngineError::NoSequence)?;
+    let (track_kind, track_id) = clip_target_in(sequence, clip_id, tick)?;
+    let source_item_id = sequence[&track_kind].as_array()
+        .and_then(|tracks| tracks.iter().find(|t| t["id"].as_u64() == Some(track_id)))
+        .and_then(|track| track["items"].as_array())
+        .and_then(|items| items.iter().find(|item| item["clip"].as_u64() == Some(clip_id)))
+        .and_then(|clip| clip["item"].as_u64())
+        .ok_or_else(|| EngineError::Other("A07_PREFLIGHT_INCOMPLETE: native clip source identity missing".into()))?;
+
+    if session.revision != before.revision
+        || session.document_epoch != before.document_epoch
+        || session.state.active_sequence.map(|id| id.0) != before.active_sequence
+    {
+        return Err(EngineError::Other("A07_PREFLIGHT_STALE: native Session changed during inspection".into()));
+    }
+    Ok(shuvi_ai_readonly::NativeA07SplitPreview {
+        revision: before.revision,
+        document_epoch: before.document_epoch,
+        sequence_id: before.active_sequence.ok_or(EngineError::NoSequence)?,
+        clip_id,
+        source_item_id,
+        track_id,
+        track_kind,
+        tick,
+    })
+}
+
 /// Read back that a clip-specific split did not touch ANY unrelated track.
 /// The A07 host additionally needs SHA-256 native object proof and a SQLite
 /// committed receipt; a per-track equality check is not those assurances.
@@ -476,6 +513,41 @@ mod tests {
         assert_eq!(clip_id, 17);
         let expected = session.sequence_rate().snap_nearest(Tick((2.0 * TICKS_PER_SECOND as f64).round() as i64)).0;
         assert_eq!(tick, expected);
+    }
+
+
+    #[test]
+    fn shuvi_ai06_preflight_reads_actual_clip_and_does_not_mutate_session() {
+        let mut session = demo();
+        let tick = session.sequence_rate().tick_of(48).0;
+        let clip = session.active_sequence().unwrap().video_tracks[0].items.iter()
+            .find(|c| c.start.0 < tick && tick < c.end().0).unwrap();
+        let (clip_id, item_id) = (clip.id.0, clip.item.0);
+        let (revision, journal) = (session.revision, session.journal.len());
+        let view = shuvi_ai_readonly::a07_preflight_video_split(
+            &mut session, json!({"type":"video.split","clipId":clip_id,"seconds":2.0})
+        ).unwrap();
+        assert_eq!(view.clip_id, clip_id);
+        assert_eq!(view.source_item_id, item_id);
+        assert_eq!(view.track_kind, "video");
+        assert_eq!(view.sequence_id, session.state.active_sequence.unwrap().0);
+        assert_eq!(view.revision, revision);
+        assert_eq!((session.revision, session.journal.len()), (revision, journal));
+    }
+
+    #[test]
+    fn shuvi_ai06_preflight_is_fail_closed_for_unknown_or_outside_clip() {
+        let mut session = demo();
+        let before = (session.revision, session.journal.len());
+        for proposal in [
+            json!({"type":"video.split","clipId":u64::MAX,"seconds":2.0}),
+            json!({"type":"video.split","clipId":2,"seconds":0.0}),
+            json!({"type":"video.split","clipId":2,"seconds":36000.0}),
+            json!({"type":"video.split","clipId":2,"seconds":2.0,"approved":true}),
+        ] {
+            assert!(shuvi_ai_readonly::a07_preflight_video_split(&mut session, proposal).is_err());
+            assert_eq!((session.revision, session.journal.len()), before);
+        }
     }
 
     #[test]

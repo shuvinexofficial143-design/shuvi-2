@@ -118,6 +118,25 @@ pub fn command_registry(session: &mut Session) -> Result<Value> {
 }
 
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeA07SplitPreview {
+    pub revision: u64,
+    pub document_epoch: u64,
+    pub sequence_id: u64,
+    pub clip_id: u64,
+    pub source_item_id: u64,
+    pub track_id: u64,
+    pub track_kind: String,
+    pub tick: i64,
+}
+
+/// Read-only A07 proposal preflight. This is not an approval or a capability
+/// enabling edits. Output becomes stale after any change to the native Session.
+pub fn a07_preflight_video_split(session: &mut Session, proposal: Value) -> Result<NativeA07SplitPreview> {
+    crate::shuvi_ai_owner::preflight_a07_video_split(session, proposal)
+}
+
 /// A07 NativeModelRequest requires exactly {"clipIds":[],"mediaIds":[]};
 /// build the inventory from the real FilmCraft Session, never from untrusted
 /// browser/model JSON, and never include any absolute path or source metadata.
