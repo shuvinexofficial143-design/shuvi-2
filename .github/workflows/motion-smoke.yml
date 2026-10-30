@@ -1,0 +1,202 @@
+name: Shuvi 2 Motion native engine + persistence
+
+on:
+  push:
+    branches:
+      - feature/shuvi2-motion-studio
+  pull_request:
+    paths:
+      - 'crates/shuvi-motion-bridge/**'
+      - 'docs/motion/**'
+      - '.github/workflows/motion-smoke.yml'
+
+concurrency:
+  # Only newest Motion branch source should consume lengthy Windows Rust+WebView runners.
+  group: motion-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  motion-engine-windows:
+    name: Real EffectCraft comp.new on Windows
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout pinned EffectCraft submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Parse real Windows GUI and installer PowerShell gate scripts BEFORE native compilation
+        shell: pwsh
+        run: |
+          $paths = @("scripts/motion/verify-desktop-proof.ps1",
+                     "scripts/motion/test-desktop-proof-failclosed.ps1",
+                     "scripts/motion/run-windows-e2e.ps1",
+                     "scripts/motion/package-windows-release.ps1")
+          foreach ($path in $paths) {
+            $tokens = $null
+            $errorsFound = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path).Path,[ref]$tokens,[ref]$errorsFound) | Out-Null
+            if (@($errorsFound).Count -ne 0) {
+              throw "PowerShell parser rejected $path : $($errorsFound -join '; ')"
+            }
+            Write-Host "PASS: parsed real Windows gate $path"
+          }
+      - name: Install upstream-required Rust 1.95
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache pinned EffectCraft native engine build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/shuvi-motion-bridge
+          key: motion-engine-windows
+      - name: Verify source pin
+        shell: pwsh
+        run: |
+          $actual = git -C vendor/effectcraft rev-parse HEAD
+          $expected = 'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'
+          if ($actual -ne $expected) { throw "EffectCraft pin mismatch: $actual" }
+      - name: Assert patched PDF parser resolves to upstream reviewed commit
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --format-version 1 --manifest-path crates/shuvi-motion-bridge/Cargo.toml | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $syntax = @($metadata.packages | Where-Object { $_.name -eq 'hayro-syntax' })
+          if ($syntax.Count -ne 1) { throw "Expected exactly one hayro-syntax package; found $($syntax.Count)" }
+          $source = $syntax[0].source
+          $pin = '92d392cff132eaf53e13afff77f38b5c11b73aa0'
+          if (-not $source -or -not $source.Contains('storytold/craft-libs') -or -not $source.Contains($pin)) {
+            throw "Guarded upstream hayro-syntax patch missing: $source"
+          }
+          Write-Host "PASS: guarded hayro-syntax comes from reviewed upstream source"
+      - name: Test actual EffectCraft engine bridge
+        run: cargo test --manifest-path crates/shuvi-motion-bridge/Cargo.toml --all-targets
+      - name: Execute headless real composition smoke
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-smoke
+      - name: Verify actual native save and reopen across sessions
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-persistence-smoke
+      - name: Verify native scene rendering and project reopen
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-editor-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Verify real effect and mask rendering with native disk reopen
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-effects-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Verify native advanced mask feather expansion opacity and reopened PNG
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-advanced-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Verify native Undo/Redo pixels and fresh project reopen
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-history-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Prove actual animated EffectCraft 16-frame PNG image sequence and no-overwrite
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-sequence-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Upload native project and preview frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-proof
+          path: proof/motion/
+          if-no-files-found: error
+          retention-days: 14
+
+  motion-desktop-e2e-windows:
+    name: Real Windows WebView2 mouse-click-to-native-editor E2E
+    needs: motion-engine-windows
+    # Newer elevated Windows 2025 runner images + WebView2 150+ can prevent
+    # msedgedriver session creation: https://github.com/actions/runner-images/issues/14738
+    # Pin only the ACTUAL WebView2 UI E2E job to the reported working image.
+    # Native compile/packaging jobs keep independent windows-latest coverage.
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout pinned native engines
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install native Rust toolchain
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache real Tauri EffectCraft Windows desktop build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: motion-webview2-windows
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install desktop/frontend packages
+        run: npm install --no-audit --no-fund
+      - name: Preflight validate desktop WebDriver JavaScript and UI contracts
+        run: |
+          node --check tests/motion/desktop-e2e.mjs
+          npm test
+      - name: Build actual Tauri Windows binary with embedded production UI
+        run: npm run tauri -- build --ci --no-bundle
+      - name: Verify production GUI binary exists (never test dev-url-only build)
+        shell: pwsh
+        run: |
+          $binary = "src-tauri/target/release/shuvi2.exe"
+          if (!(Test-Path $binary)) { throw "Production Shuvi WebView2 exe missing: $binary" }
+          Write-Host "PASS: production frontend embedded native Tauri exe: $binary"
+      - name: Click actual Windows Motion UI and verify native PNG/project on disk
+        shell: pwsh
+        run: ./scripts/motion/run-windows-e2e.ps1 -Application src-tauri/target/release/shuvi2.exe
+      - name: Independently verify actual GUI screenshot and cold-restart artifact before release
+        shell: pwsh
+        run: ./scripts/motion/verify-desktop-proof.ps1
+      - name: Prove receipt and screenshots cannot be tampered to bypass installer safety
+        shell: pwsh
+        run: ./scripts/motion/test-desktop-proof-failclosed.ps1
+      - name: Upload real desktop screenshot and E2E receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-windows-webview2-e2e
+          path: proof/motion-desktop/
+          if-no-files-found: warn
+          retention-days: 14
+
+  motion-windows-installer:
+    name: Real NSIS Windows Installer gated by verified desktop E2E
+    needs: motion-desktop-e2e-windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact commit and both pinned native engines
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install native Rust 1.95 toolchain
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache exact Tauri Windows release build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: motion-native-nsis-release
+      - name: Install Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore webview package dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build actual unsigned Windows installer only after green WebView2 E2E
+        shell: pwsh
+        run: ./scripts/motion/package-windows-release.ps1
+      - name: Upload real Windows installer and SHA256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-windows-installer-unsigned
+          path: proof/motion-installer/
+          if-no-files-found: error
+          retention-days: 14
