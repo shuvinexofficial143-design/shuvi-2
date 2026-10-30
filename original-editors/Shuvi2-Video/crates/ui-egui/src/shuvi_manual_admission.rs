@@ -103,11 +103,15 @@ mod shuvi_manual_admission_tests {
         let ctx=egui::Context::default();
         let gate=app.shuvi_manual_admission.clone();
         let claim=gate.try_claim().unwrap();
-        let mut dummy=crate::control::ControlRequest::new(
+        let (request, _reply)=crate::control::ControlRequest::new(
             "engine.commands",json!({})
         );
-        let output=crate::control::handle(&mut app,&ctx,&dummy.0);
-        assert!(output.value.to_string().contains("SHUVI_NATIVE_OWNER_BUSY"));
+        let output=crate::control::handle(&mut app,&ctx,&request);
+        let crate::control::Outcome::Done(payload)=output else {
+            panic!("expected immediate native command-list response")
+        };
+        assert_eq!(payload["ok"],false);
+        assert!(payload["error"].as_str().unwrap().contains("SHUVI_NATIVE_OWNER_BUSY"));
         drop(claim);
         assert!(crate::menus::invoke(&mut app,&ctx,"command.list",json!({})).is_ok());
     }
