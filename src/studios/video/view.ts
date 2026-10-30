@@ -2,6 +2,7 @@ import "./view.css";
 import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import { clipDragDestination } from "./drag.mjs";
+import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
 import {requestVideoAiProposal} from "./ai";
 import {canSubmitVideoAiRequest} from "./privacy.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
@@ -575,8 +576,13 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         e<HTMLInputElement>("root").value=selected.replace(/[\\/][^\\/]+$/,"");
       }
       if(selected){
-        clearProposal();history=null;snapshot=null;clipId=null;itemId=null;
-        scrubber.invalidate();clearFrame();draw();
+        if(shouldInvalidateVideoProjectOnFilePick(which)){
+          // Only switching the actual .fcproj or its permitted root loses
+          // current native snapshot/history. Export target and new media source
+          // are settings of the SAME verified FilmCraft project.
+          clearProposal();history=null;snapshot=null;clipId=null;itemId=null;
+          scrubber.invalidate();clearFrame();draw();
+        }
         inform("Selected native path · "+selected+" · no editor operation executed yet");
       }
     }catch(err){inform("Native dialog unavailable: "+String(err),true);}
