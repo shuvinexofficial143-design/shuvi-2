@@ -26,6 +26,11 @@ jobs:
           persist-credentials: false
       - name: Install upstream-required Rust 1.95
         uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache pinned EffectCraft native engine build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/shuvi-motion-bridge
+          key: motion-engine-windows
       - name: Verify source pin
         shell: pwsh
         run: |
@@ -84,6 +89,11 @@ jobs:
           persist-credentials: false
       - name: Install native Rust toolchain
         uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache real Tauri EffectCraft Windows desktop build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: motion-webview2-windows
       - name: Install Node
         uses: actions/setup-node@v4
         with:
