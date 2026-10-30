@@ -480,6 +480,19 @@ fn handle_synthetic_input(app: &mut FilmcraftApp, p: &Value, method: &str) -> Ou
 /// Execute one control request. Synthetic input is capped by `MAX_SYNTHETIC_EVENTS` before queueing, screenshot crops stay symbolic until capture, and
 /// `gfxEdit` layer identity is resolved from the document.
 pub fn handle(app: &mut FilmcraftApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    // Synthetic control inputs are processed by the REAL original UI event
+    // loop later; they can trigger timeline mutations without menus::invoke.
+    // Refuse to enqueue them while this phase-one command lane is claimed.
+    // This does NOT claim to guard direct hardware pointer/keyboard events.
+    if matches!(req.method.as_str(),
+        "engine.execute" | "engine.commands" | "ui.menu.invoke" |
+        "ui.click" | "ui.move" | "ui.drag" | "ui.scroll" |
+        "ui.key" | "ui.type"
+    ) {
+        if let Some(reason) = app.shuvi_manual_admission.blocked_reason() {
+            return err(reason);
+        }
+    }
     let p = &req.params;
     let s = |k: &str| p.get(k).and_then(Value::as_str);
     if matches!(req.method.as_str(), "ui.click" | "ui.move" | "ui.drag" | "ui.scroll" | "ui.key" | "ui.type") && app.synthetic.len() >= MAX_SYNTHETIC_EVENTS {

@@ -148,6 +148,47 @@ mod shuvi_manual_admission_tests {
         assert!(app.session.revision>before);
     }
 
+
+    #[test]
+    fn claimed_or_poisoned_lane_never_enqueues_synthetic_control_pointer_or_keyboard() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let ctx=egui::Context::default();
+        let lane=app.shuvi_manual_admission.clone();
+        let first=lane.try_claim().unwrap();
+        let before=app.synthetic.len();
+        for (method,params) in [
+            ("ui.key",json!({"key":"a"})),
+            ("ui.type",json!({"text":"unsafe"})),
+            ("ui.click",json!({"x":200,"y":200})),
+            ("ui.drag",json!({"fromX":1,"fromY":1,"toX":5,"toY":5})),
+            ("engine.execute",json!({"command":"file.newSequence"})),
+        ] {
+            let (request,_reply)=crate::control::ControlRequest::new(method,params);
+            let result=crate::control::handle(&mut app,&ctx,&request);
+            let crate::control::Outcome::Done(value)=result else {
+                panic!("busy native owner must return immediately")
+            };
+            assert_eq!(value["ok"],false);
+            assert_eq!(value["error"],"SHUVI_NATIVE_OWNER_BUSY");
+            assert_eq!(app.synthetic.len(),before);
+        }
+        drop(first);
+        // Simulate an original native edit that panics while claiming the
+        // command lane; the poison becomes sticky even after unwinding.
+        let _=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
+            let _claim=lane.try_claim().unwrap();
+            panic!("test-only native editor panic")
+        }));
+        let (request,_reply)=crate::control::ControlRequest::new(
+            "ui.type",json!({"text":"do not queue"})
+        );
+        let crate::control::Outcome::Done(response)=crate::control::handle(&mut app,&ctx,&request) else {
+            panic!("poisoned owner must reject input")
+        };
+        assert_eq!(response["error"],"SHUVI_NATIVE_OWNER_POISONED");
+        assert_eq!(app.synthetic.len(),before);
+    }
+
     #[test]
     fn menu_and_remote_command_list_use_exact_same_manual_lane() {
         let mut app=FilmcraftApp::new(Session::default());
