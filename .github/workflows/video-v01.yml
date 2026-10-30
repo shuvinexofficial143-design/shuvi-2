@@ -75,6 +75,10 @@ jobs:
         shell: pwsh
         timeout-minutes: 3
         run: ./scripts/video/desktop-launch-smoke.ps1
+      - name: End-to-end real WebView2 UI + FilmCraft MP4 export
+        shell: pwsh
+        timeout-minutes: 12
+        run: node scripts/video/windows-desktop-e2e.mjs
       - name: Verify real nonempty NSIS installer and staged binary
         shell: pwsh
         run: |
@@ -92,4 +96,6 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/binaries/filmcraft-cli.build.json
             src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/video-desktop-e2e.json
+            src-tauri/target/video-desktop-e2e.png
           if-no-files-found: error
