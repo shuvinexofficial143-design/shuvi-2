@@ -5,6 +5,7 @@
 import {nativeFps,verifyNativeMove,nativeTrackGuard} from "./timeline.mjs";
 import {checkedAiVideoActions} from "./ai-plan.mjs";
 import {nativeClipInspector,splitPreflight,verifyNativeSplit} from "./video-inspector.mjs";
+import {trimPreflight,deletePreflight,verifyNativeTrim,verifyNativeDelete} from "./video-mutations.mjs";
 export class WorkspaceError extends Error {
   constructor(code, message) { super(message); this.name = "WorkspaceError"; this.code = code; }
 }
@@ -156,10 +157,13 @@ export function createWorkspaceController(native) {
         expectedRevision:video.snapshot.sessionRevision,
         expectedProjectSha256:video.snapshot.projectSha256,actions
       });
-      if(!validSha(receipt?.projectSha256) || !Array.isArray(receipt?.commands) ||
-        receipt.commands.some(c=>c.ok===false)) {
-        set({needsReload:true,recoveryStudio:"video",videoFrame:null,pendingApproval:null});
-        fail("INVALID_RECEIPT","FilmCraft edit result lacks complete native proof; refresh required");
+      if(!validSha(receipt?.projectSha256) ||
+        receipt.projectSha256===video.snapshot.projectSha256 ||
+        !Array.isArray(receipt?.commands) ||
+        receipt.commands.length!==actions.length ||
+        receipt.commands.some(c=>c?.ok!==true)) {
+        set({needsReload:true,recoveryStudio:"video",videoFrame:null,exportReceipt:null,pendingApproval:null});
+        fail("INVALID_RECEIPT","FilmCraft edit result lacks exact native command proof or a changed disk SHA; refresh required");
       }
       let fresh;
       try { fresh=await readVideo(video.root,video.projectPath); }
@@ -172,16 +176,38 @@ export function createWorkspaceController(native) {
       return receipt;
     },{studio:"video",mutating:true});
   }
+  function quarantineVideoReadback(message) {
+    set({needsReload:true,recoveryStudio:"video",videoFrame:null,
+      exportReceipt:null,pendingApproval:null,error:message,
+      progress:"Native timeline proof mismatched — refresh required"});
+    fail("REVISION_CONFLICT",message);
+  }
   async function splitVideoClip(clipId,seconds) {
     requireReady("video");
     const source=nativeClipInspector(state,clipId);
     const preflight=splitPreflight(source,seconds);
     if(!preflight.ok)fail("INVALID_SPLIT",preflight.reason);
     const receipt=await applyVideo([{type:"split",clipId,seconds:preflight.seconds}]);
-    if(!verifyNativeSplit(source,state.video?.clips,preflight.seconds)){
-      set({needsReload:true,recoveryStudio:"video",videoFrame:null,exportReceipt:null,pendingApproval:null});
-      fail("REVISION_CONFLICT","FilmCraft split has no matching native left/right clip readback");
-    }
+    if(!verifyNativeSplit(source,state.video?.clips,preflight.seconds))
+      quarantineVideoReadback("FilmCraft split has no matching native left/right clip readback");
+    return receipt;
+  }
+  async function trimVideoClip(clipId,edge,deltaFrames,ripple=false) {
+    requireReady("video");
+    const pre=trimPreflight(state,clipId,edge,deltaFrames,ripple);
+    if(!pre.ok)fail("INVALID_TRIM",pre.reason);
+    const receipt=await applyVideo([pre.action]);
+    if(!verifyNativeTrim(pre.before,state.video?.clips,edge))
+      quarantineVideoReadback("FilmCraft trim did not produce the required saved edge readback");
+    return receipt;
+  }
+  async function deleteVideoClip(clipId,ripple=false) {
+    requireReady("video");
+    const pre=deletePreflight(state,clipId,ripple);
+    if(!pre.ok)fail("INVALID_DELETE",pre.reason);
+    const receipt=await applyVideo([pre.action]);
+    if(!verifyNativeDelete(pre.before,state.video?.clips))
+      quarantineVideoReadback("FilmCraft delete did not remove the clip in saved native readback");
     return receipt;
   }
   async function moveVideoClip(clipId,track,seconds) {
@@ -199,10 +225,8 @@ export function createWorkspaceController(native) {
     if(clip.track===track&&Math.abs(clip.start-seconds)<=0.01/fps)
       return {unchanged:true,projectSha256:current.snapshot.projectSha256};
     const result=await applyVideo([{type:"move",clipId,track,seconds,insert:false}]);
-    if(!verifyNativeMove(state.video?.clips,clipId,track,seconds,fps)) {
-      set({needsReload:true,recoveryStudio:"video",videoFrame:null});
-      fail("REVISION_CONFLICT","Saved FilmCraft timeline did not contain the requested clip move");
-    }
+    if(!verifyNativeMove(state.video?.clips,clipId,track,seconds,fps))
+      quarantineVideoReadback("Saved FilmCraft timeline did not contain the requested clip move");
     return result;
   }
   async function importVideo(sourcePath) {
@@ -538,7 +562,7 @@ export function createWorkspaceController(native) {
       state.chat.push({role:"assistant",text:"Draft only — AI Director is not connected; no native edit was executed."});emit();},
     stop(){if(!state.busy)return false;set({stopped:true,progress:"Stop requested; waiting for native IPC to settle"});return true;},
     dismissTask(){set({pendingApproval:null});},
-    refreshVideo,verifyVideoSnapshot,applyVideo,splitVideoClip,moveVideoClip,importVideo,renderVideo,exportVideo,history,
+    refreshVideo,verifyVideoSnapshot,applyVideo,splitVideoClip,trimVideoClip,deleteVideoClip,moveVideoClip,importVideo,renderVideo,exportVideo,history,
     motionStatus,verifyMotionSnapshot,createComposition,inspectMotionLayer,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
     stageAiVideoTask,approveTask
   };

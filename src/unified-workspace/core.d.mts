@@ -32,7 +32,7 @@ export function createWorkspaceController(native:WorkspaceNative):{
  selectStudio(studio:"video"|"motion"):void;addDraft(text:string):void;
  stop():boolean;dismissTask():void;
  refreshVideo(root:string,path:string):Promise<any>;verifyVideoSnapshot():Promise<any>;
- applyVideo(actions:VideoAction[]):Promise<any>;splitVideoClip(clipId:number,seconds:number):Promise<any>;moveVideoClip(clipId:number,track:string,seconds:number):Promise<any>;importVideo(source:string):Promise<any>;
+ applyVideo(actions:VideoAction[]):Promise<any>;splitVideoClip(clipId:number,seconds:number):Promise<any>;trimVideoClip(clipId:number,edge:"in"|"out",deltaFrames:number,ripple?:boolean):Promise<any>;deleteVideoClip(clipId:number,ripple?:boolean):Promise<any>;moveVideoClip(clipId:number,track:string,seconds:number):Promise<any>;importVideo(source:string):Promise<any>;
  renderVideo(seconds:number,scale?:number):Promise<any>;
  exportVideo(path:string,scale?:number,includeAudio?:boolean):Promise<any>;
  history(direction:"undo"|"redo"):Promise<any>;

@@ -81,3 +81,8 @@
 .su [data-tab].recovery::after{content:" · refresh";font-size:11px}
 .su button:disabled{cursor:not-allowed;opacity:.53}
 .su .su-inspector button:not(:disabled):focus-visible{outline:2px solid #add6ff;outline-offset:2px}
+
+/* U08: FilmCraft native signed-frame trim and ripple toggle. */
+.su label.su-native-check{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:9px;min-height:39px;padding:7px;border:1px solid var(--line);border-radius:7px}
+.su label.su-native-check input{width:17px;height:17px;margin:0;flex:0 0 auto;accent-color:#8ab5ff}
+.su [data-field="trimEdge"]{min-height:38px}

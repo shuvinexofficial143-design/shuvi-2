@@ -57,7 +57,10 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<span data-ui="noFrame">No verified native frame yet</span></div>',
     '<section data-panel="video">',
     '<div class="su-pair"><label>Playhead seconds<input type="number" step=".04" min="0" data-field="videoTime" value="0"></label>',
-    '<label>Trim frames<input type="number" data-field="trimFrames" value="-3"></label></div>',
+    '<label>Trim frames (signed)<input type="number" step="1" data-field="trimFrames" value="-3"></label></div>',
+    '<div class="su-pair"><label>Native trim edge<select data-field="trimEdge">',
+    '<option value="out">Out</option><option value="in">In</option></select></label>',
+    '<label class="su-native-check"><input type="checkbox" data-field="videoRipple">Ripple on Trim/Delete</label></div>',
     '<div class="su-buttons"><button data-act="video-preview">Render frame</button>',
     '<button data-act="video-split">Split</button><button data-act="video-trim">Trim Out</button>',
     '<button data-act="video-delete">Delete</button><button data-act="video-undo">Undo</button>',
@@ -437,8 +440,15 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         if(!valid.ok)throw Error(valid.reason);
         return ctrl.splitVideoClip(clip(),valid.seconds);
       }
-      case "video-trim":return ctrl.applyVideo([{type:"trim",clipId:clip(),edge:"out",deltaFrames:n("trimFrames"),ripple:false}]);
-      case "video-delete":return ctrl.applyVideo([{type:"delete",clipId:clip(),ripple:false}]);
+      case "video-trim":{
+        const raw=s("trimFrames"),delta=Number(raw),edge=s("trimEdge");
+        if(!raw||!Number.isSafeInteger(delta)||delta===0||Math.abs(delta)>144000)
+          throw Error("Trim requires a nonzero integer FilmCraft frame delta");
+        if(edge!=="in"&&edge!=="out")throw Error("Select native Trim In or Out");
+        return ctrl.trimVideoClip(clip(),edge,delta,node<HTMLInputElement>('[data-field="videoRipple"]').checked);
+      }
+      case "video-delete":return ctrl.deleteVideoClip(clip(),
+        node<HTMLInputElement>('[data-field="videoRipple"]').checked);
       case "video-undo":return ctrl.history("undo");
       case "video-redo":return ctrl.history("redo");
       case "video-preview":return ctrl.renderVideo(n("videoTime"));
@@ -657,7 +667,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const id=selectedClip;
       safe(()=>command==="split"?
         ctrl.splitVideoClip(id,n("videoTime")):
-        ctrl.applyVideo([{type:"delete",clipId:id,ripple:false}]));
+        ctrl.deleteVideoClip(id,node<HTMLInputElement>('[data-field="videoRipple"]').checked));
       return;
     }
     const fps=nativeFps(state.video?.snapshot.sequence);

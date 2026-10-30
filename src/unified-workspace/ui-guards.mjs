@@ -45,9 +45,11 @@ export function workspaceActionAvailable(state,action,{clipId=null,layerId=null,
   }
   if(studio==="motion"){
     const m=state.motion;
-    if(!m?.ready)return false;
+    // New composition may boot the native EffectCraft worker; an initial
+    // status probe is useful but not a prerequisite to opening real editing.
     if(action==="motion-create")return true;
-    if(action==="motion-save")return true;
+    if(!m?.ready)return false;
+    if(action==="motion-save")return !!m.composition;
     if(!m.composition)return false;
     if(["motion-text","motion-shape","motion-render","motion-export",
       "motion-verify"].includes(action))return true;
