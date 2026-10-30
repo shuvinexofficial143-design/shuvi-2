@@ -158,7 +158,7 @@ test("fresh manual edit after preview invalidates approval before any action",as
   assert.equal(r.calls.length,0);
 });
 test("manual change between two native edits blocks second action",async()=>{
-  const r=rig({journalHook:async e,ctx=>{
+  const r=rig({journalHook:async (e,ctx)=>{
     if(e.event==="step_verified") ctx.setCurrent({...ctx.current,version:99});
   }});
   await prepare(r,[shape,textAction]);
