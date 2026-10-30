@@ -20,7 +20,7 @@ if (!(Test-Path $tauri)) {
     if ($LASTEXITCODE -ne 0) { throw "tauri-driver installation failed" }
 }
 if (!(Test-Path $edgetool)) {
-    cargo install --git https://github.com/chippers/msedgedriver-tool --locked
+    cargo install --git https://github.com/chippers/msedgedriver-tool
     if ($LASTEXITCODE -ne 0) { throw "msedgedriver-tool installation failed" }
 }
 $driverDir = Join-Path $project "proof/motion-desktop/driver"
