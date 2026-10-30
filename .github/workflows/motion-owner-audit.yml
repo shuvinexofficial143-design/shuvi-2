@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion Native Owner Route Audit (M-AI15)
+name: Shuvi 2 Motion Native Owner and State Audit (M-AI16)
 on:
   push:
     branches:
@@ -6,6 +6,7 @@ on:
     paths:
       - original-editors/Shuvi2-Motion/crates/ui-egui/src/**
       - .github/scripts/check_motion_owner_routes.py
+      - .github/scripts/check_motion_state_mutations.py
       - .github/workflows/motion-owner-audit.yml
   workflow_dispatch:
 
@@ -40,10 +41,26 @@ jobs:
           print("Verified read-only queries:",len(data["verifiedReadOnlyQueryExceptions"]))
           print("Test-only direct Session fixtures:",len(data["unresolvedTestOnlyCalls"]))
           PY
+      - name: Check direct original native document and state mutations
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check_motion_state_mutations.py --out motion-state-mutation-audit.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path("motion-state-mutation-audit.json").read_text())
+          assert not a["unguardedAppProjectReplacement"]
+          assert not a["fullNativeOwnerLockVerified"]
+          assert not a["productionAiEditingEnabled"]
+          assert sum(a["reviewedNativeStateGateAnchors"].values()) >= 12
+          print("Additional state mutation review candidates:",len(a["trackedDirectSetterOrStateCandidates"]))
+          PY
       - name: Publish source-linked audit of guarded and unresolved native mutation routes
         uses: actions/upload-artifact@v4
         with:
-          name: Shuvi2-Motion-MAI15-OwnerGate-SourceAudit
-          path: motion-owner-route-audit.json
+          name: Shuvi2-Motion-MAI16-OwnerAndState-Audit
+          path: |
+            motion-owner-route-audit.json
+            motion-state-mutation-audit.json
           retention-days: 21
           if-no-files-found: error
