@@ -4,6 +4,7 @@ import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import { clipDragDestination } from "./drag.mjs";
 import { timelineViewport,clipViewportBounds } from "./viewport.mjs";
 import {realClipDetail,realSequenceMarkers,revealTimeOffset} from "./inspect.mjs";
+import {rulerTicks,rulerSeekTime,percentOnRuler} from "./ruler.mjs";
 import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
 import {shouldRefreshVideoProjectAfterActionError} from "./error-policy.mjs";
 import {videoTrackStates,videoActionPreflight} from "./track-state.mjs";
@@ -102,6 +103,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       <label>Timeline Pan<input data-v="timelinePan" type="range" min="0" max="0" value="0" step="any" disabled></label>
       <span data-v="viewRange">00:00:00.000 – 00:00:00.000</span>
     </div>
+    <button data-v="timeRuler" type="button" class="v-time-ruler" aria-label="FilmCraft timeline ruler. Click to seek and render a native frame." disabled></button>
     <div data-v="tracks" class="v-tracks">Open a project to load FilmCraft sequence tracks.</div>
     <div data-v="selected" class="v-muted">Click a clip to select it.</div>
     <section class="v-native-inspector">
@@ -245,6 +247,36 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     e<HTMLElement>("viewRange").textContent=formatTimecode(viewport.start)+
       " – "+formatTimecode(viewport.end)+" · "+zoom+"× zoom";
     const nativeTracks=videoTrackStates(snapshot?.sequence);
+    const ruler=e<HTMLButtonElement>("timeRuler");
+    ruler.replaceChildren();
+    const fpsForRuler=sequenceFps(seq);
+    ruler.disabled=busy||!active||!snapshot||!fpsForRuler||sequenceDuration(seq)<=0;
+    for(const tick of rulerTicks(viewport)){
+      const span=document.createElement("span");
+      span.className="v-time-tick";
+      span.style.left=String(tick.percent)+"%";
+      span.title=formatTimecode(tick.seconds);
+      span.textContent=formatTimecode(tick.seconds);
+      ruler.append(span);
+    }
+    for(const marker of realSequenceMarkers(seq)){
+      const at=percentOnRuler(marker.start,viewport);
+      if(at===null)continue;
+      const mark=document.createElement("span");
+      mark.className="v-marker-tick";
+      mark.style.left=String(at)+"%";
+      mark.title="Real FilmCraft marker #"+marker.id+" · "+(marker.name||marker.kind)+
+        " · "+formatTimecode(marker.start);
+      ruler.append(mark);
+    }
+    const playhead=percentOnRuler(Number(value("seconds")),viewport);
+    if(playhead!==null){
+      const indicator=document.createElement("span");
+      indicator.className="v-ruler-playhead";
+      indicator.style.left=String(playhead)+"%";
+      indicator.title="Playhead: "+formatTimecode(Number(value("seconds")));
+      ruler.append(indicator);
+    }
     e<HTMLElement>("duration").textContent=formatTimecode(sequenceDuration(seq));
     const duration=sequenceDuration(seq);
     const fps=sequenceFps(seq);
@@ -748,6 +780,25 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       stopSampledPlayback(true);
       try{renderCurrentFrame(true);}catch(error){inform("Native seek not verified: "+String(error),true);}
     });
+  });
+  e<HTMLButtonElement>("timeRuler").addEventListener("click",event=>{
+    if(!active||busy||!snapshot)return;
+    const seqDuration=Math.max(1,sequenceDuration(snapshot.sequence),
+      ...clips.map(c=>c.start+c.duration));
+    const pan=e<HTMLInputElement>("timelinePan");
+    const zoom=Number(e<HTMLSelectElement>("timelineZoom").value);
+    const viewport=timelineViewport(seqDuration,zoom,Number(pan.value));
+    const fps=sequenceFps(snapshot.sequence);
+    const button=e<HTMLButtonElement>("timeRuler");
+    const bounds=button.getBoundingClientRect();
+    const time=rulerSeekTime(event.clientX,{left:bounds.left,width:bounds.width},viewport,fps??NaN);
+    if(time===null){inform("FilmCraft ruler seek unavailable: invalid FPS or position",true);return;}
+    stopSampledPlayback(true);
+    e<HTMLInputElement>("seconds").value=String(time);
+    e<HTMLInputElement>("scrub").value=String(time);
+    e<HTMLElement>("scrubLabel").textContent=formatTimecode(time);
+    draw();
+    try{renderCurrentFrame(true);}catch(error){inform("Ruler frame not verified: "+String(error),true);}
   });
   e<HTMLSelectElement>("timelineZoom").addEventListener("change",()=>draw());
   e<HTMLInputElement>("timelinePan").addEventListener("input",()=>draw());
