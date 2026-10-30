@@ -88,6 +88,19 @@ impl MotionOwnerGate {
         self.manual(session, cmd, params, true)
     }
 
+    /// Admit a native manual transaction that is not expressible as a single
+    /// engine command (e.g. restoring the exact undo/project snapshot on
+    /// cancelling an original Layer Style dialog). The caller owns all native
+    /// state references; no AI/provider code can request this closure.
+    pub(crate) fn manual_transaction<T>(
+        &self, transaction: impl FnOnce() -> Result<T, String>
+    ) -> Result<T, String> {
+        let _lease = self.enter(Owner::Manual)?;
+        let result = transaction();
+        self.completed.set(self.completed.get().saturating_add(1));
+        result
+    }
+
     /// This is deliberately a read-only status snapshot. An AI provider cannot
     /// turn any of these values into an active mutation permit.
     pub(crate) fn status(&self) -> MotionOwnerStatus {
@@ -248,6 +261,29 @@ mod tests {
         assert!(!app.session.project.items.values().any(|i|i.name=="Must Be Rejected"));
         assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,1);
         assert!(!app.motion_owner_gate.status().busy);
+    }
+
+    #[test]
+    fn direct_manual_project_restoration_is_refused_during_test_guarded_owner() {
+        use std::sync::Arc;
+        let gate=MotionOwnerGate::default();
+        let mut session=Session::new();
+        let original=Arc::clone(&session.project);
+        {
+            let _owned=gate.guarded_for_test().unwrap();
+            assert!(gate.manual_transaction(|| {
+                session.project=Arc::new(Default::default());
+                Ok(())
+            }).is_err());
+            assert!(Arc::ptr_eq(&original,&session.project));
+        }
+        let r=gate.manual_transaction(|| {
+            session.project=Arc::new(Default::default());
+            Ok(())
+        });
+        assert!(r.is_ok());
+        assert!(!Arc::ptr_eq(&original,&session.project));
+        assert!(!gate.status().busy);
     }
 
     #[test]
