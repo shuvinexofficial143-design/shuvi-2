@@ -20,6 +20,7 @@ const originalTimeline = timeline.innerHTML;
 const motionTab = document.querySelector<HTMLButtonElement>('button[data-studio="motion"]')!;
 const videoTab = document.querySelector<HTMLButtonElement>('button[data-studio="video"]')!;
 let mounted = false;
+let uiGeneration = 0;
 let activeComp: Comp | null = null;
 let activeLayer: Layer | null = null;
 let activeEffect: Effect | null = null;
@@ -45,12 +46,15 @@ function info(message:string,failed=false):void {
 async function execute(label:string,work:()=>Promise<void>):Promise<void> {
   if (busy) return;
   busy = true;
+  const generation=uiGeneration;
   info(label+"…");
   try {
     await work();
-    info(label+" · native verification complete");
+    if(mounted&&generation===uiGeneration)
+      info(label+" · native verification complete");
   } catch (error) {
-    info("FAIL: "+String(error),true);
+    if(mounted&&generation===uiGeneration)
+      info("FAIL: "+String(error),true);
   } finally { busy = false; }
 }
 function ensureComp():Comp {
@@ -70,7 +74,9 @@ function updateSlider():void {
 }
 async function listLayers():Promise<void> {
   const comp = ensureComp();
+  const generation=uiGeneration;
   const layers = await request<Layer[]>({action:"listLayers",compId:comp.id});
+  if(!mounted||generation!==uiGeneration||activeComp?.id!==comp.id)return;
   activeLayer=layers.find(item=>item.id===activeLayer?.id)??null;
   const list = node<HTMLElement>("#motion-layer-list");
   list.replaceChildren();
@@ -94,9 +100,12 @@ async function listLayers():Promise<void> {
 }
 async function renderFrame():Promise<void> {
   const comp = ensureComp();
+  const generation=uiGeneration;
+  const frameTime=currentTime;
   const frame = await request<{
     width:number;height:number;pngBase64:string;source:string;visiblePixels:number;revision:number
-  }>({action:"render",compId:comp.id,time:currentTime,maxSide:640,transparent:true});
+  }>({action:"render",compId:comp.id,time:frameTime,maxSide:640,transparent:true});
+  if(!mounted||generation!==uiGeneration||activeComp?.id!==comp.id||currentTime!==frameTime)return;
   if (frame.source !== "native-effectcraft" || !frame.pngBase64) throw new Error("Unverified frame source");
   const image = node<HTMLImageElement>("#motion-native-frame");
   image.src = "data:image/png;base64,"+frame.pngBase64;
@@ -115,8 +124,11 @@ async function refreshEffectMaskControls():Promise<void>{
     activeEffect=null;activeMask=null;return;
   }
   const query={compId:activeComp.id,layerId:activeLayer.id};
+  const generation=uiGeneration;
   const effects=await request<Effect[]>({action:"listEffects",...query});
   const masks=await request<Mask[]>({action:"listMasks",...query});
+  if(!mounted||generation!==uiGeneration||activeComp?.id!==query.compId
+    ||activeLayer?.id!==query.layerId)return;
   activeEffect=effects.find(f=>f.uid===activeEffect?.uid)??null;
   activeMask=masks.find(m=>m.uid===activeMask?.uid)??null;
   if(!effects.length)effectsEl.textContent="No effects";
@@ -149,6 +161,7 @@ function selectedEffectKind(effect:Effect):string {
 async function refreshSelectedNativeProperties():Promise<void>{
   if(!activeComp||!activeLayer)return;
   const compId=activeComp.id,layerId=activeLayer.id;
+  const generation=uiGeneration;
   if(activeEffect){
     const kind=selectedEffectKind(activeEffect);
     const choice=node<HTMLSelectElement>("#motion-fx-param");
@@ -157,6 +170,8 @@ async function refreshSelectedNativeProperties():Promise<void>{
     if(!valid.includes(choice.value))choice.value=valid[0];
     const param=await request<NativeEffectParameter>({action:"inspectEffectParameter",
       compId,layerId,uid:activeEffect.uid,effect:kind,parameter:choice.value});
+    if(!mounted||generation!==uiGeneration||activeComp?.id!==compId
+      ||activeLayer?.id!==layerId||activeEffect?.uid!==param.uid)return;
     if(param.source!=="native-effectcraft")throw new Error("Effect parameter was not read from native engine");
     const input=node<HTMLInputElement>("#motion-fx-value");
     input.value=String(param.value);
@@ -169,6 +184,8 @@ async function refreshSelectedNativeProperties():Promise<void>{
   if(activeMask){
     const state=await request<NativeMaskSettings>({action:"getMaskSettings",
       compId,layerId,uid:activeMask.uid});
+    if(!mounted||generation!==uiGeneration||activeComp?.id!==compId
+      ||activeLayer?.id!==layerId||activeMask?.uid!==state.uid)return;
     node<HTMLInputElement>("#motion-feather").value=String(state.feather[0]);
     node<HTMLInputElement>("#motion-expansion").value=String(state.expansion);
     node<HTMLInputElement>("#motion-mask-opacity").value=String(state.opacity);
@@ -187,6 +204,7 @@ function bindClick(selector:string,label:string,action:()=>Promise<void>):void {
   node<HTMLButtonElement>(selector).addEventListener("click",()=>void execute(label,action));
 }
 function paintUi():void {
+  uiGeneration++;
   preview.innerHTML = `
   <section class="motion-pane" aria-label="EffectCraft motion editor">
     <div class="motion-toolbar">
@@ -465,6 +483,7 @@ async function mount():Promise<void> {
 }
 function unmount():void {
   if(!mounted)return;
+  uiGeneration++;
   mounted=false;preview.innerHTML=originalPreview;timeline.innerHTML=originalTimeline;
   health.textContent="Source pinned · Engine not built";
 }
