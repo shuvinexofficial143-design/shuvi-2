@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion Native AI Integration (M-AI07)
+name: Shuvi 2 Motion Native AI Integration (M-AI11)
 on:
   push:
     branches:
@@ -89,23 +89,18 @@ jobs:
       - name: Build native Windows EffectCraft from OWN branch source
         shell: pwsh
         run: cargo build --release --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft
-      - name: Package real compiled binary with attribution
+      - name: Package real Windows PE with original attribution and honest AI flags
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force own-motion | Out-Null
-          $src = "original-editors/Shuvi2-Motion/target/release/effectcraft.exe"
-          if (!(Test-Path $src)) { throw "Native EXE missing" }
-          Copy-Item $src own-motion/Shuvi2-Motion.exe
-          foreach ($f in @("LICENSE-MIT","LICENSE-APACHE","NOTICE","ATTRIBUTION.md","SHUVI_SOURCE_ORIGIN.txt")) {
-            Copy-Item "original-editors/Shuvi2-Motion/$f" own-motion
-          }
-          Get-FileHash own-motion/Shuvi2-Motion.exe -Algorithm SHA256 | Format-List
-          Compress-Archive -Path own-motion/* -DestinationPath Shuvi2-Motion-MAI04-Win64.zip -Force
-          if ((Get-Item Shuvi2-Motion-MAI04-Win64.zip).Length -lt 5000000) { throw "Invalid ZIP" }
+          ./original-editors/Shuvi2-Motion/tools/shuvi-motion-package.ps1 -Mode Package
+      - name: Independently reopen release ZIP and verify PE, SHA256 and source
+        shell: pwsh
+        run: |
+          ./original-editors/Shuvi2-Motion/tools/shuvi-motion-package.ps1 -Mode Verify
       - name: Upload OWN Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Shuvi2-Motion-MAI04-BridgeTest-Windows-x64
-          path: Shuvi2-Motion-MAI04-Win64.zip
+          name: Shuvi2-Motion-MAI11-VerifiedOriginal-Windows-x64
+          path: Shuvi2-Motion-MAI11-Win64.zip
           retention-days: 14
           if-no-files-found: error
