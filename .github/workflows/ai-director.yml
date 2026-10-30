@@ -24,9 +24,18 @@ jobs:
         with:
           node-version: '22'
       - name: Test bounded AI action plans and consent on exact branch HEAD
-        run: node --test tests/ai-director-*.test.mjs
+        run: node --test tests/ai-director-core.test.mjs tests/ai-director-a02.test.mjs
       - name: Verify existing app regressions
         run: |
           npm install --no-audit --no-fund
           npm test
           npm run build
+
+  native-model-provider-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile real HTTPS provider and test no-network request safeguards
+        run: cargo test --manifest-path src-tauri/src/ai_director/Cargo.toml
