@@ -194,6 +194,14 @@ export class AiDirector {
       await this.#journal.append({event:"complete",taskId,steps:task.receipts.length});
       return view(task);
     } catch (error) {
+      // Native Stop may win the SQLite race while an owner-consent window is
+      // still open. That window can then reject/close instead of returning a
+      // normal proof; never override a committed pre-edit Stop with 'blocked'.
+      if (this.#nativeStop && task.cancel && !task.intentLogged) {
+        task.status="cancelled";
+        task.error=null;
+        return view(task);
+      }
       if (!["uncertain","blocked","complete"].includes(task.status)) {
         // After a logged native intent, even audit/readback failures are uncertain.
         task.status = task.intentLogged ? "uncertain" : "blocked";
