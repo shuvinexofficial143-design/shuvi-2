@@ -14,9 +14,16 @@ let session;
 let lastStep="starting";
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 class FatalNativeUiError extends Error {}
+// Creating a real Windows WebView2 process can take longer than one normal
+// element click on GitHub-hosted virtualized Windows. Never abort a legitimate
+// desktop launch after the former generic 25-second request timeout.
+const SESSION_STARTUP_MS=180000;
+const COMMAND_TIMEOUT_MS=45000;
 async function wd(method,route,data) {
+  const startup=method==="POST"&&route==="/session";
+  const timeout=startup?SESSION_STARTUP_MS:COMMAND_TIMEOUT_MS;
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),25000);
+  const timer=setTimeout(()=>controller.abort(),timeout);
   try {
     const response=await fetch(endpoint+route,{method,headers:{"content-type":"application/json"},
       ...(data===undefined?{}:{body:JSON.stringify(data)}),signal:controller.signal});
@@ -24,6 +31,12 @@ async function wd(method,route,data) {
     if(!response.ok||payload.value?.error)
       throw new Error(method+" "+route+" "+(payload.value?.message??response.status));
     return payload.value;
+  }catch(error){
+    if(controller.signal.aborted)
+      throw new Error("Real Windows WebDriver "+method+" "+route+
+        " timed out after "+timeout+" ms; browser startup or driver transport did not complete",
+        {cause:error});
+    throw error;
   }finally{clearTimeout(timer)}
 }
 async function waitFor(label,fn,timeout=40000){
