@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion Native AI Integration (M-AI04)
+name: Shuvi 2 Motion Native AI Integration (M-AI07)
 on:
   push:
     branches:
@@ -10,6 +10,11 @@ on:
 
 permissions:
   contents: read
+
+# Old commits launch overlapping cold Windows builds. Only latest branch HEAD matters.
+concurrency:
+  group: motion-ai-native-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   motion-native:
@@ -28,7 +33,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: original-editors/Shuvi2-Motion
-          key: native-motion-ai-v1
+          key: native-motion-ai-v2
       - name: Check real native sources, notices and module wiring
         shell: pwsh
         run: |
@@ -84,11 +89,11 @@ jobs:
           }
           Get-FileHash own-motion/Shuvi2-Motion.exe -Algorithm SHA256 | Format-List
           Compress-Archive -Path own-motion/* -DestinationPath Shuvi2-Motion-MAI04-Win64.zip -Force
-          if ((Get-Item Shuvi2-Motion-MAI01-Win64.zip).Length -lt 5000000) { throw "Invalid ZIP" }
+          if ((Get-Item Shuvi2-Motion-MAI04-Win64.zip).Length -lt 5000000) { throw "Invalid ZIP" }
       - name: Upload OWN Windows build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Shuvi2-Motion-MAI04-BridgeTest-Windows-x64
-          path: Shuvi2-Motion-MAI01-Win64.zip
+          path: Shuvi2-Motion-MAI04-Win64.zip
           retention-days: 14
           if-no-files-found: error
