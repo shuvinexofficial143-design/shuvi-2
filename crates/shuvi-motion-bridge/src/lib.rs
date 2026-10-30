@@ -18,6 +18,8 @@ mod export;
 pub use export::PngExportReceipt;
 mod advanced;
 pub use advanced::{MaskProperty,MaskSettings,EffectParameterState};
+mod history;
+pub use history::{HistorySnapshot,HistoryReceipt};
 
 /// Approved basic composition parameters, rather than arbitrary AI-authored engine JSON.
 #[derive(Debug, Clone)]
