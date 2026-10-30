@@ -18,7 +18,7 @@ export type WorkspaceNative = {
 };
 export type WorkspaceState = {
  studio:"video"|"motion";busy:boolean;progress:string;error:string|null;
- stopped:boolean;needsReload:boolean;video:any;videoFrame:any;exportReceipt:any;
+ stopped:boolean;needsReload:boolean;recoveryStudio:"video"|"motion"|null;video:any;videoFrame:any;exportReceipt:any;
  motion:{ready:boolean;revision:number|null;composition:any;layers:any[];frame:any;dirty:boolean;inspector:null|{layer:any;effects:any[];masks:any[];revision:number}};
  pendingApproval:any;
  chat:{role:"assistant"|"user";text:string}[];
@@ -29,7 +29,7 @@ export function createWorkspaceController(native:WorkspaceNative):{
  selectStudio(studio:"video"|"motion"):void;addDraft(text:string):void;
  stop():boolean;dismissTask():void;
  refreshVideo(root:string,path:string):Promise<any>;
- applyVideo(actions:VideoAction[]):Promise<any>;importVideo(source:string):Promise<any>;
+ applyVideo(actions:VideoAction[]):Promise<any>;moveVideoClip(clipId:number,track:string,seconds:number):Promise<any>;importVideo(source:string):Promise<any>;
  renderVideo(seconds:number,scale?:number):Promise<any>;
  exportVideo(path:string,scale?:number,includeAudio?:boolean):Promise<any>;
  history(direction:"undo"|"redo"):Promise<any>;

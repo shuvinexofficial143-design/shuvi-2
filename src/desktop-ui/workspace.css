@@ -33,3 +33,15 @@
 .su .su-inspector button{margin-top:6px}
 .su [data-ui="health"]{overflow-wrap:anywhere}
 .su .su-track button.selected{outline:2px solid #9dbbf3}
+
+/* U03 native FilmCraft track lanes; layout is computed from saved sequence ticks. */
+.su .su-timeline{border:1px solid var(--line);border-radius:9px;background:#111b28;padding:10px;overflow:auto;min-height:112px}
+.su .su-timeline-row{display:grid;grid-template-columns:40px minmax(320px,1fr);min-width:390px;gap:9px;align-items:center;border-bottom:1px solid var(--line);padding:7px 0}
+.su .su-timeline-row:last-child{border-bottom:0}
+.su .su-track-name{color:var(--muted);font-weight:700;letter-spacing:.04em}
+.su .su-lane{height:36px;position:relative;border-radius:5px;background:repeating-linear-gradient(90deg,#142237 0 1px,#19283b 1px 10%);overflow:hidden}
+.su .su-lane button{position:absolute;top:4px;height:29px;max-width:calc(100% - 2px);padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;touch-action:pan-y;cursor:grab}
+.su .su-lane button:active{cursor:grabbing}.su .su-lane button[data-drag-disabled="true"]{cursor:default}
+.su .su-native-meta,.su .su-help{display:block;color:var(--muted);font-size:12px;padding:6px 0}
+.su .su-inspector .su-buttons{margin-top:8px}
+.su .su-inspector select{background:#101725}

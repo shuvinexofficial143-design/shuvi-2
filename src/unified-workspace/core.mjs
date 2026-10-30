@@ -1,7 +1,8 @@
 /**
- * Shuvi 2 U01 — shared manual/AI controller; a native receipt is the only source
- * of completed edits. No fake model, preview, export or AI responses.
+ * Shuvi 2 unified controller: receipts and subsequent native readback are the
+ * only source of completed edits. No fabricated preview, export or AI status.
  */
+import {nativeFps,verifyNativeMove} from "./timeline.mjs";
 export class WorkspaceError extends Error {
   constructor(code, message) { super(message); this.name = "WorkspaceError"; this.code = code; }
 }
@@ -132,6 +133,27 @@ export function createWorkspaceController(native) {
       set({video:fresh,videoFrame:null,pendingApproval:null});
       return receipt;
     });
+  }
+  async function moveVideoClip(clipId,track,seconds) {
+    requireReady("video");
+    const current=requireVideo();
+    const clip=current.clips.find(c=>c.clipId===clipId);
+    if(!clip)fail("CLIP_NOT_FOUND","Clip is no longer in the native timeline");
+    if(typeof track!=="string" || !/^[VA](?:[1-9]|1[0-6])$/.test(track) ||
+        track[0]!==clip.track[0])
+      fail("INVALID_TRACK","Destination must be a valid native track of the same media kind");
+    if(!Number.isFinite(seconds)||seconds<0||seconds>86400)
+      fail("INVALID_TIME","Invalid FilmCraft timeline destination");
+    const fps=nativeFps(current.snapshot.sequence);
+    if(fps===null)fail("FPS_UNAVAILABLE","Native sequence frame rate must be read before moving a clip");
+    if(clip.track===track&&Math.abs(clip.start-seconds)<=0.01/fps)
+      return {unchanged:true,projectSha256:current.snapshot.projectSha256};
+    const result=await applyVideo([{type:"move",clipId,track,seconds,insert:false}]);
+    if(!verifyNativeMove(state.video?.clips,clipId,track,seconds,fps)) {
+      set({needsReload:true,recoveryStudio:"video",videoFrame:null});
+      fail("REVISION_CONFLICT","Saved FilmCraft timeline did not contain the requested clip move");
+    }
+    return result;
   }
   async function importVideo(sourcePath) {
     requireReady("video"); const v=requireVideo();
@@ -291,9 +313,23 @@ export function createWorkspaceController(native) {
       }
       const current=m.inspector;
       const updatedLayer=current&&layers.find(layer=>layer.id===current.layer.id);
+      let inspector=updatedLayer?{...current,layer:updatedLayer,revision:after.projectRevision}:null;
       const changesInspectorData=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
-      set({motion:{...m,revision:after.projectRevision,layers,frame:null,dirty:!!after.dirty,
-        inspector:updatedLayer&&!changesInspectorData?{...current,layer:updatedLayer,revision:after.projectRevision}:null}});
+      if(inspector&&changesInspectorData) {
+        try{
+          const effects=await native.motion({action:"listEffects",compId:m.composition.id,layerId:updatedLayer.id});
+          const masks=await native.motion({action:"listMasks",compId:m.composition.id,layerId:updatedLayer.id});
+          const stable=await native.motion({action:"status"});
+          if(!Array.isArray(effects)||!Array.isArray(masks)||
+            stable?.projectRevision!==after.projectRevision)
+            fail("REVISION_CONFLICT","Motion effect/mask readback drifted after native write");
+          inspector={...inspector,effects,masks};
+        }catch(error){
+          set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
+          throw error;
+        }
+      }
+      set({motion:{...m,revision:after.projectRevision,layers,frame:null,dirty:!!after.dirty,inspector}});
       return receipt;
     },{studio:"motion"});
   }
@@ -375,7 +411,7 @@ export function createWorkspaceController(native) {
       state.chat.push({role:"assistant",text:"Draft only — AI Director is not connected; no native edit was executed."});emit();},
     stop(){if(!state.busy)return false;set({stopped:true,progress:"Stop requested; waiting for native IPC to settle"});return true;},
     dismissTask(){set({pendingApproval:null});},
-    refreshVideo,applyVideo,importVideo,renderVideo,exportVideo,history,
+    refreshVideo,applyVideo,moveVideoClip,importVideo,renderVideo,exportVideo,history,
     motionStatus,createComposition,inspectMotionLayer,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
     stageAiVideoTask,approveTask
   };
