@@ -92,15 +92,22 @@ async function test(){
   const root=await mkdtemp(path.join(tmpdir(),"shuvi-motion-e2e-"));
   // Verify native Tauri actually launches a WebView, not a Vite-only browser.
   let created;
+  const sessionStart=Date.now();
   try{
     created=await wd("POST","/session",{
       capabilities:{alwaysMatch:{"browserName":"wry","tauri:options":{application:path.resolve(application)}}}
     });
   }catch(error){
-    await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify({
+    const details={
       ok:false,failedStep:"start-real-webview2-session",
-      driver:"tauri-driver",application:path.resolve(application),error:String(error)
-    },null,2));
+      driver:"tauri-driver",application:path.resolve(application),
+      sessionStartupElapsedMs:Date.now()-sessionStart,
+      sessionTimeoutMs:SESSION_STARTUP_MS,
+      sourceCommit:process.env.GITHUB_SHA??null,
+      error:String(error),
+      errorStack:error instanceof Error?error.stack??null:null
+    };
+    await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify(details,null,2));
     throw error;
   }
   session=created.sessionId;
@@ -110,7 +117,8 @@ async function test(){
     commitSha:process.env.GITHUB_SHA??null,
     nativeEffectCraftPin:process.env.SHUVI_EFFECTCRAFT_PIN??null,
     runnerOS:process.env.RUNNER_OS??process.platform,
-    projectDir:root,steps:[],nativeScreenshot:null};
+    projectDir:root,steps:[],nativeScreenshot:null,
+    sessionStartupElapsedMs:Date.now()-sessionStart};
   async function step(name,fn){
     lastStep=name;
     process.stdout.write("REAL-WEBVIEW STEP START: "+name+"\n");
