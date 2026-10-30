@@ -3,6 +3,7 @@
 //! No arbitrary model-selected endpoints, shell commands or editor IPC.
 pub mod guard;
 pub mod ipc;
+pub mod plan;
 pub mod windows_vault;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
