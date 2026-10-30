@@ -182,3 +182,129 @@ fn old_sqlite_video_reservation_cannot_open_owner_prompt_after_native_document_r
     assert_eq!(ledger.recovery_bound(&binding.task_id,&binding.plan_hash).unwrap(),
         vec!["not_started"]);
 }
+
+#[test]
+fn two_approved_sqlite_tasks_on_one_native_session_cannot_both_mutate_stale_project() {
+    let admission=gate();
+    let dir=Tmp::new();
+    let (first_plan,first_reserve,first_consent,first_binding)=plan(&admission,"sharedownertask04");
+    let (other_plan,other_reserve,other_consent,other_binding)=plan(&admission,"sharedownertask05");
+    assert_eq!(first_plan["snapshot"],other_plan["snapshot"]);
+    let before=admission.native_readback().unwrap();
+    let mut ledger=dir.open();
+    admission.with_guarded_a07(&mut ledger,|host|{
+        host.reserve(&first_reserve)?;
+        host.reserve(&other_reserve)?;
+        Ok(())
+    }).unwrap();
+    let mut one=Consent{clicks:0,grant:true};
+    let mut two=Consent{clicks:0,grant:true};
+    admission.with_guarded_a07(&mut ledger,|host|{
+        host.request_consent(&first_consent,&mut one)?;
+        host.request_consent(&other_consent,&mut two)?;
+        Ok(())
+    }).unwrap();
+    assert_eq!((one.clicks,two.clicks),(1,1));
+    admission.with_guarded_a07(&mut ledger,|host|{
+        let receipt=host.execute(wire(&first_plan))?;
+        assert_eq!(receipt["nativeVerified"],true);
+        Ok(())
+    }).unwrap();
+    let after_first=admission.native_readback().unwrap();
+    assert_ne!(after_first.project_sha256,before.project_sha256);
+    let stale=admission.with_guarded_a07(&mut ledger,|host|{
+        host.execute(wire(&other_plan))
+    });
+    assert!(matches!(stale,Err(AdmissionError::A07(GuardError::StaleProject))));
+    assert_eq!(admission.native_readback().unwrap().project_sha256,after_first.project_sha256);
+    assert_eq!(ledger.recovery_bound(&first_binding.task_id,&first_binding.plan_hash).unwrap(),
+        vec!["verified"]);
+    assert_eq!(ledger.recovery_bound(&other_binding.task_id,&other_binding.plan_hash).unwrap(),
+        vec!["not_started"]);
+    drop(ledger);
+    let reopened=dir.open();
+    assert_eq!(reopened.recovery_bound(&first_binding.task_id,&first_binding.plan_hash).unwrap(),
+        vec!["verified"]);
+    assert_eq!(reopened.recovery_bound(&other_binding.task_id,&other_binding.plan_hash).unwrap(),
+        vec!["not_started"]);
+}
+
+#[test]
+fn approved_task_rejects_manual_save_as_and_fails_without_any_native_intent() {
+    let admission=gate();
+    let dir=Tmp::new();
+    let (proposal,reserve,approve,binding)=plan(&admission,"sharedownertask06");
+    let mut ledger=dir.open();
+    let mut clicks=Consent{clicks:0,grant:true};
+    admission.with_guarded_a07(&mut ledger,|host|{
+        host.reserve(&reserve)?;
+        host.request_consent(&approve,&mut clicks)?;
+        Ok(())
+    }).unwrap();
+    assert_eq!(clicks.clicks,1);
+    let saved=dir.0.join("manual-save-before-ai.fcproj");
+    admission.manual_command("file.saveAs",json!({"path":saved.to_string_lossy()})).unwrap();
+    assert!(saved.exists());
+    let after_manual=admission.a07_snapshot().unwrap();
+    assert_ne!(after_manual.session_id,reserve.plan["snapshot"]["sessionId"].as_str().unwrap());
+    let attempt=admission.with_guarded_a07(&mut ledger,|host|{
+        host.execute(wire(&proposal))
+    });
+    assert!(matches!(attempt,Err(AdmissionError::A07(GuardError::StaleProject))));
+    assert_eq!(admission.a07_snapshot().unwrap(),after_manual);
+    assert_eq!(ledger.recovery_bound(&binding.task_id,&binding.plan_hash).unwrap(),
+        vec!["not_started"]);
+}
+
+#[test]
+fn native_owner_panics_poison_the_shared_gate_and_never_allow_fallback_edits() {
+    let admission=gate();
+    let dir=Tmp::new();
+    let mut ledger=dir.open();
+    let original=admission.a07_snapshot().unwrap();
+    let crash=std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = admission.with_guarded_a07(&mut ledger,|_host| -> Result<(),GuardError> {
+            // Inject a true native-owner failure while holding its Session
+            // Mutex. No production panic, no external app involved.
+            panic!("test-only owner panic before any edit")
+        });
+    }));
+    assert!(crash.is_err());
+    assert!(matches!(
+        admission.manual_command("file.newSequence",json!({"name":"unsafe fallback"})),
+        Err(AdmissionError::Poisoned)
+    ));
+    assert!(matches!(admission.a07_snapshot(),Err(AdmissionError::Poisoned)));
+    assert!(matches!(admission.native_readback(),Err(AdmissionError::Poisoned)));
+    assert!(matches!(
+        admission.with_guarded_a07(&mut ledger,|_host| Ok(())),
+        Err(AdmissionError::Poisoned)
+    ));
+    // The original project is inaccessible after poisoning, rather than
+    // continuing with a potentially corrupted in-memory native Session.
+    assert!(!original.session_id.is_empty());
+}
+
+#[test]
+fn manual_change_after_approved_a07_consent_prevents_replay_at_execute() {
+    let admission=gate();
+    let tmp=Tmp::new();
+    let (proposal,reservation,consent,binding)=plan(&admission,"sharedownertask07");
+    let mut db=tmp.open();
+    let mut operator=Consent{clicks:0,grant:true};
+    admission.with_guarded_a07(&mut db,|host|{
+        host.reserve(&reservation)?;
+        host.request_consent(&consent,&mut operator)?;
+        Ok(())
+    }).unwrap();
+    assert_eq!(operator.clicks,1);
+    admission.manual_command("file.newSequence",json!({"name":"native manual edit"})).unwrap();
+    let changed=admission.a07_snapshot().unwrap();
+    let failed=admission.with_guarded_a07(&mut db,|host|{
+        host.execute(wire(&proposal))
+    });
+    assert!(matches!(failed,Err(AdmissionError::A07(GuardError::StaleProject))));
+    assert_eq!(admission.a07_snapshot().unwrap(),changed);
+    assert_eq!(db.recovery_bound(&binding.task_id,&binding.plan_hash).unwrap(),
+        vec!["not_started"]);
+}

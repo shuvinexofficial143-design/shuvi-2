@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI11 Shared Native Manual and A07 Admission
+name: Shuvi 2 Video - AI12 SQLite Replay and Owner Poison Safety
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai11
+  group: shuvi2-video-ai12
   cancel-in-progress: false
 
 jobs:
