@@ -1,0 +1,47 @@
+name: Shuvi 2 Motion Native egui Fast Rust Check (M-AI16)
+on:
+  push:
+    branches:
+      - feature/shuvi2-original-motion-ai
+    paths:
+      - original-editors/Shuvi2-Motion/crates/ui-egui/**
+      - .github/workflows/motion-native-quick-check.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: motion-native-rustcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-egui-rust-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact original Motion branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin native Rust with unit tests compiled
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Cache original native Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: original-editors/Shuvi2-Motion
+          key: native-motion-egui-check-v1
+      - name: Compile original EffectCraft egui library and test modules without linking Windows executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --locked --all-targets --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui
+      - name: Assert actual shipping AI approval controls remain disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'ui.add_enabled(false, egui::Button::new("Approve & execute — not integrated"))' original-editors/Shuvi2-Motion/crates/ui-egui/src/panels/shuvi_ai.rs
+          grep -F 'pub(crate) struct OwnerPermit { _private: () }' original-editors/Shuvi2-Motion/crates/ui-egui/src/shuvi_motion_owner.rs
+          grep -F 'production AI editing disabled' original-editors/Shuvi2-Motion/crates/ui-egui/src/shuvi_owner_gate.rs
