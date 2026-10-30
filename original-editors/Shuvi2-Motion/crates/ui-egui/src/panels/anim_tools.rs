@@ -302,7 +302,7 @@ pub fn sketch_overlay(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
                 && comp_t < comp.duration
             {
                 let ft = comp.frame_rate.snap_nearest(comp_t);
-                app.session.set_time(ft);
+                if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.set_time(ft); Ok(()) }) { app.ui.status = e; }
             }
         }
         let pts: Vec<egui::Pos2> = c.points.iter().map(|p| map.to_screen([p[1], p[2]])).collect();
@@ -330,7 +330,7 @@ pub fn sketch_overlay(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
             Ok(r) => app.ui.status = format!("Motion Sketch: {} Position keyframes", r["keys"]),
             Err(e) => app.ui.status = e.to_string(),
         }
-        app.session.set_time(c.start);
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.set_time(c.start); Ok(()) }) { app.ui.status = e; }
         return;
     }
     match cap {

@@ -465,7 +465,7 @@ pub fn markers(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         p.text(pos2(r.min.x + 12.0, r.center().y), Align2::LEFT_CENTER, tc, Tokens::mono(11.5), t.timecode);
         p.text(pos2(r.min.x + 120.0, r.center().y), Align2::LEFT_CENTER, &m.comment, Tokens::ui(12.0), t.text);
         if ui.interact(r, egui::Id::unique(("mk", m.time.0)), Sense::click()).clicked() {
-            app.session.set_time(m.time);
+            if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.set_time(m.time); Ok(()) }) { app.ui.status = e; }
         }
     }
     let content = y + 8.0 - (rect.min.y - scroll.offset);

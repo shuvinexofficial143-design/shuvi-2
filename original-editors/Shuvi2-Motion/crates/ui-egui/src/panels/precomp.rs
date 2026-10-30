@@ -231,7 +231,7 @@ pub fn navigator(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     }
     app.auto.add("viewer.navigator.flowchart", fr, "Composition Mini-Flowchart");
     if let Some(id) = open {
-        app.session.open_comp(id);
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.open_comp(id); Ok(()) }) { app.ui.status = e; }
     }
 }
 
@@ -309,7 +309,7 @@ pub fn mini_flowchart(app: &mut EffectcraftApp, ctx: &egui::Context) {
         });
     let outside = crate::widgets::pressed_outside(ctx, &area.response);
     if let Some(id) = open {
-        app.session.open_comp(id);
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.open_comp(id); Ok(()) }) { app.ui.status = e; }
         close = true;
     }
     if close || outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

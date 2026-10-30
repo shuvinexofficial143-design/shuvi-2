@@ -191,7 +191,7 @@ fn tool_options_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Paint
     // One undo step per picker session or width drag: end the merge once both are done.
     let picking = ["fill", "stroke"].iter().any(|k| widgets::popup_is_open(ui, picker_id(k)));
     if !picking && !ui.input(|i| i.pointer.any_down()) && app.session.history.merge_key.as_deref().is_some_and(|k| k.starts_with("tool-")) {
-        app.session.history.merge_key = None;
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.history.merge_key = None; Ok(()) }) { app.ui.status = e; }
     }
     let drawing = app.ui.tool.is_shape() || app.ui.tool == Tool::Pen;
     // Tool Creates Shape / Tool Creates Mask, with a shape layer selected (as in After Effects).

@@ -344,7 +344,7 @@ fn marker(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, comp: 
     }
     if resp.drag_stopped() {
         ctx.data_mut(|d| d.remove::<(Option<u64>, usize, bool)>(drag_state_id()));
-        app.session.history.merge_key = None;
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.history.merge_key = None; Ok(()) }) { app.ui.status = e; }
     }
     crate::widgets::context_menu(&resp, |ui| {
         let run = |ui: &mut egui::Ui, label: &str, cmd: &str, params: Value, app: &mut EffectcraftApp| {

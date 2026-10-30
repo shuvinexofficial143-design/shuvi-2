@@ -40,7 +40,7 @@ pub(super) fn empty_state(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rec
             p.rect_stroke(rect.shrink(2.0), 0.0, Stroke::new(2.0, t.accent), StrokeKind::Inside);
             app.auto.add("viewer.newCompDrop", rect, "Drop footage to create a composition");
             if ctx.input(|i| i.pointer.any_released()) {
-                app.session.state.project_selection = items;
+                if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = items; Ok(()) }) { app.ui.status = e; return; }
                 if let Err(e) = crate::menus::invoke(app, &ctx, "file.newCompFromSelection", json!({})) {
                     app.ui.status = e;
                 }

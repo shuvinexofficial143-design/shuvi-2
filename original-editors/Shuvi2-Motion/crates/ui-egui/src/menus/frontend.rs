@@ -462,7 +462,7 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
         "file.interpretFootage" => {
             // Import ▸ Interpret Unlabeled Alpha As: Ask User.
             if let Some(i) = p.get("item").and_then(Value::as_u64) {
-                app.session.state.project_selection = vec![effectcraft_engine::project::ItemId(i)];
+                if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = vec![effectcraft_engine::project::ItemId(i)]; Ok(()) }) { app.ui.status = e; }
             }
             crate::panels::dialogs::open_form(app, "file.interpretFootage", &json!({}));
             Value::Null

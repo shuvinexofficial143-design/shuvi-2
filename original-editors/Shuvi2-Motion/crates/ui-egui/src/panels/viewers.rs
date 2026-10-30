@@ -289,7 +289,7 @@ pub fn on_close(app: &mut EffectcraftApp, p: PanelKind) {
         if let Some(c) = app.ui.viewers.get(&next).copied().flatten().map(ItemId).filter(|c| app.session.project.comp(*c).is_some())
             && app.session.active_comp_id() != Some(c)
         {
-            app.session.open_comp(c);
+            if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.open_comp(c); Ok(()) }) { app.ui.status = e; }
         }
     }
 }

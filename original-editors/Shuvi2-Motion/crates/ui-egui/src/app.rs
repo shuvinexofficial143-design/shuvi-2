@@ -148,7 +148,7 @@ impl eframe::App for EffectcraftApp {
             self.feed_synthetic(raw_input);
         }
         if pointer_wrap::prepare_input(ctx, raw_input, injected) {
-            self.session.history.merge_key = None;
+            if let Err(e) = self.motion_owner_gate.manual_transaction(|| { self.session.history.merge_key = None; Ok(()) }) { self.ui.status = e; }
         }
     }
 
