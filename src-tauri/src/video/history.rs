@@ -31,6 +31,16 @@ pub struct HistoryStatus {
     pub depth:usize,
     pub position:usize,
     pub diverged:bool,
+    pub recoverable_direction:Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct ReconcileRequest {
+    pub selected_root:String,
+    pub project_path:String,
+    pub expected_project_sha256:String,
+    pub direction:String,
 }
 
 #[derive(Deserialize)]
@@ -151,6 +161,67 @@ pub(super) fn record_edit(project:&Path,before:&[u8],after:&[u8])->Result<(),Str
     let event=if old.states.is_empty() || old.states.get(old.index)==Some(&from) {"edit"} else {"reset"};
     append(project,&Entry{event:event.into(),from,to})
 }
+
+/// Only adjacent, SHA-identical project states can be reconciled after a
+/// process crash between a verified restore write and journal append.
+/// Never auto-adopt arbitrary external changes, even when syntactically valid.
+fn interrupted_direction(chain:&Chain,actual:&str)->Option<&'static str>{
+    if chain.states.is_empty() || chain.states.get(chain.index).map(String::as_str)==Some(actual) {
+        return None;
+    }
+    let prior=chain.index.checked_sub(1)
+        .and_then(|i|chain.states.get(i)).is_some_and(|sha|sha==actual);
+    let next=chain.states.get(chain.index+1).is_some_and(|sha|sha==actual);
+    match (prior,next) {(true,false)=>Some("undo"),(false,true)=>Some("redo"),_=>None}
+}
+fn trusted_interrupted_direction(project:&Path,chain:&Chain,actual:&str)->Option<&'static str>{
+    let direction=interrupted_direction(chain,actual)?;
+    let source=snapshot_path(project,actual);
+    if safe_regular_file(&source).is_err() {return None;}
+    if super::project_sha256(&source).ok().as_deref()!=Some(actual){return None;}
+    Some(direction)
+}
+/// Explicitly recover an interrupted journal event without writing the
+/// project again. The candidate project must still open in real FilmCraft.
+pub fn reconcile(request:ReconcileRequest)->Result<HistoryStatus,String>{
+    if !is_sha(&request.expected_project_sha256) ||
+        !matches!(request.direction.as_str(),"undo"|"redo"){
+        return Err("Recovery requires a valid project SHA and undo/redo direction".into());
+    }
+    let project=super::timeline::checked_project(&request.selected_root,&request.project_path)?;
+    let _lock=super::media::ImportLock::acquire(&project)?;
+    let actual=super::project_sha256(&project)?;
+    if actual!=request.expected_project_sha256 {
+        return Err("STALE_PROJECT_CONTENT: project changed since recovery was offered".into());
+    }
+    let entries=read_entries(&project)?;
+    let chain=replay(&entries)?;
+    let direction=trusted_interrupted_direction(&project,&chain,&actual)
+        .ok_or("No independently verified interrupted history transition exists")?;
+    if direction!=request.direction {
+        return Err("Recovery direction mismatched the saved project".into());
+    }
+    // Check the exact on-disk candidate with the real pinned FilmCraft CLI.
+    let cli=super::configured_cli_path()?;
+    let path=project.to_str().ok_or("Invalid project UTF-8 path")?;
+    let info=super::run_json_bounded(&cli,&["--compact","--project",path,"inspect","project"],INSPECT_TIMEOUT)?;
+    if info["root"].is_null(){return Err("FilmCraft cannot open recovery project".into());}
+    if info["activeSequence"].is_u64(){
+        let seq=super::run_json_bounded(&cli,&["--compact","--project",path,"inspect","sequence"],INSPECT_TIMEOUT)?;
+        if !seq["video"].is_array() || !seq["audio"].is_array(){
+            return Err("Recovery sequence readback is invalid".into());
+        }
+    }
+    if super::project_sha256(&project)?!=actual {
+        return Err("EXTERNAL_PROJECT_EDIT: project changed during recovery inspection".into());
+    }
+    let old_sha=chain.states[chain.index].clone();
+    append(&project,&Entry{event:direction.into(),from:old_sha,to:actual})?;
+    let status=status_unlocked(&project)?;
+    if status.diverged {return Err("History still diverged after recovery".into());}
+    Ok(status)
+}
+
 fn status_unlocked(project:&Path)->Result<HistoryStatus,String>{
     let digest=super::project_sha256(project)?;
     let chain=replay(&read_entries(project)?)?;
@@ -163,6 +234,7 @@ fn status_unlocked(project:&Path)->Result<HistoryStatus,String>{
         depth:chain.states.len().saturating_sub(1),
         position:chain.index,
         diverged,
+        recoverable_direction: if diverged {trusted_interrupted_direction(project,&chain,&digest).map(str::to_owned)} else {None},
     })
 }
 pub fn status(selected_root:String,project_path:String)->Result<HistoryStatus,String>{
@@ -280,6 +352,17 @@ mod tests{
         assert!(replay(&[entry("edit","../escape".into(),sha('b'))]).is_err());
     }
     #[test]
+    fn interrupted_history_accepts_only_exact_adjacent_state(){
+        let a=sha('a');let b=sha('b');let c=sha('c');let x=sha('d');
+        let chain=replay(&[entry("edit",a.clone(),b.clone()),entry("edit",b.clone(),c.clone())]).unwrap();
+        assert_eq!(interrupted_direction(&chain,&b),Some("undo"));
+        assert_eq!(interrupted_direction(&chain,&x),None);
+        let undone=replay(&[entry("edit",a.clone(),b.clone()),entry("edit",b.clone(),c.clone()),entry("undo",c.clone(),b.clone())]).unwrap();
+        assert_eq!(interrupted_direction(&undone,&c),Some("redo"));
+        assert_eq!(interrupted_direction(&undone,&a),Some("undo"));
+        assert_eq!(interrupted_direction(&undone,&x),None);
+    }
+    #[test]
     fn snapshot_detects_tampering_and_history_chain_persists(){
         let root=super::super::Scratch::create().unwrap();
         let project=root.0.join("test.fcproj");
@@ -326,5 +409,22 @@ mod tests{
         assert_eq!(redo.project_sha256,edited.project_sha256);
         assert!(redo.sequence.is_some());
         assert!(redo.history.can_undo && !redo.history.can_redo);
+        // Simulate process termination immediately after a verified Undo
+        // writes the old project bytes but before its journal event is appended.
+        let earlier=snapshot_path(&project,&imported.project_sha256);
+        let bytes=fs::read(&earlier).unwrap();
+        fs::write(&project,bytes).unwrap();
+        let pending=status(root.0.to_string_lossy().into_owned(),project.to_string_lossy().into_owned()).unwrap();
+        assert!(pending.diverged);
+        assert_eq!(pending.recoverable_direction.as_deref(),Some("undo"));
+        let repaired=reconcile(ReconcileRequest{
+            selected_root:root.0.to_string_lossy().into_owned(),
+            project_path:project.to_string_lossy().into_owned(),
+            expected_project_sha256:pending.project_sha256,
+            direction:"undo".into(),
+        }).unwrap();
+        assert!(!repaired.diverged);
+        assert!(repaired.can_redo);
+        assert_eq!(repaired.recoverable_direction,None);
     }
 }

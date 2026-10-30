@@ -6,3 +6,5 @@
 .v-play-tools{display:flex;gap:5px;flex-wrap:wrap}.v-play-tools button{padding:5px 8px;font-size:10px;background:#334160;color:#d9e7ff;border:1px solid #566989;border-radius:5px}.v-play-tools button:disabled{opacity:.38}
 
 .v-lanes [data-action=undo],.v-lanes [data-action=redo]{border-color:#4b9c87;background:#24483e}.v-lanes [data-v=history]{font-size:10px;overflow-wrap:anywhere;opacity:.86}
+
+.v-lanes [data-action=recover]{border:1px solid #c19d51;background:#4b3b29;color:#ffdda0}.v-lanes [data-action=recover]:disabled{opacity:.35}

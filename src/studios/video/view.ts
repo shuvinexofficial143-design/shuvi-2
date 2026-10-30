@@ -7,7 +7,8 @@ import { importVideoMedia } from "./media";
 import { editVideoTimeline, type TimelineAction } from "./timeline";
 import { renderVideoPreview, applyPreviewToImage } from "./preview";
 import { exportVideoMp4 } from "./export";
-import { inspectVideoHistory, restoreVideoHistory, type VideoHistoryStatus } from "./history";
+import { inspectVideoHistory, restoreVideoHistory, reconcileVideoHistory, type VideoHistoryStatus } from "./history";
+import { videoKeyboardCommand } from "./keyboard.mjs";
 import { mediaItems, timelineClips, sequenceDuration, sequenceFps, formatTimecode, localWindowsPath, requireNumber, type EditorClip } from "./model.mjs";
 
 /** The FilmCraft UI is owned by Video Studio. No Motion Studio DOM is removed. */
@@ -74,7 +75,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     <div data-v="tracks" class="v-tracks">Open a project to load FilmCraft sequence tracks.</div>
     <div data-v="selected" class="v-muted">Click a clip to select it.</div>
     <div class="v-actions"><button data-action="place">Place Media</button><button data-action="split">Split</button><button data-action="trim">Trim</button><button data-action="move">Move</button><button data-action="delete">Delete</button>
-    <button data-action="undo">Undo Last Edit</button><button data-action="redo">Redo Edit</button></div>
+    <button data-action="undo">Undo Last Edit</button><button data-action="redo">Redo Edit</button>
+    <button data-action="recover">Recover Interrupted History</button></div>
     <div class="v-muted" data-v="history">Cross-session FilmCraft project history is being inspected.</div>
   `;
   preview.append(panel);timeline.append(lane);
@@ -222,7 +224,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       }
     }
     e<HTMLElement>("history").textContent=history?.diverged
-      ? "History paused: project modified outside Shuvi; refresh and create a new edit branch"
+      ? history.recoverableDirection
+        ? "Interrupted "+history.recoverableDirection+" detected: project SHA matches a verified snapshot. Click Recover Interrupted History."
+        : "History paused: project modified outside Shuvi; refresh and create a new edit branch"
       : history ? "Saved project history · "+history.position+" / "+history.depth+
           " · SHA "+history.projectSha256.slice(0,12)
         : "No saved project editing history yet";
@@ -233,7 +237,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     panel.querySelectorAll<HTMLButtonElement>("button[data-action],button[data-choose]").forEach(b=>{b.disabled=busy});
     lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{
       const action=b.dataset.action;
-      b.disabled=busy||!snapshot||(action==="undo"&&!history?.canUndo)||(action==="redo"&&!history?.canRedo);
+      b.disabled=busy||!snapshot||(action==="undo"&&!history?.canUndo)||(action==="redo"&&!history?.canRedo)
+        ||(action==="recover"&&!history?.recoverableDirection);
     });
     panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input,select").forEach(control=>{control.disabled=busy;});
     lane.querySelectorAll<HTMLButtonElement>(".v-clip").forEach(control=>{control.disabled=busy;});
@@ -292,6 +297,20 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         await edit({type:"place",itemId:id,track,seconds:requireNumber(value("seconds"),0,86400),video:!audio,audio});
       }else if(action==="preview"){
         renderCurrentFrame(true);
+      }else if(action==="recover"){
+        const req=request();
+        if(!history?.recoverableDirection)throw Error("No recoverable interrupted event in this project");
+        const direction=history.recoverableDirection;
+        const repaired=await reconcileVideoHistory({
+          selectedRoot:req.selectedRoot,
+          projectPath:req.projectPath,
+          expectedProjectSha256:req.expectedProjectSha256,
+          direction,
+        });
+        const current=await load();
+        if(current.projectSha256!==repaired.projectSha256)throw Error("History recovery project changed; refresh required");
+        clipId=null;
+        inform("Verified interrupted "+direction+" journal recovery with real FilmCraft project readback");
       }else if(action==="undo"||action==="redo"){
         const req=request();
         const receipt=await restoreVideoHistory({
@@ -421,6 +440,22 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
   e<HTMLSelectElement>("media").addEventListener("change",()=>{
     const id=Number(e<HTMLSelectElement>("media").value);
     itemId=Number.isSafeInteger(id)&&id>0?id:null;
+  });
+  window.addEventListener("keydown",(event)=>{
+    if(!active||busy||event.defaultPrevented)return;
+    const target=event.target instanceof HTMLElement ? event.target : null;
+    const editing=Boolean(target?.closest("input,textarea,select,[contenteditable='true']"));
+    const action=videoKeyboardCommand(event,editing);
+    if(!action)return;
+    if(action==="undo" && !history?.canUndo)return;
+    if(action==="redo" && !history?.canRedo)return;
+    if((action==="back"||action==="forward") && (!snapshot||sequenceDuration(snapshot.sequence)<=0))return;
+    event.preventDefault();
+    if(action==="back"||action==="forward"){
+      panel.querySelector<HTMLButtonElement>('[data-preview-control="'+action+'"]')?.click();
+    }else{
+      void handle(action);
+    }
   });
   draw();
   return {setActive(next:boolean){
