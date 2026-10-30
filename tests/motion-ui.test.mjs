@@ -11,6 +11,9 @@ const cargo=read("src-tauri/Cargo.toml");
 const desktopE2e=read("tests/motion/desktop-e2e.mjs");
 const windowsRunner=read("scripts/motion/run-windows-e2e.ps1");
 const motionCi=read(".github/workflows/motion-smoke.yml");
+const pkgConfig=JSON.parse(read("src-tauri/src/motion/tauri.release.conf.json"));
+const releaseRunner=read("scripts/motion/package-windows-release.ps1");
+const historySource=read("crates/shuvi-motion-bridge/src/history.rs");
 
 test("Motion lives in existing Shuvi single window without injecting a second editor",()=>{
   assert.match(html, /src\/main\.ts/);
@@ -35,7 +38,8 @@ test("all manual editing actions go through native Tauri command",()=>{
     "setTransform","addKey","easeKeys","render","saveProject","openProject",
     "addEffect","listEffects","setEffectParameter","toggleEffect","removeEffect",
     "addPolygonMask","listMasks","setMaskVertex","removeMask","exportPng",
-    "inspectEffectParameter","getMaskSettings","setMaskProperty"
+    "inspectEffectParameter","getMaskSettings","setMaskProperty",
+    "inspectHistory","undo","redo","inspectComposition"
   ];
   for(const action of actions){
     assert.ok(ts.includes('action:"'+action+'"'),"UI request not wired for "+action);
@@ -145,4 +149,31 @@ test("M11 real desktop E2E parses as executable JS and verifies cross-process pi
   assert.ok(desktopE2e.includes('await wd("DELETE"'));
   assert.ok(desktopE2e.includes('m11_03-cold-reopened-project.png'));
   assert.ok(desktopE2e.includes('native no-overwrite error'));
+});
+
+test("M12 owner Undo/Redo uses exact native EffectCraft project history",()=>{
+  assert.ok(ts.includes('id="motion-undo"'));
+  assert.ok(ts.includes('id="motion-redo"'));
+  assert.ok(ts.includes('action:"inspectHistory"'));
+  assert.ok(ts.includes('action:"inspectComposition"'));
+  assert.ok(ts.includes('receipt.projectChanged'));
+  assert.ok(ipc.includes("e.undo_native()?"));
+  assert.ok(ipc.includes("e.redo_native()?"));
+  assert.ok(historySource.includes('execute_checked(command,json!({}))'));
+  assert.ok(historySource.includes('original.as_ref()!=self.session.project.as_ref()'));
+  assert.ok(desktopE2e.includes('Undoing native edit'));
+  assert.ok(desktopE2e.includes('Redoing native edit'));
+  assert.ok(desktopE2e.includes('result.undoRedoVerified=true'));
+});
+test("M12 unsigned Windows NSIS package cannot run until real desktop E2E passes",()=>{
+  assert.equal(pkgConfig.bundle.active,true);
+  assert.deepEqual(pkgConfig.bundle.targets,["nsis"]);
+  assert.ok(motionCi.includes("motion-windows-installer:"));
+  assert.ok(motionCi.includes("needs: motion-desktop-e2e-windows"));
+  assert.ok(motionCi.includes("name: shuvi-motion-windows-installer-unsigned"));
+  assert.ok(releaseRunner.includes("git -C vendor/effectcraft rev-parse HEAD"));
+  assert.ok(releaseRunner.includes("npm run tauri -- build --ci --config"));
+  assert.ok(releaseRunner.includes("Get-FileHash"));
+  assert.ok(releaseRunner.includes("signed = $false"));
+  assert.ok(releaseRunner.includes("Git commit SHA"));
 });
