@@ -19,6 +19,8 @@ pub struct NativeVideoSnapshot {
     pub document_epoch: u64,
     pub active_sequence: Option<u64>,
     pub project_path: Option<String>,
+    /// Native project hash computed once on readback refresh, not per UI frame.
+    pub project_sha256: String,
     pub dirty: bool,
     pub project: Value,
     pub sequence: Option<Value>,
@@ -96,11 +98,13 @@ pub fn snapshot(session: &mut Session) -> Result<NativeVideoSnapshot> {
     {
         return Err(EngineError::Other("FilmCraft session changed while collecting AI readback".into()));
     }
+    let project_sha256 = a07_native_project_sha256(session);
     Ok(NativeVideoSnapshot {
         revision,
         document_epoch,
         active_sequence,
         project_path,
+        project_sha256,
         dirty,
         project,
         sequence,
@@ -177,7 +181,7 @@ pub fn a07_native_clip_sha256(session: &Session, clip_id: u64) -> Result<String>
 /// after a real native project edit, and never reads or exposes a secret.
 pub fn a07_readonly_native_fingerprint(session: &mut Session) -> Result<Value> {
     let view = snapshot(session)?;
-    let project_sha256 = a07_native_project_sha256(session);
+    let project_sha256 = view.project_sha256.clone();
     let active_sequence = view.active_sequence;
     if session.revision != view.revision
         || session.document_epoch != view.document_epoch

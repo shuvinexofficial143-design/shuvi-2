@@ -16,3 +16,6 @@ No real model calls, external HTTP edit permission, GUI capture or MP4 output ar
 
 ## Evidence
 At milestone start Windows CI `41035516200` had passed canonical A07 Provider, Windows Vault and SQLite ledger tests in its separate job, while original FilmCraft native UI/EXE was still building. Historical CI `41032852702` had passed native Session contracts and owner kernel tests and was still compiling egui UI tests. This milestone's new Windows run must pass before claiming compilation proof.
+
+## UI performance follow-up
+The SHA-256 is cached in \`NativeVideoSnapshot\` when the original editor performs its revision-keyed native readback. The egui paint loop displays the cached hash instead of re-serializing the entire film project on every frame. Live revisions trigger refresh; manual refresh is provided for non-revision metadata. This is not a persistent A07 approval token.
