@@ -1055,6 +1055,118 @@ mod tests{
     }
 
     #[test]
+    fn sqlite_mask_three_native_properties_verified_and_reopened(){
+        let temp=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let comp=gate.manual_command("comp.new",json!({
+            "name":"Mask Destination","width":480,"height":270,
+            "frameRate":30.0,"duration":6.0
+        })).unwrap()["comp"].as_u64().unwrap();
+        let layer=gate.manual_command("layer.newText",json!({
+            "name":"Masked Title","text":"Native mask"
+        })).unwrap()["layer"].as_u64().unwrap();
+        let mask=gate.manual_command("mask.new",json!({
+            "layer":layer,"vertices":[[10.0,10.0],[150.0,10.0],
+                [150.0,80.0],[10.0,80.0]],"closed":true
+        })).unwrap()["mask"].as_u64().unwrap();
+        assert!(gate.native_inventory().unwrap()["maskIds"].as_array().unwrap()
+            .contains(&json!(mask)));
+        let rev=gate.revision().unwrap();
+        let (plan,reserve,approval,bind)=plan(rev,vec![
+            json!({"type":"motion.setMaskProperty","compId":comp,
+                "layerId":layer,"uid":mask,"property":"feather","value":12.5}),
+            json!({"type":"motion.setMaskProperty","compId":comp,
+                "layerId":layer,"uid":mask,"property":"opacity","value":72.0}),
+            json!({"type":"motion.setMaskProperty","compId":comp,
+                "layerId":layer,"uid":mask,"property":"expansion","value":-4.0}),
+        ]);
+        let mut ledger=temp.open();
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut ledger,owner};
+            host.reserve(&reserve).unwrap();
+            host.request_consent(&approval,&mut TestOwnerConsent{count:0,yes:true}).unwrap();
+            let mut current=rev;
+            for i in 0..3 {
+                let r=host.execute(wire(&plan,i,current)).unwrap();
+                assert_eq!(r["nativeVerified"],true);
+                assert_eq!(r["objectProofSha256"].as_str().unwrap().len(),64);
+                current=r["after"]["version"].as_u64().unwrap();
+            }
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(
+                ["verified","verified","verified"]));
+        }).unwrap();
+        let file=temp.0.join("verified-masks.ecproj");
+        gate.manual_command("file.saveAs",json!({
+            "path":file.to_str().unwrap()
+        })).unwrap();
+        let bytes=fs::read(&file).unwrap();
+        let hash=format!("{:x}",Sha256::digest(&bytes));
+        let mut reopened=Session::new();
+        reopened.execute_checked("file.open",json!({
+            "path":file.to_str().unwrap()
+        })).unwrap();
+        let l=reopened.project.comp(ItemId(comp)).unwrap().layer(LayerId(layer)).unwrap();
+        let m=l.masks().unwrap().groups().find(|g|g.uid==mask).unwrap();
+        assert!(matches!(&m.get("feather").unwrap().value,
+            effectcraft_engine::keyframe::Value::Vec2(v)
+            if (v[0]-12.5).abs()<1e-5&&(v[1]-12.5).abs()<1e-5));
+        assert!(matches!(&m.get("opacity").unwrap().value,
+            effectcraft_engine::keyframe::Value::Scalar(v) if (v-72.0).abs()<1e-5));
+        assert!(matches!(&m.get("expansion").unwrap().value,
+            effectcraft_engine::keyframe::Value::Scalar(v) if (v+4.0).abs()<1e-5));
+        assert_eq!(format!("{:x}",Sha256::digest(fs::read(&file).unwrap())),hash);
+        assert_eq!(temp.open().recovery("realmotion1234").unwrap(),
+            vec!["verified","verified","verified"]);
+    }
+
+    #[test]
+    fn mask_uid_cannot_escape_its_real_native_layer_and_invalid_values_fail(){
+        let mut s=Session::new();
+        let comp=from_comp(&mut s);
+        let first=s.execute_checked("layer.newText",json!({
+            "name":"First Mask Owner","text":"One"
+        })).unwrap()["layer"].as_u64().unwrap();
+        let mask=s.execute_checked("mask.new",json!({
+            "layer":first,"vertices":[[0.0,0.0],[100.0,0.0],[0.0,100.0]],
+            "closed":true
+        })).unwrap()["mask"].as_u64().unwrap();
+        let second=s.execute_checked("layer.newText",json!({
+            "name":"Other Layer","text":"Two"
+        })).unwrap()["layer"].as_u64().unwrap();
+        let mut owner=EffectcraftNativeOwner::new(&mut s,
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let mut requested=Action::MotionSetMaskProperty{
+            comp_id:comp,layer_id:second,uid:mask,
+            property:"opacity".into(),value:50.0
+        };
+        assert!(!owner.preflight_action(&requested).unwrap(),
+            "one real native mask UID must not mutate a different layer");
+        requested=Action::MotionSetMaskProperty{
+            comp_id:comp,layer_id:first,uid:mask,
+            property:"opacity".into(),value:110.0
+        };
+        assert!(!owner.preflight_action(&requested).unwrap(),
+            "opacity may never escape 0..100 native bounds");
+        requested=Action::MotionSetMaskProperty{
+            comp_id:comp,layer_id:first,uid:mask,
+            property:"feather".into(),value:-1.0
+        };
+        assert!(!owner.preflight_action(&requested).unwrap(),
+            "feather length may not be negative");
+        requested=Action::MotionSetMaskProperty{
+            comp_id:comp,layer_id:first,uid:mask,
+            property:"expansion".into(),value:-4.0
+        };
+        assert!(owner.preflight_action(&requested).unwrap());
+        owner.apply(&requested).unwrap();
+        assert!(owner.verify_action(&requested).unwrap());
+        assert!(!owner.preflight_action(&requested).unwrap());
+        let proof=owner.object_proof_sha256(&requested).unwrap();
+        assert_eq!(proof.len(),64);
+    }
+
+    #[test]
     fn real_ai_director_provider_accepts_only_native_bounded_inventory(){
         use shuvi_ai_provider::{NativeModelRequest,build_request};
         let mut s=Session::new();
