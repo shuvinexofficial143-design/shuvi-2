@@ -53,9 +53,8 @@ fn target_clip(app:&mut FilmcraftApp)->u64{
         .and_then(|c|c["clip"].as_u64()).unwrap()
 }
 fn view(app:&mut FilmcraftApp)->Snapshot {
-    app.with_shuvi_trusted_ai_transaction(|session|{
-        let mut owner=VideoOwner::new(session,
-            "trusted-ui-project-01".into(),"native-ui-owner-session-01".into())?;
+    app.with_shuvi_trusted_a07_context(|session,project_id,session_id|{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
         owner.snapshot()
     }).unwrap()
 }
@@ -105,9 +104,8 @@ fn real_filmcraftapp_a07_transaction_has_same_native_owner_sqlite_receipt_and_ma
     let (plan,reserve,consent)=planned(state.clone(),clip,"a17-real-ui-a07-01");
     let mut db=tmp.db();
     let mut clicks=TestOnlyOwner{clicks:0};
-    let result=app.with_shuvi_trusted_ai_transaction(|session|{
-        let mut owner=VideoOwner::new(session,
-            "trusted-ui-project-01".into(),"native-ui-owner-session-01".into())?;
+    let result=app.with_shuvi_trusted_a07_context(|session,project_id,session_id|{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
         let mut guarded=GuardedHost{ledger:&mut db,owner:&mut owner};
         guarded.reserve(&reserve).map_err(|e|e.to_string())?;
         assert_eq!(guarded.request_consent(&consent,&mut clicks)
@@ -148,9 +146,8 @@ fn original_manual_ui_edit_between_a07_reserve_and_consent_stales_sqlite_before_
     let clip=target_clip(&mut app);
     let (_,reserve,consent)=planned(state,clip,"a17-real-ui-a07-02");
     let mut db=tmp.db();
-    app.with_shuvi_trusted_ai_transaction(|session|{
-        let mut owner=VideoOwner::new(session,
-            "trusted-ui-project-01".into(),"native-ui-owner-session-01".into())?;
+    app.with_shuvi_trusted_a07_context(|session,project_id,session_id|{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
         GuardedHost{ledger:&mut db,owner:&mut owner}
             .reserve(&reserve).map_err(|e|e.to_string())?;
         Ok(())
@@ -163,9 +160,8 @@ fn original_manual_ui_edit_between_a07_reserve_and_consent_stales_sqlite_before_
     assert!(app.session.revision>original_rev);
     let after_manual=view(&mut app);
     let mut operator=TestOnlyOwner{clicks:0};
-    let failed=app.with_shuvi_trusted_ai_transaction(|session|{
-        let mut owner=VideoOwner::new(session,
-            "trusted-ui-project-01".into(),"native-ui-owner-session-01".into())?;
+    let failed=app.with_shuvi_trusted_a07_context(|session,project_id,session_id|{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
         GuardedHost{ledger:&mut db,owner:&mut owner}
             .request_consent(&consent,&mut operator).map_err(|e|e.to_string())
     }).unwrap_err();
@@ -195,9 +191,8 @@ fn verified_native_sqlite_edit_but_lost_gui_ack_never_replays_and_poison_is_visi
     let mut clicks=TestOnlyOwner{clicks:0};
     // All native logic and canonical SQLite receipts are REAL; only the
     // explicit owner Yes click is a unit-test double, never a live modal.
-    let outcome=app.with_shuvi_trusted_ai_transaction(|session|->Result<(),String>{
-        let mut owner=VideoOwner::new(session,
-            "trusted-ui-project-01".into(),"native-ui-owner-session-01".into())?;
+    let outcome=app.with_shuvi_trusted_a07_context(|session,project_id,session_id|->Result<(),String>{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
         let mut host=GuardedHost{ledger:&mut ledger,owner:&mut owner};
         host.reserve(&reserve).map_err(|e|e.to_string())?;
         host.request_consent(&consent,&mut clicks).map_err(|e|e.to_string())?;
@@ -224,4 +219,41 @@ fn verified_native_sqlite_edit_but_lost_gui_ack_never_replays_and_poison_is_visi
     drop(ledger);
     assert_eq!(temp.db().recovery_bound(&reserve.task_id,&reserve.plan_hash).unwrap(),
         vec!["verified"]);
+}
+
+#[test]
+fn original_gui_save_as_rotates_a07_scope_and_denies_old_approved_ui_prompt() {
+    let dir=Tmp::new();
+    let mut app=app();
+    let native_id=target_clip(&mut app);
+    let original=view(&mut app);
+    let (_,reserve,consent)=planned(original.clone(),native_id,"a20-saveas-context-01");
+    let mut db=dir.db();
+    app.with_shuvi_trusted_a07_context(|session,project_id,session_id|{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
+        GuardedHost{ledger:&mut db,owner:&mut owner}
+            .reserve(&reserve).map_err(|e|e.to_string())?;
+        Ok(())
+    }).unwrap();
+    let original_identity=app.shuvi_trusted_a07_identity();
+    // Original native editor Save As is a legitimate manual GUI command.
+    // New path changes the trusted session context; model cannot choose it.
+    let save=dir.0.join("new-native-document.fcproj");
+    menus::invoke(&mut app,&egui::Context::default(),"file.saveAs",
+        json!({"path":save.to_string_lossy()})).unwrap();
+    assert!(save.exists());
+    assert_ne!(app.shuvi_trusted_a07_identity(),original_identity);
+    let after=view(&mut app);
+    assert_ne!(after.session_id,original.session_id);
+    let mut consent_ui=TestOnlyOwner{clicks:0};
+    let stale=app.with_shuvi_trusted_a07_context(|session,project_id,session_id|{
+        let mut owner=VideoOwner::new(session,project_id,session_id)?;
+        GuardedHost{ledger:&mut db,owner:&mut owner}
+            .request_consent(&consent,&mut consent_ui).map_err(|e|e.to_string())
+    }).unwrap_err();
+    assert_eq!(stale,GuardError::StaleProject.to_string());
+    assert_eq!(consent_ui.clicks,0);
+    assert_eq!(db.recovery_bound(&reserve.task_id,&reserve.plan_hash).unwrap(),
+        vec!["not_started"]);
+    assert_eq!(view(&mut app),after);
 }
