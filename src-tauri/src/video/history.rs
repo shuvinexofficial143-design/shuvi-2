@@ -228,7 +228,7 @@ fn status_unlocked(project:&Path)->Result<HistoryStatus,String>{
     let diverged=!chain.states.is_empty() && chain.states[chain.index]!=digest;
     Ok(HistoryStatus {
         project_path:project.to_string_lossy().into_owned(),
-        project_sha256:digest,
+        project_sha256:digest.clone(),
         can_undo:!diverged && chain.index>0,
         can_redo:!diverged && chain.index+1<chain.states.len(),
         depth:chain.states.len().saturating_sub(1),
