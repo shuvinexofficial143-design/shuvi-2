@@ -33,6 +33,13 @@ fn renders_actual_png_sequence_with_native_disk_verified_manifest(){
     assert_eq!(v["ok"],true);
     assert_eq!(v["source"],"native-effectcraft");
     assert_eq!(v["frames"],5);
+    assert_eq!(receipt.directory,dir.join("real_frames"),
+        "verified frames were not published at the exact owner destination");
+    let names=fs::read_dir(&dir).unwrap()
+        .map(|e|e.unwrap().file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(names,vec!["real_frames".to_string()],
+        "a temporary staging directory escaped after successful native publish");
 }
 #[test]
 fn rejects_existing_directory_and_out_of_bounds_without_overwriting_owner_files(){
@@ -53,4 +60,9 @@ fn rejects_existing_directory_and_out_of_bounds_without_overwriting_owner_files(
         assert!(!Path::new(&dir.join("not_created")).exists());
     }
     assert_eq!(bridge.revision(),revision);
+    let names=fs::read_dir(&dir).unwrap()
+        .map(|e|e.unwrap().file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(names,vec!["my_frames".to_string()],
+        "a rejected native export left a visible partial/staging output");
 }
