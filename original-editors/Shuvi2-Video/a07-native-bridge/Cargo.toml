@@ -1,0 +1,19 @@
+[package]
+name = "shuvi-video-a07-native-bridge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Intentionally separate from the upstream FilmCraft workspace: this adapter
+# compiles only when CI checks out the EXACT pinned canonical A07 source.
+# Production app is NOT linked to this package or given mutation capability.
+[workspace]
+
+[dependencies]
+filmcraft-engine = { path = "../crates/engine" }
+filmcraft-project = { path = "../crates/project" }
+filmcraft-time = { path = "../crates/time" }
+filmcraft-edit = { path = "../crates/edit" }
+shuvi-ai-provider = { path = "../../../a07-canonical/src-tauri/src/ai_director" }
+serde_json = "1"
+sha2 = "0.10"

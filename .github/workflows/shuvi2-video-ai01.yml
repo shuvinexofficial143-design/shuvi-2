@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI08 Native Multi-step Readonly Plan
+name: Shuvi 2 Video - AI09 Real A07 FilmCraft SQLite Bridge
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai08
+  group: shuvi2-video-ai09
   cancel-in-progress: false
 
 jobs:
@@ -87,6 +87,11 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
+      - name: Checkout ORIGINAL Video source for native guarded bridge tests
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
       - name: Checkout pinned, separate canonical A07 AI Director commit (read only)
         uses: actions/checkout@v4
         with:
@@ -109,3 +114,6 @@ jobs:
       - name: Test canonical provider, vault and SQLite native ledger as separate source crate
         shell: pwsh
         run: cargo test --manifest-path a07-canonical/src-tauri/src/ai_director/Cargo.toml -- --nocapture
+      - name: Test exact canonical A07 SQLite GuardedHost against ORIGINAL FilmCraft native Session
+        shell: pwsh
+        run: cargo test --manifest-path original-editors/Shuvi2-Video/a07-native-bridge/Cargo.toml -- --nocapture
