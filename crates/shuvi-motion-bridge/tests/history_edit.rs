@@ -52,3 +52,15 @@ fn no_available_redo_is_rejected_without_mutating_native_project(){
     assert!(b.redo_native().is_err());
     assert_eq!(b.revision(),rev);
 }
+
+#[test]
+fn deleting_and_recreating_entire_composition_via_history_is_real(){
+    let (mut b,comp)=make();
+    assert!(b.inspect_composition(comp).is_ok());
+    let undo=b.undo_native().unwrap();
+    assert!(undo.project_changed);
+    assert!(b.inspect_composition(comp).is_err(),"native Undo left the composition present");
+    let redo=b.redo_native().unwrap();
+    assert!(redo.project_changed);
+    assert_eq!(b.inspect_composition(comp).unwrap().name,"Owner Undo Redo");
+}
