@@ -83,7 +83,7 @@ impl Action {
                 bounded_text(text,2000),
             MotionAddShape{comp_id,name:n,kind,x,y,width,height,fill}=>*editor==Editor::Motion&&positive(*comp_id)&&name(n)&&
                 matches!(kind.as_str(),"rect"|"ellipse"|"rounded"|"star"|"polygon")&&
-                finite_signed(*x)&&finite_signed(*y)&&finite_signed(*width)&&finite_signed(*height)&&
+                finite_signed(*x)&&finite_signed(*y)&&shape_dimension(*width)&&shape_dimension(*height)&&
                 fill.len()==7&&fill.starts_with('#')&&fill[1..].bytes().all(|c|c.is_ascii_hexdigit()),
             MotionSetTransform{comp_id,layer_id,kind,x,y,value}=>*editor==Editor::Motion&&positive(*comp_id)&&positive(*layer_id)&&
                 match kind.as_str() {
@@ -101,6 +101,7 @@ impl Action {
     }
 }
 fn finite_signed(x:f64)->bool{x.is_finite()&&(-100000.0..=100000.0).contains(&x)}
+fn shape_dimension(x:f64)->bool{x.is_finite()&&(1.0..=8192.0).contains(&x)&&x.fract()==0.0}
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct Scope {
