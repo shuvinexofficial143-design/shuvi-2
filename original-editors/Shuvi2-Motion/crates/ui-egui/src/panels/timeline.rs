@@ -1742,7 +1742,7 @@ fn empty_timeline(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             ui.painter().rect_stroke(rect.shrink(2.0), 0.0, Stroke::new(2.0, t.accent), StrokeKind::Inside);
             app.auto.add("timeline.newCompDrop", rect, "Drop footage to create a composition");
             if ctx.input(|i| i.pointer.any_released()) {
-                app.session.state.project_selection = items;
+                if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.state.project_selection = items; Ok(()) }) { app.ui.status = e; return; }
                 if let Err(e) = crate::menus::invoke(app, &ctx, "file.newCompFromSelection", json!({})) {
                     app.ui.status = e;
                 }
@@ -1897,8 +1897,8 @@ fn apply_ui_acts(app: &mut EffectcraftApp, comp: &Comp, ui_actions: Vec<UiAct>) 
                     }
                 }
             }
-            UiAct::SetTime(tt) => app.session.set_time(tt),
-            UiAct::EndMerge => app.session.history.merge_key = None,
+            UiAct::SetTime(tt) => { if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.set_time(tt); Ok(()) }) { app.ui.status = e; } },
+            UiAct::EndMerge => { if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.history.merge_key = None; Ok(()) }) { app.ui.status = e; } },
             UiAct::ChangeRenderer => {
                 if super::dialogs::open_comp_settings(app).is_ok() {
                     app.dialog_state.comp.tab = super::comp_settings::Tab::Renderer;
@@ -1916,7 +1916,7 @@ fn apply_actions(app: &mut EffectcraftApp, ui: &mut egui::Ui, ctx: &egui::Contex
     }
     for (id, params) in actions {
         if id == "__endMerge" {
-            app.session.history.merge_key = None;
+            if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.history.merge_key = None; Ok(()) }) { app.ui.status = e; }
             continue;
         }
         if let Err(e) = crate::menus::invoke(app, ctx, &id, params) {
@@ -2461,7 +2461,7 @@ fn ruler_scrub(app: &mut EffectcraftApp, ui: &mut egui::Ui, g: &Tl) {
             secs = snap_time(&cands, secs, 8.0 / pps.max(1e-6));
         }
         let tt = Tick::from_seconds_f64(secs);
-        app.session.set_time(tt);
+        if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.set_time(tt); Ok(()) }) { app.ui.status = e; }
         app.stop();
         // Dragged past either edge of the ruler (over the layer outline, say), the view scrolls so
         // the current time indicator stays in sight (After Effects).

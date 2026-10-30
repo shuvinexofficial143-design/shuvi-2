@@ -326,7 +326,7 @@ fn apply_viewer(app: &mut EffectcraftApp, v: &Value) -> Result<(), String> {
             return Err(format!("unknown resolution `{r}` (auto, full, half, third, quarter)"));
         };
         if let Some(cid) = app.session.active_comp_id()
-            && let Err(e) = app.session.set_resolution(cid, res)
+            && let Err(e) = app.motion_owner_gate.manual_transaction(|| app.session.set_resolution(cid, res).map_err(|err| err.to_string()))
         {
             return Err(e.to_string());
         }

@@ -226,7 +226,7 @@ fn phase_nav(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect, v: &mut Vw
         p.galley_with_override_text_color(pos2(r.min.x + 8.0, r.center().y - g.size().y / 2.0), g, if active { t.tab_text_active } else { t.text_dim });
         app.auto.add(&format!("viewer.nav.{}", oc.0), r, &name);
         if resp.clicked() {
-            app.session.open_comp(oc);
+            if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.open_comp(oc); Ok(()) }) { app.ui.status = e; }
         }
         x = r.max.x + 4.0;
     }
@@ -1397,7 +1397,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 }
                 // The current time runs with the recording (Record Options ▸ Speed).
                 let speed = app.session.state.puppet.record_speed.max(1.0) / 100.0;
-                app.session.set_time(cti + Tick::from_seconds_f64(now / speed));
+                if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.set_time(cti + Tick::from_seconds_f64(now / speed)); Ok(()) }) { app.ui.status = e; }
                 painter.circle_filled(pos, 6.0, Color32::from_rgb(0xe0, 0x30, 0x30));
                 painter.text(pos + vec2(10.0, -10.0), Align2::LEFT_BOTTOM, crate::i18n::tr("Recording"), Tokens::ui(11.0), Color32::from_rgb(0xff, 0x60, 0x60));
                 ui.data_mut(|dd| dd.insert_temp(gid, Gesture::PuppetRecord { layer, pin, others, inv, began, cti, samples }));
@@ -1725,7 +1725,7 @@ fn phase_dblclick(app: &mut EffectcraftApp, ectx: &EvalCtx, resp: &egui::Respons
         let roto = app.ui.tool.roto_kind(false).is_some();
         if let Some(l) = pick(app, ectx, cpt, false).and_then(|l| comp.layer(l)) {
             match &l.source {
-                effectcraft_engine::project::LayerSource::Comp { item } => app.session.open_comp(*item),
+                effectcraft_engine::project::LayerSource::Comp { item } => { if let Err(e) = app.motion_owner_gate.manual_transaction(|| { app.session.open_comp(*item); Ok(()) }) { app.ui.status = e; } },
                 // With a Roto Brush tool, double-clicking a layer opens it in the Layer panel,
                 // where the brush works (After Effects).
                 _ if roto => {

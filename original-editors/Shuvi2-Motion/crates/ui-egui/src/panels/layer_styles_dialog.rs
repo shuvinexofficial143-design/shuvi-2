@@ -36,9 +36,11 @@ impl std::fmt::Debug for Checkpoint {
     }
 }
 
-fn checkpoint(app: &mut EffectcraftApp) -> Checkpoint {
-    app.session.history.merge_key = None;
-    Checkpoint { project: app.session.project.clone(), history: app.session.history.clone() }
+fn checkpoint(app: &mut EffectcraftApp) -> Result<Checkpoint, String> {
+    app.motion_owner_gate.manual_transaction(|| {
+        app.session.history.merge_key = None;
+        Ok(Checkpoint { project: app.session.project.clone(), history: app.session.history.clone() })
+    })
 }
 
 /// Open the dialog on the first selected (or given) layer, showing `style` (a style id;
@@ -55,7 +57,7 @@ pub fn open(app: &mut EffectcraftApp, params: &Value) -> Result<(), String> {
     if style != BLENDING && !STYLES.iter().any(|s| s.0 == style) {
         return Err(format!("unknown layer style `{style}`"));
     }
-    let checkpoint = checkpoint(app);
+    let checkpoint = checkpoint(app)?;
     app.dialog_state.layer_style = LayerStyleState { layer, selected: style, undo_mark: app.session.history.undo.len(), checkpoint: Some(checkpoint) };
     app.dialog = Some(Dialog::LayerStyles);
     Ok(())
@@ -69,7 +71,7 @@ pub fn route(app: &mut EffectcraftApp, id: &str, params: &Value) -> Result<bool,
         return Ok(false);
     }
     let mark = app.session.history.undo.len();
-    let checkpoint = checkpoint(app);
+    let checkpoint = checkpoint(app)?;
     app.motion_owner_gate.manual_menu_command(&mut app.session, id, json!({})).map_err(|e| e.to_string())?;
     open(app, &json!({"style": style}))?;
     // Cancel also removes the style just added.
