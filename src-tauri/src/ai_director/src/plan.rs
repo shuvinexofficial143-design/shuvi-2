@@ -58,7 +58,7 @@ fn build_scope(request:&ReserveWire)->Result<Scope,GuardError>{
         return Err(GuardError::Invalid);
     }
     Ok(Scope{task_id:request.task_id.clone(),plan_hash:request.plan_hash.clone(),
-        snapshot:snap,actions})
+        instruction:instruction.to_owned(),snapshot:snap,actions})
 }
 impl ReserveWire {
     /// Caller must hold native owner lock shared with manual edits while
