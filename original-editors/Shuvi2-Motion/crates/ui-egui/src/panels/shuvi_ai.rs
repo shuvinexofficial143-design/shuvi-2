@@ -22,22 +22,26 @@ const MAX_CHAT_TURNS: usize = 40;
 pub struct NativePreviewBinding {
     revision: u64,
     project: Arc<Project>,
+    plan: PendingCommand,
     path: Option<String>,
     active_comp: Option<ItemId>,
 }
 
 impl NativePreviewBinding {
-    pub fn capture(session: &Session) -> Self {
+    pub fn capture(session: &Session, plan: &PendingCommand) -> Self {
         Self {
             revision: session.revision,
             project: Arc::clone(&session.project),
+            plan: plan.clone(),
             path: session.path.clone(),
             active_comp: session.active_comp_id(),
         }
     }
 
-    pub fn matches(&self, session: &Session) -> bool {
-        self.revision == session.revision
+    pub fn matches(&self, session: &Session, pending: &PendingCommand) -> bool {
+        self.plan == *pending
+            && self.plan.requires_owner_approval
+            && self.revision == session.revision
             && Arc::ptr_eq(&self.project, &session.project)
             && self.path == session.path
             && self.active_comp == session.active_comp_id()
@@ -118,7 +122,7 @@ impl ShuviAiState {
         if self.pending.is_some() &&
             !self.preview_binding.as_ref().is_some_and(|binding|
                 self.pending.as_ref().is_some_and(|p| p.expected_revision == session.revision)
-                    && binding.matches(session)) {
+                    && self.pending.as_ref().is_some_and(|p|binding.matches(session,p))) {
             self.pending = None;
             self.preview_binding = None;
             self.status = "Native project, composition or revision changed: previous preview invalidated.".into();
@@ -139,8 +143,8 @@ fn prepare_preview(app: &mut EffectcraftApp) {
         .preview_new_composition(expected, &app.shuvi_ai.draft);
     match result {
         Ok(plan) => {
+            app.shuvi_ai.preview_binding = Some(NativePreviewBinding::capture(&app.session,&plan));
             app.shuvi_ai.pending = Some(plan);
-            app.shuvi_ai.preview_binding = Some(NativePreviewBinding::capture(&app.session));
             app.shuvi_ai.status = "Native plan checked and bound to this project; owner-approved editing is not connected.".into();
         }
         Err(error) => {
@@ -315,7 +319,7 @@ mod tests {
             params: serde_json::json!({"name": "Plan"}),
             requires_owner_approval: true,
         });
-        state.preview_binding = Some(NativePreviewBinding::capture(session));
+        state.preview_binding = state.pending.as_ref().map(|p|NativePreviewBinding::capture(session,p));
     }
 
     #[test]
@@ -365,6 +369,30 @@ mod tests {
         session.execute_checked("comp.open", serde_json::json!({"comp":first})).unwrap();
         state.invalidate_stale_preview(&session);
         assert!(state.pending.is_none());
+    }
+
+    #[test]
+    fn tampered_preview_payload_cannot_keep_old_native_binding() {
+        let session = Session::new();
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        state.pending.as_mut().unwrap().params["name"] = serde_json::json!("Different");
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none(), "a changed plan payload cannot inherit the old native binding");
+        install_bound_preview(&session, &mut state);
+        state.pending.as_mut().unwrap().requires_owner_approval = false;
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none(), "an owner approval flag may never be removed from a preview");
+    }
+
+    #[test]
+    fn changed_saved_file_path_invalidates_same_document_preview() {
+        let mut session = Session::new();
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        session.path = Some("native-saved-as.ecproj".into());
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none(), "Save As must invalidate a preview bound to the previous path");
     }
 
     #[test]
