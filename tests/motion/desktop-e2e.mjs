@@ -12,6 +12,7 @@ const KEY = "element-6066-11e4-a52e-4f735466cecf";
 let session;
 let lastStep="starting";
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+class FatalNativeUiError extends Error {}
 async function wd(method,route,data) {
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),25000);
@@ -27,7 +28,10 @@ async function wd(method,route,data) {
 async function waitFor(label,fn,timeout=40000){
   const start=Date.now();let lastError;
   while(Date.now()-start<timeout){
-    try{const result=await fn();if(result)return result}catch(e){lastError=e}
+    try{const result=await fn();if(result)return result}catch(e){
+      if(e instanceof FatalNativeUiError)throw e;
+      lastError=e;
+    }
     await delay(400);
   }
   throw new Error("Timeout waiting for "+label+": "+String(lastError??"not available"));
@@ -59,7 +63,7 @@ async function fill(selector,input){
 async function ready(message,timeout=40000){
   await waitFor(message,async()=>{
     const t=await text("#motion-status");
-    if(t.startsWith("FAIL:"))throw new Error("Native editor error: "+t);
+    if(t.startsWith("FAIL:"))throw new FatalNativeUiError("Native editor error: "+t);
     return t.includes(message)?t:null;
   },timeout);
 }
@@ -73,9 +77,18 @@ async function test(){
   await mkdir(artifacts,{recursive:true});
   const root=await mkdtemp(path.join(tmpdir(),"shuvi-motion-e2e-"));
   // Verify native Tauri actually launches a WebView, not a Vite-only browser.
-  const created=await wd("POST","/session",{
-    capabilities:{alwaysMatch:{"browserName":"wry","tauri:options":{application:path.resolve(application)}}}
-  });
+  let created;
+  try{
+    created=await wd("POST","/session",{
+      capabilities:{alwaysMatch:{"browserName":"wry","tauri:options":{application:path.resolve(application)}}}
+    });
+  }catch(error){
+    await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify({
+      ok:false,failedStep:"start-real-webview2-session",
+      driver:"tauri-driver",application:path.resolve(application),error:String(error)
+    },null,2));
+    throw error;
+  }
   session=created.sessionId;
   assert.ok(session,"tauri-driver did not create a real desktop session");
   const result={driver:"tauri-driver",window:"real-windows-webview2",
