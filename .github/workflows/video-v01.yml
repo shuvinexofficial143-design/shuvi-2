@@ -1,4 +1,4 @@
-name: Shuvi 2 video V02 Windows engine/package verify
+name: Shuvi 2 video V10 Windows engine + desktop E2E
 on:
   pull_request:
     paths:
@@ -13,6 +13,12 @@ on:
       - ".gitmodules"
       - "vendor/filmcraft"
   workflow_dispatch:
+
+# Avoid burning several Windows builders for obsolete PR commits; only newest
+# head gets a complete integration/desktop E2E verdict.
+concurrency:
+  group: shuvi2-video-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   video-windows-package:
