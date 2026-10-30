@@ -70,3 +70,38 @@ jobs:
           path: proof/motion/
           if-no-files-found: error
           retention-days: 14
+
+  motion-desktop-e2e-windows:
+    name: Real Windows WebView2 mouse-click-to-native-editor E2E
+    needs: motion-engine-windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout pinned native engines
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install native Rust toolchain
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install desktop/frontend packages
+        run: npm install --no-audit --no-fund
+      - name: Build actual Shuvi 2 Windows WebView2 binary
+        run: |
+          npm run build
+          cargo build --manifest-path src-tauri/Cargo.toml --bin shuvi2
+      - name: Click actual Windows Motion UI and verify native PNG/project on disk
+        shell: pwsh
+        run: ./scripts/motion/run-windows-e2e.ps1
+      - name: Upload real desktop screenshot and E2E receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-windows-webview2-e2e
+          path: proof/motion-desktop/
+          if-no-files-found: warn
+          retention-days: 14
