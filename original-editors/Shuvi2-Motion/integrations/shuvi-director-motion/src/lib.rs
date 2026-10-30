@@ -1332,6 +1332,14 @@ mod tests{
         assert_eq!(c["nativeEditor"]["projectFormat"],".ecproj");
         assert_eq!(c["editorRelease"]["sqliteBridgeBundled"],false);
         assert_eq!(c["editorRelease"]["productionAiEditingEnabled"],false);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["appOwned"],true);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["menuAndShortcutCommandRoute"],true);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["controlChannelEngineExecuteRoute"],true);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["controlChannelOffloadedCommandAdmission"],true);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["aiLeaseAvailableInProduction"],false);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["otherDirectNativeMutationRoutesReconciled"],false);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["desktopTrustedOwnerApproval"],false);
+        assert_eq!(c["manualNativeOwnerGateFoundation"]["globalCrossProcessLock"],false);
         let caps=unintegrated_capabilities();
         assert_eq!(caps.version,1);
         let expected=[
