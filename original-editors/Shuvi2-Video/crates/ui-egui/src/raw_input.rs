@@ -56,6 +56,68 @@ pub(crate) fn synthesize_mac_ctrl_click(armed: &mut bool, raw_input: &mut egui::
     }
 }
 
+/// Native floating windows do NOT enter FilmcraftApp::raw_input_hook.
+pub(crate) fn rewrite_native_window_input_admitted(
+    admission: &crate::shuvi_manual_admission::ManualCommandAdmission,
+    control_input_only: bool,
+    armed: &Mutex<HashMap<egui::ViewportId,bool>>,
+    input: &mut egui::RawInput,
+) {
+    let _owner=match admission.try_claim(){
+        Ok(owner)=>owner,
+        Err(_)=>{drop_native_input(input);return;}
+    };
+    rewrite_native_window_input(control_input_only,armed,input);
+}
+
+#[cfg(test)]
+mod shuvi_floating_window_admission_tests {
+    use super::*;
+    use crate::shuvi_manual_admission::ManualCommandAdmission;
+    use std::sync::{Arc,Barrier};
+
+    #[test]
+    fn floating_window_busy_drops_raw_input_and_cannot_replay_it() {
+        let owner=ManualCommandAdmission::default();
+        let armed=Mutex::<HashMap<egui::ViewportId,bool>>::default();
+        let sync=Arc::new(Barrier::new(2));
+        let w=Arc::clone(&sync);
+        let shared=owner.clone();
+        let worker=std::thread::spawn(move||{
+            let _guard=shared.try_claim().unwrap();
+            w.wait();w.wait();
+        });
+        sync.wait();
+        let mut input=egui::RawInput{events:vec![
+            egui::Event::Text("stale".into()),
+            egui::Event::PointerMoved(egui::pos2(8.0,4.0))
+        ],..Default::default()};
+        rewrite_native_window_input_admitted(&owner,false,&armed,&mut input);
+        assert!(input.events.is_empty());
+        sync.wait();
+        worker.join().unwrap();
+        let mut later=egui::RawInput::default();
+        rewrite_native_window_input_admitted(&owner,false,&armed,&mut later);
+        assert!(later.events.is_empty());
+    }
+
+    #[test]
+    fn floating_window_poison_rejects_input_but_same_thread_allows_it() {
+        let owner=ManualCommandAdmission::default();
+        let armed=Mutex::<HashMap<egui::ViewportId,bool>>::default();
+        let lease=owner.try_claim().unwrap();
+        let mut input=egui::RawInput{events:vec![
+            egui::Event::Text("allowed".into())
+        ],..Default::default()};
+        rewrite_native_window_input_admitted(&owner,false,&armed,&mut input);
+        assert_eq!(input.events.len(),1);
+        drop(lease);
+        owner.poison();
+        rewrite_native_window_input_admitted(&owner,false,&armed,&mut input);
+        assert!(input.events.is_empty());
+    }
+}
+
 #[cfg(test)]
 mod mac_ctrl_click_tests {
     use egui::{Event, Modifiers, PointerButton, RawInput};
