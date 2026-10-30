@@ -80,6 +80,20 @@ try {
     await action('redo','Verified persistent FilmCraft redo');
     assert.equal((await driver.elements('.v-lanes .v-clip')).length,1);
   });
+  await step('real owner-click FilmCraft split with native disk readback',async()=>{
+    // A genuine manually clicked classic FilmCraft split (NOT AI approval).
+    // The exact native .fcproj bytes and timeline clip count must change.
+    const before=sha256(await readFile(project));
+    await driver.click('.v-lanes .v-clip');
+    await driver.fill(field('seconds'),'0.5');
+    await action('split','Verified split');
+    assert.equal((await driver.elements('.v-lanes .v-clip')).length,2,'native split must produce two real clips');
+    const after=sha256(await readFile(project));
+    assert.notEqual(after,before,'native .fcproj did not change after split');
+    result.splitBeforeSha256=before;result.splitAfterSha256=after;
+    result.nativeSplitVerified=true;
+    await screenshot('video-native-split.png');
+  });
   await step('native decoded preview and scrub',async()=>{
     await driver.fill(field('seconds'),'0.25');await action('preview','Verified real FilmCraft frame');
     await until('decoded native PNG',async()=>Number(await driver.property('.v-monitor img','naturalWidth'))>0);
@@ -116,7 +130,7 @@ try {
   await step('same window retains video state after Motion',async()=>{
     await driver.click('button[data-studio="motion"]');
     await until('native Motion mounted',()=>driver.element('#motion-create'));
-    await selectVideo();assert.equal((await driver.elements('.v-lanes .v-clip')).length,1);
+    await selectVideo();assert.equal((await driver.elements('.v-lanes .v-clip')).length,2);
     assert.equal(await driver.property(field('project'),'value'),result.canonicalProjectPath);
   });
   await step('cold restart and native saved project readback',async()=>{
@@ -124,7 +138,7 @@ try {
     await driver.close();await driver.start(app);await selectVideo();
     await driver.fill(field('root'),root);await driver.fill(field('project'),project);
     await action('open','Verified FilmCraft project snapshot');
-    assert.equal((await driver.elements('.v-lanes .v-clip')).length,1);
+    assert.equal((await driver.elements('.v-lanes .v-clip')).length,2,'both actual split clips must survive disk reopen');
     assert.equal(sha256(await readFile(project)),before);
     result.projectSha256=before;result.coldRestartVerified=true;
     await driver.fill(field('seconds'),'0.25');await action('preview','Verified real FilmCraft frame');

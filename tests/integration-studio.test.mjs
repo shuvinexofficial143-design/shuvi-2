@@ -34,3 +34,20 @@ test("native Windows canonical FilmCraft readback is used for edits and static M
   assert.match(shell,/\.preview > \.screen/);
   assert.match(shell,/Native editing · AI offline/);
 });
+
+test("Rust native FilmCraft Tauri action deserializer accepts every frontend camelCase field",()=>{
+  const rust=read("src-tauri/src/video/timeline.rs");
+  const ts=read("src/studios/video/timeline.ts");
+  assert.match(rust,/rename_all_fields = "camelCase"/);
+  for(const field of ["itemId","clipId","deltaFrames"]) {
+    assert.ok(ts.includes(field),"missing typed browser action field "+field);
+    assert.ok(rust.includes('"'+field+'"'),"missing exact Rust serde regression fixture for "+field);
+  }
+  assert.match(rust,/browser_camelcase_actions_deserialize_into_real_native_timeline_commands/);
+  const e2e=read("scripts/release/video-installed-e2e.mjs");
+  assert.match(e2e,/real owner-click FilmCraft split with native disk readback/);
+  assert.match(e2e,/assert\.notEqual\(after,before/);
+  assert.match(e2e,/nativeSplitVerified=true/);
+  assert.match(e2e,/both actual split clips must survive disk reopen/);
+  assert.match(e2e,/video-native-split\.png/);
+});

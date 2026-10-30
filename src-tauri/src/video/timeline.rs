@@ -24,7 +24,7 @@ pub struct TimelineRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TimelineAction {
     CreateSequence { name: String, width: u32, height: u32, fps: u32 },
     Place { item_id: u64, track: String, seconds: f64, video: bool, audio: bool },
@@ -203,6 +203,41 @@ mod tests {
         assert!(mapped_action(&TimelineAction::Trim {clip_id:1,edge:"middle".into(),ripple:false,delta_frames:1}).is_err());
         assert!(mapped_action(&TimelineAction::Move {clip_id:1,track:"V1".into(),seconds:-1.0,insert:false}).is_err());
         assert!(valid_track("V1") && valid_track("A16") && !valid_track("V17"));
+    }
+    #[test]
+    fn browser_camelcase_actions_deserialize_into_real_native_timeline_commands() {
+        // Exact JSON keys emitted by src/studios/video/timeline.ts and Tauri invoke.
+        // Serde enum rename_all handles the TYPE name only; the fields require
+        // rename_all_fields. Previously "itemId" was silently unknown and
+        // "item_id" was reported missing after a successful real media import.
+        let cases = [
+            (json!({"type":"createSequence","name":"Scene","width":64,"height":64,"fps":12}),"file.newSequence"),
+            (json!({"type":"place","itemId":7,"track":"V1","seconds":0.0,"video":true,"audio":false}),"timeline.place"),
+            (json!({"type":"split","clipId":9,"seconds":0.5}),"timeline.razor"),
+            (json!({"type":"trim","clipId":9,"edge":"out","ripple":false,"deltaFrames":-3}),"timeline.trim"),
+            (json!({"type":"move","clipId":9,"track":"V1","seconds":1.0,"insert":false}),"timeline.move"),
+            (json!({"type":"delete","clipId":9,"ripple":false}),"edit.clear"),
+            (json!({"type":"undo"}),"edit.undo"),
+            (json!({"type":"redo"}),"edit.redo"),
+        ];
+        for (raw, expected) in cases {
+            let action:TimelineAction=serde_json::from_value(raw).expect("UI camelCase must match native action");
+            assert_eq!(mapped_action(&action).unwrap()["id"],expected);
+        }
+        let request:TimelineRequest=serde_json::from_value(json!({
+            "selectedRoot":"C:\\Owner","projectPath":"C:\\Owner\\work.fcproj",
+            "expectedRevision":3,"expectedProjectSha256":"a".repeat(64),
+            "actions":[{"type":"place","itemId":7,"track":"V1","seconds":0.0,"video":true,"audio":false}]
+        })).unwrap();
+        assert_eq!(request.actions.len(),1);
+        // No snake_case alias: browser must use the documented typed contract.
+        assert!(serde_json::from_value::<TimelineAction>(json!({
+            "type":"place","item_id":7,"track":"V1","seconds":0.0,
+            "video":true,"audio":false
+        })).is_err());
+        assert!(serde_json::from_value::<TimelineAction>(json!({
+            "type":"split","clip_id":9,"seconds":0.5
+        })).is_err());
     }
     #[test]
     fn maps_real_filmcraft_command_ids() {
