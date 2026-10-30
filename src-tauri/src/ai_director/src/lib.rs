@@ -1,7 +1,7 @@
 //! A02 isolated real HTTPS OpenAI adapter. Not yet registered in Tauri.
 //! Credential retrieval belongs to the trusted Windows host vault, never JS.
-pub mod guard;
 //! No arbitrary model-selected endpoints, shell commands or editor IPC.
+pub mod guard;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -125,7 +125,7 @@ impl OpenAiProvider {
            key.chars().any(char::is_whitespace) {
             return Err(error("CREDENTIAL_INVALID"));
         }
-        let mut response=self.client.post(URL).bearer_auth(key.as_str()).json(&payload).send()
+        let response=self.client.post(URL).bearer_auth(key.as_str()).json(&payload).send()
             .map_err(|_|error("NETWORK_OR_TIMEOUT"))?;
         if !response.status().is_success() {
             return Err(match response.status().as_u16() {
