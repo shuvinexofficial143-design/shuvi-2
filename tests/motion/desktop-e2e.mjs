@@ -193,6 +193,30 @@ async function test(){
       assert.deepEqual(await readFile(path.join(root,"webview_e2e.png")),png,
         "Second PNG export unexpectedly overwrote the owner file");
     });
+    await step("export owner-scoped real native 3-frame PNG sequence",async()=>{
+      await fill("#motion-sequence-folder","webview_frames");
+      await fill("#motion-sequence-frames","3");
+      await click("#motion-export-sequence");
+      await ready("Exporting native PNG sequence · native verification complete",60000);
+      const folder=path.join(root,"webview_frames");
+      const manifest=JSON.parse(await readFile(path.join(folder,"sequence.json"),"utf8"));
+      assert.equal(manifest.ok,true);
+      assert.equal(manifest.source,"native-effectcraft");
+      assert.equal(manifest.frames,3);
+      for(let i=0;i<3;i++){
+        const png=await readFile(path.join(folder,`frame_${String(i).padStart(4,"0")}.png`));
+        assert.ok(png.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
+          "native image sequence frame is not actual PNG");
+        assert.ok(png.length>100);
+      }
+      await click("#motion-export-sequence");
+      await waitFor("existing sequence folder rejected",async()=>{
+        const status=await text("#motion-status");
+        return status.includes("FAIL:")&&status.includes("cannot create new sequence folder")?status:null;
+      });
+      result.sequenceVerified=true;
+      result.sequenceFrames=3;
+    });
     await step("open saved native project from disk and restore effects and masks",async()=>{
       await click("#motion-open");
       await ready("Opening native project · native verification complete",60000);
