@@ -109,8 +109,10 @@ export function createGuardedDesktopAdapter({invoke,readback}={}) {
       typeof receipt.objectProofSha256!=="string" || !SHA.test(receipt.objectProofSha256) ||
       receipt.taskId!==request.taskId || receipt.stepIndex!==request.stepIndex)
       throw new Error("NATIVE_GUARDED_RECEIPT_INVALID");
-    return {guarded:true,nativeVerified:true,idempotencyKey:request.idempotencyKey,
-      after:actual};
+    return {guarded:true,nativeVerified:true,
+      taskId:request.taskId,stepIndex:request.stepIndex,
+      objectProofSha256:receipt.objectProofSha256,
+      idempotencyKey:request.idempotencyKey,after:actual};
   }
   return Object.freeze({readSnapshot:()=>readback.readSnapshot(),requireReady,executeGuarded});
 }
