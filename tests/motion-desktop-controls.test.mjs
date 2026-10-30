@@ -50,3 +50,14 @@ test("GUI evidence cannot be accepted through timeout, syntax errors or fake fra
   assert.match(e2e,/coldRestartVerified=true/);
   assert.doesNotMatch(e2e,/page\.evaluate|mockInvoke|fakeRender/);
 });
+
+test("M17 real Windows WebDriver session startup exceeds legacy 25-second abort without hiding transport failures",()=>{
+  assert.ok(e2e.includes("const SESSION_STARTUP_MS=180000"));
+  assert.ok(e2e.includes("const COMMAND_TIMEOUT_MS=45000"));
+  assert.ok(e2e.includes('method==="POST"&&route==="/session"'));
+  assert.ok(e2e.includes('const timeout=startup?SESSION_STARTUP_MS:COMMAND_TIMEOUT_MS'));
+  assert.ok(e2e.includes("sessionStartupElapsedMs:Date.now()-sessionStart"));
+  assert.ok(e2e.includes("sessionTimeoutMs:SESSION_STARTUP_MS"));
+  assert.ok(e2e.includes('failedStep:"start-real-webview2-session"'));
+  assert.ok(e2e.includes("controller.signal.aborted"));
+});
