@@ -11,7 +11,10 @@
 //! lock or provide persisted authorization.
 use std::sync::Arc;
 
+use serde::Deserialize;
 use serde_json::{Value, json};
+use crate::project::ClipId;
+use crate::time::{Tick, TICKS_PER_SECOND};
 
 use crate::{EngineError, Result, Session, project::{ItemId, Project}, shuvi_ai_readonly};
 
@@ -20,6 +23,8 @@ use crate::{EngineError, Result, Session, project::{ItemId, Project}, shuvi_ai_r
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TypedVideoEdit {
     SplitAllTracksAt { tick: i64 },
+    /// A07's video.split is clip-specific, NOT an all-track razor.
+    SplitClipAt { clip_id: u64, tick: i64 },
 }
 
 /// A volatile in-memory fence; it is NOT a durable project hash/consent token.
@@ -89,6 +94,90 @@ fn timeline_clip_count(sequence: &Value) -> Result<usize> {
     Ok(count)
 }
 
+
+/// A07 model proposal's exact video.split shape (not a consent or execution
+/// request). The canonical A07 Rust enum and SQLite ledger remain on the
+/// AI Director branch: this video-owned *adapter* does not copy either.
+/// This parser is PRIVATE and never grants model-originated execution.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+enum A07VideoProposal {
+    #[serde(rename = "video.split")]
+    VideoSplit { clip_id: u64, seconds: f64 },
+}
+
+/// Convert an untrusted provider proposal into a bounded native typed request.
+/// It is NOT sufficient approval: the caller must separately use the
+/// persisted A07 plan, one native owner-consent and shared owner lock.
+/// No other video action or arbitrary command is accepted at this stage.
+#[allow(dead_code)]
+fn parse_a07_video_split(value: Value, session: &Session) -> Result<TypedVideoEdit> {
+    let proposal: A07VideoProposal = serde_json::from_value(value).map_err(|_| {
+        EngineError::Other("A07_ACTION_REJECTED: invalid or unsupported video action schema".into())
+    })?;
+    match proposal {
+        A07VideoProposal::VideoSplit { clip_id, seconds } => {
+            if clip_id == 0 || !seconds.is_finite() || !(0.0..=21_600.0).contains(&seconds) {
+                return Err(EngineError::Other("A07_ACTION_REJECTED: invalid clip or seconds".into()));
+            }
+            // Convert exactly once and snap to the ACTIVE native sequence rate.
+            let tick = (seconds * TICKS_PER_SECOND as f64).round();
+            if !tick.is_finite() || tick < i64::MIN as f64 || tick > i64::MAX as f64 {
+                return Err(EngineError::Other("A07_ACTION_REJECTED: time overflow".into()));
+            }
+            let tick = session.sequence_rate().snap_nearest(Tick(tick as i64)).0;
+            Ok(TypedVideoEdit::SplitClipAt { clip_id, tick })
+        }
+    }
+}
+
+/// Locate the exact clip ID on the ORIGINAL project timeline and ensure the
+/// split lies strictly inside it; no fallback to timeline selection or targeted
+/// tracks is allowed. A model cannot invent an ID and get another clip edited.
+fn clip_target_in(sequence: &Value, clip_id: u64, tick: i64) -> Result<(String, u64)> {
+    for kind in ["video", "audio"] {
+        let tracks = sequence[kind].as_array().ok_or_else(|| EngineError::Other("missing native tracks".into()))?;
+        for track in tracks {
+            let items = track["items"].as_array().ok_or_else(|| EngineError::Other("missing native items".into()))?;
+            for item in items {
+                if item["clip"].as_u64() != Some(clip_id) {
+                    continue;
+                }
+                let start = item["start"].as_i64().ok_or_else(|| EngineError::Other("native clip missing start".into()))?;
+                let end = item["end"].as_i64().ok_or_else(|| EngineError::Other("native clip missing end".into()))?;
+                if tick <= start || tick >= end {
+                    return Err(EngineError::Other("SPLIT_OUT_OF_RANGE: tick must lie inside exact native clip".into()));
+                }
+                let track_id = track["id"].as_u64().ok_or_else(|| EngineError::Other("native track missing id".into()))?;
+                return Ok((kind.to_string(), track_id));
+            }
+        }
+    }
+    Err(EngineError::Other("A07_CLIP_NOT_FOUND: no exact clip ID in active sequence".into()))
+}
+
+/// Read back that a clip-specific split did not touch ANY unrelated track.
+/// The A07 host additionally needs SHA-256 native object proof and a SQLite
+/// committed receipt; a per-track equality check is not those assurances.
+fn confirm_other_tracks_unchanged(before: &Value, after: &Value, kind: &str, target_track: u64) -> Result<()> {
+    for key in ["video", "audio"] {
+        let original = before[key].as_array().ok_or_else(|| EngineError::Other("missing before tracks".into()))?;
+        let current = after[key].as_array().ok_or_else(|| EngineError::Other("missing after tracks".into()))?;
+        if original.len() != current.len() {
+            return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: track count changed".into()));
+        }
+        for (a, b) in original.iter().zip(current) {
+            if a["id"] != b["id"] {
+                return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: track identity changed".into()));
+            }
+            if !(key == kind && a["id"].as_u64() == Some(target_track)) && a != b {
+                return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: unrelated track changed".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Testable real native editing primitive, deliberately NOT exported from the
 /// crate. There is NO model-facing or renderer-facing caller in this milestone.
 ///
@@ -106,7 +195,15 @@ pub(crate) fn execute_owner_only(
     let original_sequence = before.sequence.as_ref().ok_or(EngineError::NoSequence)?;
     let before_clips = timeline_clip_count(original_sequence)?;
 
-    let (command, params) = match action {
+    // All edits use the true original engine's synchronous Session. The exact
+    // clip-specific A07 variant never falls back to selected/targeted tracks.
+    let clip_target = match action {
+        TypedVideoEdit::SplitClipAt { clip_id, tick } => {
+            Some(clip_target_in(original_sequence, clip_id, tick)?)
+        }
+        TypedVideoEdit::SplitAllTracksAt { .. } => None,
+    };
+    let cuts = match action {
         TypedVideoEdit::SplitAllTracksAt { tick } => {
             let end = original_sequence["duration"].as_i64().ok_or_else(|| {
                 EngineError::Other("native timeline duration missing".into())
@@ -114,21 +211,32 @@ pub(crate) fn execute_owner_only(
             if tick <= 0 || tick >= end {
                 return Err(EngineError::Other("SPLIT_OUT_OF_RANGE: split tick must be strictly inside native sequence".into()));
             }
-            ("sequence.addEditAllTracks", json!({"time": tick}))
+            let result = session.execute("sequence.addEditAllTracks", json!({"time": tick}))?;
+            result["cuts"].as_u64().ok_or_else(|| {
+                EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: cut count missing; do not retry blindly".into())
+            })?
+        }
+        TypedVideoEdit::SplitClipAt { clip_id, tick } => {
+            let razor_at = Tick(tick);
+            // Direct original FilmCraft edit algebra, with ONE precise clip ID,
+            // rather than menu focus, synthetic input or Selection fallback.
+            let ids = session.edit_sequence("Shuvi Native Split Clip", |seq, ctx, _| {
+                Ok(filmcraft_edit::razor_items(seq, &[ClipId(clip_id)], razor_at, ctx))
+            })?;
+            ids.len() as u64
         }
     };
-
-    // Execute only the precise original FilmCraft registered command, against
-    // the SAME in-memory Session as the human's editing. Never use UIA or TCP.
-    let result = session.execute(command, params)?;
-    let cuts = result["cuts"].as_u64().ok_or_else(|| {
-        EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: cut count missing; do not retry blindly".into())
-    })?;
     let after = shuvi_ai_readonly::snapshot(session)?;
     let after_sequence = after.sequence.as_ref().ok_or_else(|| {
         EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: sequence disappeared; do not retry blindly".into())
     })?;
     let after_clips = timeline_clip_count(after_sequence)?;
+    if let Some((kind, target_track)) = clip_target {
+        confirm_other_tracks_unchanged(original_sequence, after_sequence, &kind, target_track)?;
+        if after_clips != before_clips + 1 || cuts != 1 {
+            return Err(EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: expected exactly one target clip split".into()));
+        }
+    }
     if after.active_sequence != before.active_sequence
         || after.document_epoch != before.document_epoch
         || cuts == 0 || after_clips <= before_clips || after.revision <= before.revision
@@ -209,6 +317,65 @@ mod tests {
             let res = execute_owner_only(&mut session, &fence, TypedVideoEdit::SplitAllTracksAt { tick });
             assert!(res.unwrap_err().to_string().contains("SPLIT_OUT_OF_RANGE"));
             assert_eq!((session.revision, session.journal.len()), baseline);
+        }
+    }
+
+
+    #[test]
+    fn shuvi_a07_video_split_parser_rejects_model_extra_fields_and_other_actions() {
+        let session = demo();
+        let valid = json!({"type":"video.split","clipId":7,"seconds":2.0});
+        assert!(matches!(parse_a07_video_split(valid, &session).unwrap(), TypedVideoEdit::SplitClipAt { clip_id: 7, .. }));
+        for invalid in [
+            json!({"type":"video.split","clipId":7,"seconds":2,"approved":true}),
+            json!({"type":"video.delete","clipId":7}),
+            json!({"type":"system.shell","command":"rm"}),
+            json!({"type":"video.split","clipId":0,"seconds":2}),
+            json!({"type":"video.split","clipId":7,"seconds":-1}),
+            json!({"type":"video.split","clipId":7,"seconds":21601}),
+            json!({"type":"video.split","clipId":"7","seconds":2}),
+        ] {
+            assert!(parse_a07_video_split(invalid, &session).is_err());
+        }
+    }
+
+    #[test]
+    fn shuvi_a07_native_video_split_changes_only_named_clip_and_can_undo() {
+        let mut session = demo();
+        let tick = session.sequence_rate().tick_of(48);
+        let sequence = session.active_sequence().unwrap();
+        let clip = sequence.video_tracks[0].items.iter()
+            .find(|x| x.start < tick && tick < x.end()).expect("source clip crossing frame 48").id.0;
+        let before = shuvi_ai_readonly::snapshot(&mut session).unwrap();
+        let proposal = json!({"type":"video.split","clipId":clip,"seconds":2.0});
+        let action = parse_a07_video_split(proposal, &session).unwrap();
+        let fence = SessionFence::capture(&session).unwrap();
+        let result = execute_owner_only(&mut session, &fence, action).unwrap();
+        assert_eq!(result.cuts, 1);
+        assert_eq!(result.after_clips, result.before_clips + 1);
+        let after = shuvi_ai_readonly::snapshot(&mut session).unwrap();
+        // The only changed native track is confirmed inside the adapter;
+        // Undo restores the full previous sequence.
+        session.execute("edit.undo", json!({})).unwrap();
+        let undone = shuvi_ai_readonly::snapshot(&mut session).unwrap();
+        assert_eq!(undone.sequence, before.sequence);
+        assert!(after.revision > before.revision);
+    }
+
+    #[test]
+    fn shuvi_a07_missing_or_outside_clip_does_not_edit_or_change_selection() {
+        let mut session = demo();
+        let tick = session.sequence_rate().tick_of(48).0;
+        let original_selection = session.state.selection.clone();
+        let baseline = (session.revision, session.journal.len());
+        let fence = SessionFence::capture(&session).unwrap();
+        for action in [
+            TypedVideoEdit::SplitClipAt { clip_id: u64::MAX, tick },
+            TypedVideoEdit::SplitClipAt { clip_id: 0, tick },
+        ] {
+            assert!(execute_owner_only(&mut session, &fence, action).is_err());
+            assert_eq!((session.revision, session.journal.len()), baseline);
+            assert_eq!(session.state.selection, original_selection);
         }
     }
 

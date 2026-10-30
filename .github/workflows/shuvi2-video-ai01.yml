@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI03 Native Guarded Kernel Baseline
+name: Shuvi 2 Video - AI04 A07 Typed Native Contract
 on:
   push:
     branches:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: shuvi2-video-ai01
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify-and-build-native-video:
