@@ -100,6 +100,8 @@ fn real_filmcraftapp_a07_transaction_has_same_native_owner_sqlite_receipt_and_ma
     let clip=target_clip(&mut app);
     let state=view(&mut app);
     let before=shuvi_ai_readonly::snapshot(&mut app.session).unwrap();
+    app.shuvi_ai.refresh(&mut app.session);
+    assert!(app.shuvi_ai.readback.is_some());
     let (plan,reserve,consent)=planned(state.clone(),clip,"a17-real-ui-a07-01");
     let mut db=tmp.db();
     let mut clicks=TestOnlyOwner{clicks:0};
@@ -116,6 +118,9 @@ fn real_filmcraftapp_a07_transaction_has_same_native_owner_sqlite_receipt_and_ma
         Ok(result)
     }).unwrap();
     assert_eq!(clicks.clicks,1);
+    // The same original UI sidebar MUST discard stale readback/preflight.
+    assert!(app.shuvi_ai.readback.is_none());
+    assert!(app.shuvi_ai.preview_plan.is_none());
     assert_eq!(result["objectProofSha256"].as_str().unwrap().len(),64);
     let after=shuvi_ai_readonly::snapshot(&mut app.session).unwrap();
     let b=before.sequence.as_ref().unwrap()["video"][0]["items"].as_array().unwrap().len();
@@ -169,4 +174,54 @@ fn original_manual_ui_edit_between_a07_reserve_and_consent_stales_sqlite_before_
     assert_eq!(view(&mut app),after_manual);
     assert_eq!(db.recovery_bound(&reserve.task_id,&reserve.plan_hash).unwrap(),
         vec!["not_started"]);
+    // A denied, pre-mutation canonical consent must not poison the actual
+    // original FilmCraft editor. The owner was released without mutation.
+    let revision=app.session.revision;
+    menus::invoke(&mut app,&egui::Context::default(),"file.newSequence",
+        json!({"name":"manual still works after A07 stale denial",
+            "width":320,"height":240})).unwrap();
+    assert!(app.session.revision>revision);
+}
+
+#[test]
+fn verified_native_sqlite_edit_but_lost_gui_ack_never_replays_and_poison_is_visible() {
+    let temp=Tmp::new();
+    let mut app=app();
+    let clip=target_clip(&mut app);
+    let snapshot=view(&mut app);
+    let (plan,reserve,consent)=planned(snapshot,clip,"a18-lost-gui-ack-01");
+    let before=shuvi_ai_readonly::snapshot(&mut app.session).unwrap();
+    let mut ledger=temp.db();
+    let mut clicks=TestOnlyOwner{clicks:0};
+    // All native logic and canonical SQLite receipts are REAL; only the
+    // explicit owner Yes click is a unit-test double, never a live modal.
+    let outcome=app.with_shuvi_trusted_ai_transaction(|session|->Result<(),String>{
+        let mut owner=VideoOwner::new(session,
+            "trusted-ui-project-01".into(),"native-ui-owner-session-01".into())?;
+        let mut host=GuardedHost{ledger:&mut ledger,owner:&mut owner};
+        host.reserve(&reserve).map_err(|e|e.to_string())?;
+        host.request_consent(&consent,&mut clicks).map_err(|e|e.to_string())?;
+        let receipt=host.execute(wire(&plan)).map_err(|e|e.to_string())?;
+        assert_eq!(receipt["nativeVerified"],true);
+        // An acknowledged, persisted native edit actually happened; inject
+        // only a lost UI acknowledgement after the durable receipt.
+        Err("injected lost frontend acknowledgement AFTER verified A07 receipt".into())
+    });
+    assert_eq!(outcome.unwrap_err(),"SHUVI_NATIVE_AI_OUTCOME_UNCERTAIN");
+    assert_eq!(clicks.clicks,1);
+    let after=shuvi_ai_readonly::snapshot(&mut app.session).unwrap();
+    let original_count=before.sequence.as_ref().unwrap()["video"][0]["items"].as_array().unwrap().len();
+    let edited_count=after.sequence.as_ref().unwrap()["video"][0]["items"].as_array().unwrap().len();
+    assert_eq!(edited_count,original_count+1);
+    assert_eq!(ledger.recovery_bound(&reserve.task_id,&reserve.plan_hash).unwrap(),
+        vec!["verified"]);
+    // Editor never claims success and never permits user/manual auto-retry.
+    let command=menus::invoke(&mut app,&egui::Context::default(),"file.newSequence",
+        json!({"name":"must not retry after lost acknowledgement"}));
+    assert!(command.unwrap_err().contains("SHUVI_NATIVE_OWNER_POISONED"));
+    assert_eq!(app.ui.status,"SHUVI_NATIVE_AI_OUTCOME_UNCERTAIN");
+    assert!(app.shuvi_ai.readback.is_none());
+    drop(ledger);
+    assert_eq!(temp.db().recovery_bound(&reserve.task_id,&reserve.plan_hash).unwrap(),
+        vec!["verified"]);
 }
