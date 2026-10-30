@@ -1,7 +1,7 @@
 # Windows-only real WebView2 desktop E2E launcher; no browser-only mocks.
 [CmdletBinding()]
 param(
-    [string]$Application = "src-tauri/target/debug/shuvi2.exe",
+    [string]$Application = "src-tauri/target/release/shuvi2.exe",
     [string]$Artifacts = "proof/motion-desktop"
 )
 $ErrorActionPreference = "Stop"
@@ -10,6 +10,9 @@ $project = (Get-Location).Path
 $binary = (Resolve-Path $Application -ErrorAction Stop).Path
 $proof = Join-Path $project $Artifacts
 New-Item -ItemType Directory -Path $proof -Force | Out-Null
+# Reject invalid JavaScript before downloading drivers or launching the Windows app.
+& node --check tests/motion/desktop-e2e.mjs
+if ($LASTEXITCODE -ne 0) { throw "Desktop WebDriver E2E JavaScript failed syntax preflight" }
 $env:SHUVI_MOTION_EXE = $binary
 $env:SHUVI_MOTION_E2E_ARTIFACTS = $proof
 $pin = (git -C vendor/effectcraft rev-parse HEAD).Trim()
