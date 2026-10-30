@@ -22,12 +22,16 @@ fn token(s:&str)->bool{s.len()>=8&&s.len()<=64&&s.bytes().all(|b|b.is_ascii_alph
 fn positive(n:u64)->bool{n>0}
 fn finite(t:f64)->bool{t.is_finite()&&(0.0..=21600.0).contains(&t)}
 fn name(s:&str)->bool{!s.is_empty()&&s.len()<=120&&s.trim()==s&&!s.chars().any(char::is_control)}
+fn bounded_text(s:&str,max:usize)->bool {
+    !s.is_empty()&&s.chars().count()<=max&&s.trim()==s&&!s.chars().any(char::is_control)
+}
 fn track(s:&str)->bool {
     s.len()>=2&&s.len()<=3&&(s.starts_with('V')||s.starts_with('A'))&&
     s[1..].bytes().all(|b|b.is_ascii_digit())&&
     !s[1..].starts_with('0')&&s[1..].parse::<u8>().is_ok_and(|n|(1..=16).contains(&n))
 }
 impl Snapshot {
+    pub(crate) fn is_valid(&self)->bool {self.valid()}
     fn valid(&self)->bool {
         !self.project_id.is_empty()&&self.project_id.len()<=1024&&
         !self.session_id.is_empty()&&self.session_id.len()<=128&&
@@ -57,6 +61,7 @@ pub enum Action {
     MotionSetMaskProperty {comp_id:u64,layer_id:u64,uid:u64,property:String,value:f64},
 }
 impl Action {
+    pub(crate) fn is_valid(&self,editor:&Editor)->bool {self.valid(editor)}
     fn valid(&self,editor:&Editor)->bool {
         use Action::*;
         match self {
@@ -64,7 +69,7 @@ impl Action {
             VideoPlace{item_id,track:tr,seconds,video,audio}=>*editor==Editor::Video&&positive(*item_id)&&track(tr)&&finite(*seconds)&&
                 ((*video&&tr.starts_with('V'))||(*audio&&tr.starts_with('A'))),
             VideoTrim{clip_id,edge,delta_frames,..}=>*editor==Editor::Video&&positive(*clip_id)&&
-                matches!(edge.as_str(),"in"|"out")&&(-100000..=100000).contains(delta_frames),
+                matches!(edge.as_str(),"in"|"out")&&*delta_frames!=0&&(-100000..=100000).contains(delta_frames),
             VideoMove{clip_id,track:tr,seconds,..}=>*editor==Editor::Video&&positive(*clip_id)&&track(tr)&&finite(*seconds),
             VideoDelete{clip_id,..}=>*editor==Editor::Video&&positive(*clip_id),
             MotionCreateComposition{name:n,width,height,fps,duration_seconds}=>*editor==Editor::Motion&&name(n)&&
@@ -72,13 +77,13 @@ impl Action {
                 (1.0..=120.0).contains(fps)&&duration_seconds.is_finite()&&
                 *duration_seconds>=1.0/fps&&*duration_seconds<=600.0,
             MotionAddText{comp_id,name:n,text,x,y,size}=>*editor==Editor::Motion&&positive(*comp_id)&&name(n)&&
-                !text.is_empty()&&text.len()<=2000&&finite_signed(*x)&&finite_signed(*y)&&
+                bounded_text(text,2000)&&finite_signed(*x)&&finite_signed(*y)&&
                 size.is_finite()&&(1.0..=1000.0).contains(size),
             MotionEditText{comp_id,layer_id,text}=>*editor==Editor::Motion&&positive(*comp_id)&&positive(*layer_id)&&
-                !text.is_empty()&&text.len()<=2000,
+                bounded_text(text,2000),
             MotionAddShape{comp_id,name:n,kind,x,y,width,height,fill}=>*editor==Editor::Motion&&positive(*comp_id)&&name(n)&&
                 matches!(kind.as_str(),"rect"|"ellipse"|"rounded"|"star"|"polygon")&&
-                finite_signed(*x)&&finite_signed(*y)&&finite_signed(*width)&&finite_signed(*height)&&
+                finite_signed(*x)&&finite_signed(*y)&&shape_dimension(*width)&&shape_dimension(*height)&&
                 fill.len()==7&&fill.starts_with('#')&&fill[1..].bytes().all(|c|c.is_ascii_hexdigit()),
             MotionSetTransform{comp_id,layer_id,kind,x,y,value}=>*editor==Editor::Motion&&positive(*comp_id)&&positive(*layer_id)&&
                 match kind.as_str() {
@@ -96,14 +101,17 @@ impl Action {
     }
 }
 fn finite_signed(x:f64)->bool{x.is_finite()&&(-100000.0..=100000.0).contains(&x)}
+fn shape_dimension(x:f64)->bool{x.is_finite()&&(1.0..=8192.0).contains(&x)&&x.fract()==0.0}
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct Scope {
-    pub task_id:String,pub plan_hash:String,pub snapshot:Snapshot,pub actions:Vec<Action>,
+    pub task_id:String,pub plan_hash:String,pub instruction:String,
+    pub snapshot:Snapshot,pub actions:Vec<Action>,
 }
 impl Scope {
+    pub(crate) fn is_valid(&self)->bool {self.valid()}
     fn valid(&self)->bool {
-        token(&self.task_id)&&hex64(&self.plan_hash)&&self.snapshot.valid()&&
+        token(&self.task_id)&&hex64(&self.plan_hash)&&bounded_text(&self.instruction,2000)&&self.snapshot.valid()&&
         (1..=12).contains(&self.actions.len())&&
         self.actions.iter().all(|a|a.valid(&self.snapshot.editor))
     }
@@ -122,7 +130,12 @@ pub trait OwnerConsent {fn grant(&mut self,scope:&Scope)->bool;}
 // The mutable borrow covers native state inspection, command and readback.
 pub trait NativeOwner {
     fn snapshot(&mut self)->Result<Snapshot,String>;
+    // Read-only lookup of the actual native clip/layer/comp IDs, track,
+    // edit capability and object state. Must NOT mutate or enqueue an edit.
+    fn preflight_action(&mut self,action:&Action)->Result<bool,String>;
     fn apply(&mut self,action:&Action)->Result<(),String>;
+    // SHA-256 of a canonical independently inspected affected native object.
+    fn object_proof_sha256(&mut self,action:&Action)->Result<String,String>;
     // Inspect the actual affected clip/layer/comp after applying, not merely
     // a session revision. A false or missing native proof is UNCERTAIN.
     fn verify_action(&mut self,action:&Action)->Result<bool,String>;
@@ -131,7 +144,7 @@ pub trait NativeOwner {
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct Receipt {
     pub task_id:String,pub index:usize,pub key:String,pub before:Snapshot,
-    pub after:Snapshot,pub native_verified:bool,
+    pub after:Snapshot,pub native_verified:bool,pub object_proof_sha256:String,
 }
 fn digest<T:Serialize>(value:&T)->Result<String,GuardError> {
     let data=serde_json::to_vec(value).map_err(|_|GuardError::Invalid)?;
@@ -224,6 +237,15 @@ impl Ledger {
         let current=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
         if !current.valid(){return Err(GuardError::Invalid);}
         if current!=expected{return Err(GuardError::StaleProject);}
+        // Native ID/track existence is NOT established by the model's inventory.
+        // Owner must independently confirm it before writing an edit intent.
+        if owner.preflight_action(&p.actions[index]).ok()!=Some(true){
+            return Err(GuardError::Invalid);
+        }
+        // Preflight must be observational. Re-check owner revision to catch
+        // accidental native changes before the irreversible intent is recorded.
+        let checked=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if checked!=expected{return Err(GuardError::StaleProject);}
         let key=digest(&(digest(&p)?,index,&p.actions[index]))?;
         // A durable intent precedes the native call. On unknown outcome it
         // remains; reentry is rejected, never blind-replayed.
@@ -236,10 +258,28 @@ impl Ledger {
         if owner.verify_action(&p.actions[index]).ok()!=Some(true) {
             return Err(GuardError::NativeOutcomeUncertain);
         }
-        let receipt=Receipt{task_id:id.into(),index,key,before:expected,after,native_verified:true};
+        let proof=owner.object_proof_sha256(&p.actions[index])
+            .map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if !hex64(&proof){return Err(GuardError::NativeOutcomeUncertain);}
+        let receipt=Receipt{task_id:id.into(),index,key,before:expected,after,
+            native_verified:true,object_proof_sha256:proof};
         persist_new(&dir.join(format!("step_{index:02}.verified")),
             &serde_json::to_vec(&receipt).map_err(|_|GuardError::Io)?)?;
         Ok(receipt)
+    }
+    pub fn execute_bound<O:NativeOwner>(&self,id:&str,index:usize,
+        expected:&Snapshot,action:&Action,owner:&mut O)->Result<Receipt,GuardError>{
+        let plan=self.scope(id)?;
+        if plan.actions.get(index)!=Some(action){return Err(GuardError::Invalid);}
+        let stored=if index==0{plan.snapshot.clone()}else{
+            let prior:Receipt=load(&self.dir(id)?.join(format!("step_{:02}.verified",index-1)))?;
+            if !prior.native_verified||prior.task_id!=id||prior.index!=index-1 {
+                return Err(GuardError::DuplicateOrUncertain);
+            }
+            prior.after
+        };
+        if stored!=*expected{return Err(GuardError::StaleProject);}
+        self.execute(id,index,owner)
     }
     pub fn recover(&self,id:&str)->Result<Vec<&'static str>,GuardError>{
         let p=self.scope(id)?;

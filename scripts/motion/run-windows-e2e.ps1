@@ -58,7 +58,7 @@ try {
     if ((Get-Item $archive).Length -lt 100000) { throw 'Microsoft driver ZIP missing or empty' }
     Expand-Archive -LiteralPath $archive -DestinationPath $driverDir -Force -ErrorAction Stop
 } catch {
-    throw "No verified Microsoft EdgeDriver matching WebView2 $webviewVersion: $($_.Exception.Message)"
+    throw "No verified Microsoft EdgeDriver matching WebView2 ${webviewVersion}: $($_.Exception.Message)"
 }
 $driver = Get-ChildItem $driverDir -Recurse -File -Filter 'msedgedriver.exe' | Select-Object -First 1
 if (-not $driver -or $driver.Length -lt 100000) { throw 'Microsoft EdgeDriver executable is absent/invalid' }

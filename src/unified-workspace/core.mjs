@@ -3,6 +3,10 @@
  * only source of completed edits. No fabricated preview, export or AI status.
  */
 import {nativeFps,verifyNativeMove,nativeTrackGuard} from "./timeline.mjs";
+import {checkedAiVideoActions} from "./ai-plan.mjs";
+import {nativeClipInspector,splitPreflight,verifyNativeSplit} from "./video-inspector.mjs";
+import {trimPreflight,deletePreflight,verifyNativeTrim,verifyNativeDelete} from "./video-mutations.mjs";
+import {verifyMotionEdit} from "./motion-proof.mjs";
 export class WorkspaceError extends Error {
   constructor(code, message) { super(message); this.name = "WorkspaceError"; this.code = code; }
 }
@@ -49,28 +53,49 @@ export function createWorkspaceController(native) {
   const listeners = new Set();
   const state = {
     studio:"video", busy:false, progress:"Idle", error:null, stopped:false,
-    needsReload:false, recoveryStudio:null, video:null, videoFrame:null, exportReceipt:null,
+    needsReload:false, recoveryStudio:null, recoveryByStudio:{video:false,motion:false}, video:null, videoFrame:null, exportReceipt:null,
+    videoGeneration:0,motionGeneration:0,verificationHistory:[],
     motion:{ready:false,revision:null,composition:null,layers:[],frame:null,dirty:false,inspector:null},
     pendingApproval:null, chat:[{role:"assistant",text:"Shuvi AI Director is not connected. Drafts cannot edit a project."}]
   };
   let inFlight = null;
   let operationId = 0;
   let taskCounter = 0;
+  let evidenceCounter = 0;
+  function evidence(studio,label,outcome,code=null) {
+    const safeCode=typeof code==="string"&&/^[A-Z][A-Z_]{2,39}$/.test(code)?code:
+      code===null?null:"NATIVE_ERROR";
+    state.verificationHistory.push({id:++evidenceCounter,studio,label,outcome,code:safeCode});
+    if(state.verificationHistory.length>48)state.verificationHistory.splice(0,state.verificationHistory.length-48);
+  }
   const emit = () => {
     const current = clone(state);
     for (const listener of listeners) listener(current);
   };
-  const set = (patch) => { Object.assign(state,patch); emit(); };
+  const set = (patch) => {
+    // Native command failures can quarantine BOTH engines in one session.
+    // Keep legacy needsReload/recoveryStudio only as a backwards-compatible
+    // current-view summary. They must never discard the other studio's guard.
+    const recovery={...state.recoveryByStudio,...(patch.recoveryByStudio??{})};
+    if(patch.needsReload===true&&["video","motion"].includes(patch.recoveryStudio))
+      recovery[patch.recoveryStudio]=true;
+    Object.assign(state,patch,{recoveryByStudio:recovery});
+    state.needsReload=recovery.video||recovery.motion;
+    state.recoveryStudio=recovery[state.studio]?state.studio:
+      recovery.video?"video":recovery.motion?"motion":null;
+    emit();
+  };
   const requireReady = (studio) => {
     if(state.busy) fail("BUSY","A native operation is already in progress");
-    if(state.needsReload && state.recoveryStudio===studio)
+    if(state.recoveryByStudio[studio])
       fail("RELOAD_REQUIRED","A stopped or divergent native operation must be re-inspected");
   };
-  async function run(label, job, {recover=false,studio="video"}={}) {
+  async function run(label, job, {recover=false,studio="video",mutating=false}={}) {
     if (state.busy) fail("BUSY", "A native operation is already in progress");
-    if (state.needsReload && state.recoveryStudio===studio && !recover) fail("RELOAD_REQUIRED", "Refresh the affected native studio before another edit");
+    if (state.recoveryByStudio[studio] && !recover) fail("RELOAD_REQUIRED", "Refresh the affected native studio before another edit");
     const token = ++operationId;
     inFlight = token;
+    evidence(studio,label,"started");
     set({busy:true,progress:label,error:null,stopped:false});
     try {
       const receipt = await job(() => state.stopped || token!==operationId);
@@ -78,12 +103,19 @@ export function createWorkspaceController(native) {
         set({needsReload:true,recoveryStudio:studio,progress:"Stop requested; native work may have completed. Refresh required."});
         fail("STOP_UNVERIFIED","Stop cannot interrupt an in-flight native IPC call; state must be refreshed");
       }
+      evidence(studio,label,"verified");
       set({progress:label+" · native readback verified"});
       return receipt;
     } catch (err) {
-      if (state.stopped || err?.code==="STOP_UNVERIFIED") {
-        set({needsReload:true,recoveryStudio:studio,progress:"Native outcome uncertain — refresh required"});
+      if (state.stopped || err?.code==="STOP_UNVERIFIED" || mutating) {
+        evidence(studio,label,"uncertain",err?.code??"NATIVE_OUTCOME_UNKNOWN");
+        const invalidation=studio==="video"?
+          {videoFrame:null,exportReceipt:null,pendingApproval:null}:
+          {motion:{...state.motion,frame:null,inspector:null}};
+        set({needsReload:true,recoveryStudio:studio,
+          error:String(err?.message ?? err),progress:"Native outcome uncertain — refresh required",...invalidation});
       } else {
+        evidence(studio,label,"failed",err?.code??"NATIVE_FAILURE");
         set({error:String(err?.message ?? err),progress:label+" · failed"});
       }
       if (state.stopped && err?.code!=="STOP_UNVERIFIED")
@@ -102,7 +134,8 @@ export function createWorkspaceController(native) {
   async function refreshVideo(root,projectPath) {
     return run("Inspecting native FilmCraft project", async()=>{
       const video=await readVideo(root,projectPath);
-      set({video,videoFrame:null,exportReceipt:null,...(state.recoveryStudio==="video"?{needsReload:false,recoveryStudio:null}:{})});
+      set({video,videoFrame:null,exportReceipt:null,pendingApproval:null,videoGeneration:state.videoGeneration+1,
+        recoveryByStudio:{...state.recoveryByStudio,video:false}});
       return video;
     },{recover:true});
   }
@@ -125,8 +158,14 @@ export function createWorkspaceController(native) {
         expectedRevision:video.snapshot.sessionRevision,
         expectedProjectSha256:video.snapshot.projectSha256,actions
       });
-      if(!validSha(receipt?.projectSha256) || receipt.commands?.some(c=>c.ok===false))
-        fail("INVALID_RECEIPT","FilmCraft did not confirm a complete edit");
+      if(!validSha(receipt?.projectSha256) ||
+        receipt.projectSha256===video.snapshot.projectSha256 ||
+        !Array.isArray(receipt?.commands) ||
+        receipt.commands.length!==actions.length ||
+        receipt.commands.some(c=>c?.ok!==true)) {
+        set({needsReload:true,recoveryStudio:"video",videoFrame:null,exportReceipt:null,pendingApproval:null});
+        fail("INVALID_RECEIPT","FilmCraft edit result lacks exact native command proof or a changed disk SHA; refresh required");
+      }
       let fresh;
       try { fresh=await readVideo(video.root,video.projectPath); }
       catch(error){set({needsReload:true,recoveryStudio:"video",videoFrame:null});throw error;}
@@ -136,7 +175,41 @@ export function createWorkspaceController(native) {
       }
       set({video:fresh,videoFrame:null,pendingApproval:null});
       return receipt;
-    });
+    },{studio:"video",mutating:true});
+  }
+  function quarantineVideoReadback(message) {
+    set({needsReload:true,recoveryStudio:"video",videoFrame:null,
+      exportReceipt:null,pendingApproval:null,error:message,
+      progress:"Native timeline proof mismatched — refresh required"});
+    fail("REVISION_CONFLICT",message);
+  }
+  async function splitVideoClip(clipId,seconds) {
+    requireReady("video");
+    const source=nativeClipInspector(state,clipId);
+    const preflight=splitPreflight(source,seconds);
+    if(!preflight.ok)fail("INVALID_SPLIT",preflight.reason);
+    const receipt=await applyVideo([{type:"split",clipId,seconds:preflight.seconds}]);
+    if(!verifyNativeSplit(source,state.video?.clips,preflight.seconds))
+      quarantineVideoReadback("FilmCraft split has no matching native left/right clip readback");
+    return receipt;
+  }
+  async function trimVideoClip(clipId,edge,deltaFrames,ripple=false) {
+    requireReady("video");
+    const pre=trimPreflight(state,clipId,edge,deltaFrames,ripple);
+    if(!pre.ok)fail("INVALID_TRIM",pre.reason);
+    const receipt=await applyVideo([pre.action]);
+    if(!verifyNativeTrim(pre.before,state.video?.clips,edge))
+      quarantineVideoReadback("FilmCraft trim did not produce the required saved edge readback");
+    return receipt;
+  }
+  async function deleteVideoClip(clipId,ripple=false) {
+    requireReady("video");
+    const pre=deletePreflight(state,clipId,ripple);
+    if(!pre.ok)fail("INVALID_DELETE",pre.reason);
+    const receipt=await applyVideo([pre.action]);
+    if(!verifyNativeDelete(pre.before,state.video?.clips))
+      quarantineVideoReadback("FilmCraft delete did not remove the clip in saved native readback");
+    return receipt;
   }
   async function moveVideoClip(clipId,track,seconds) {
     requireReady("video");
@@ -153,10 +226,8 @@ export function createWorkspaceController(native) {
     if(clip.track===track&&Math.abs(clip.start-seconds)<=0.01/fps)
       return {unchanged:true,projectSha256:current.snapshot.projectSha256};
     const result=await applyVideo([{type:"move",clipId,track,seconds,insert:false}]);
-    if(!verifyNativeMove(state.video?.clips,clipId,track,seconds,fps)) {
-      set({needsReload:true,recoveryStudio:"video",videoFrame:null});
-      fail("REVISION_CONFLICT","Saved FilmCraft timeline did not contain the requested clip move");
-    }
+    if(!verifyNativeMove(state.video?.clips,clipId,track,seconds,fps))
+      quarantineVideoReadback("Saved FilmCraft timeline did not contain the requested clip move");
     return result;
   }
   async function importVideo(sourcePath) {
@@ -170,9 +241,9 @@ export function createWorkspaceController(native) {
       catch(error){set({needsReload:true,recoveryStudio:"video"});throw error;}
       if(fresh.snapshot.projectSha256!==receipt.projectSha256)
         {set({needsReload:true,recoveryStudio:"video"});fail("REVISION_CONFLICT","Imported project SHA did not match readback");}
-      set({video:fresh,videoFrame:null});
+      set({video:fresh,videoFrame:null,pendingApproval:null});
       return receipt;
-    });
+    },{studio:"video",mutating:true});
   }
   async function renderVideo(seconds,scale=0.25) {
     requireReady("video"); const v=requireVideo();
@@ -218,7 +289,7 @@ export function createWorkspaceController(native) {
         {set({needsReload:true,recoveryStudio:"video"});fail("REVISION_CONFLICT","History restore readback mismatched");}
       set({video:fresh,videoFrame:null,pendingApproval:null});
       return result;
-    });
+    },{studio:"video",mutating:true});
   }
   async function motionStatus() {
     return run("Refreshing live EffectCraft project", async()=>{
@@ -244,7 +315,7 @@ export function createWorkspaceController(native) {
       const changed=status.projectRevision!==previous.revision;
       set({motion:{...previous,ready:true,composition,layers,revision:status.projectRevision,
         frame:changed?null:previous.frame,inspector:null,dirty:!!status.dirty},
-        ...(state.recoveryStudio==="motion"?{needsReload:false,recoveryStudio:null}:{})});
+        recoveryByStudio:{...state.recoveryByStudio,motion:false}});
       return status;
     },{recover:true,studio:"motion"});
   }
@@ -257,9 +328,10 @@ export function createWorkspaceController(native) {
         fail("INVALID_RECEIPT","Native composition readback missing");
       const layers=await native.motion({action:"listLayers",compId:comp.id});
       if(!Array.isArray(layers))fail("INVALID_RECEIPT","Native layers could not be inspected");
-      set({motion:{...state.motion,ready:true,composition:comp,revision:comp.revision,layers,frame:null,dirty:true,inspector:null}});
+      set({motion:{...state.motion,ready:true,composition:comp,revision:comp.revision,layers,frame:null,dirty:true,inspector:null},
+        motionGeneration:state.motionGeneration+1});
       return comp;
-    },{studio:"motion"});
+    },{studio:"motion",mutating:true});
   }
   async function inspectMotionLayer(layerId) {
     requireReady("motion");
@@ -304,38 +376,41 @@ export function createWorkspaceController(native) {
       const before=await native.motion({action:"status"});
       if(before.projectRevision!==m.revision)
         {set({needsReload:true,recoveryStudio:"motion"});fail("REVISION_CONFLICT","EffectCraft revision changed outside this workspace");}
-      let receipt,after,layers;
+      let receipt,after,layers,inspector=null;
       try {
         receipt=await native.motion(request);
         after=await native.motion({action:"status"});
         layers=await native.motion({action:"listLayers",compId:m.composition.id});
-      } catch(error){set({needsReload:true,recoveryStudio:"motion"});throw error;}
-      if(!Array.isArray(layers)||!Number.isSafeInteger(after?.projectRevision)
-        ||after.projectRevision<=before.projectRevision) {
-        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
-        fail("INVALID_RECEIPT","EffectCraft edit has no verified revision advance");
-      }
-      const current=m.inspector;
-      const updatedLayer=current&&layers.find(layer=>layer.id===current.layer.id);
-      let inspector=updatedLayer?{...current,layer:updatedLayer,revision:after.projectRevision}:null;
-      const changesInspectorData=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
-      if(inspector&&changesInspectorData) {
-        try{
-          const effects=await native.motion({action:"listEffects",compId:m.composition.id,layerId:updatedLayer.id});
-          const masks=await native.motion({action:"listMasks",compId:m.composition.id,layerId:updatedLayer.id});
-          const stable=await native.motion({action:"status"});
-          if(!Array.isArray(effects)||!Array.isArray(masks)||
-            stable?.projectRevision!==after.projectRevision)
-            fail("REVISION_CONFLICT","Motion effect/mask readback drifted after native write");
-          inspector={...inspector,effects,masks};
-        }catch(error){
-          set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
-          throw error;
+        if(!Array.isArray(layers)||!Number.isSafeInteger(after?.projectRevision)||
+          after.projectRevision<=before.projectRevision)
+          fail("INVALID_RECEIPT","EffectCraft edit has no verified native revision advance");
+        const current=m.inspector;
+        const candidate=current&&layers.find(layer=>layer.id===current.layer.id);
+        inspector=candidate?{...current,layer:candidate,revision:after.projectRevision}:null;
+        const needsNativeInstances=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
+        if(needsNativeInstances){
+          const owner=layers.find(layer=>layer.id===request.layerId);
+          if(!owner)fail("INVALID_RECEIPT","Motion native edit target layer is absent");
+          const effects=await native.motion({action:"listEffects",compId:m.composition.id,layerId:request.layerId});
+          const masks=await native.motion({action:"listMasks",compId:m.composition.id,layerId:request.layerId});
+          if(!Array.isArray(effects)||!Array.isArray(masks))
+            fail("INVALID_RECEIPT","Native effect/mask lists are incomplete");
+          inspector={layer:owner,effects,masks,revision:after.projectRevision};
         }
+        const stable=await native.motion({action:"status"});
+        if(stable?.projectRevision!==after.projectRevision)
+          fail("REVISION_CONFLICT","Motion project changed during post-write native readback");
+        const proof=verifyMotionEdit({
+          request,receipt,beforeLayers:m.layers,afterLayers:layers,inspector
+        });
+        if(!proof.ok)fail("INVALID_RECEIPT",proof.reason);
+      }catch(error){
+        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
+        throw error;
       }
       set({motion:{...m,revision:after.projectRevision,layers,frame:null,dirty:!!after.dirty,inspector}});
       return receipt;
-    },{studio:"motion"});
+    },{studio:"motion",mutating:true});
   }
   async function renderMotion(time=0,transparent=true) {
     requireReady("motion");const m=state.motion;
@@ -353,26 +428,47 @@ export function createWorkspaceController(native) {
     requireReady("motion");
     if(!nonempty(workspace)||!nonempty(basename))fail("PATH_REQUIRED","Select a real workspace and .ecproj name");
     return run("Saving real EffectCraft project",async()=>{
-      const receipt=await native.motion({action:"saveProject",workspace,basename});
-      if(receipt?.verifiedFromDisk!==true||receipt.bytes<=0)
-        fail("INVALID_RECEIPT","Native disk save not verified");
-      const status=await native.motion({action:"status"});
+      let receipt,status;
+      try{
+        receipt=await native.motion({action:"saveProject",workspace,basename});
+        if(receipt?.verifiedFromDisk!==true||receipt.bytes<=0)
+          fail("INVALID_RECEIPT","Native disk save not verified");
+        status=await native.motion({action:"status"});
+        if(!Number.isSafeInteger(status?.projectRevision)||
+          status.projectRevision!==state.motion.revision)
+          fail("REVISION_CONFLICT","Native Motion changed during save verification");
+      }catch(error){
+        set({needsReload:true,recoveryStudio:"motion",
+          motion:{...state.motion,frame:null,inspector:null}});
+        throw error;
+      }
       set({motion:{...state.motion,revision:status.projectRevision,dirty:!!status.dirty}});
       return receipt;
-    },{studio:"motion"});
+    },{studio:"motion",mutating:true});
   }
   async function openMotion(workspace,basename) {
     return run("Opening EffectCraft from disk",async()=>{
-      const receipt=await native.motion({action:"openProject",workspace,basename});
-      if(receipt?.verifiedFromDisk!==true||!Array.isArray(receipt.compositions))
-        fail("INVALID_RECEIPT","Native disk reopen not verified");
-      const comp=receipt.compositions[0]??null;
-      const status=await native.motion({action:"status"});
-      const layers=comp?await native.motion({action:"listLayers",compId:comp.id}):[];
-      if(!Array.isArray(layers)||!Number.isSafeInteger(status?.projectRevision))
-        fail("INVALID_RECEIPT","Native project reopened but composition state was not verified");
+      let receipt,comp,status,layers;
+      try{
+        receipt=await native.motion({action:"openProject",workspace,basename});
+        if(receipt?.verifiedFromDisk!==true||!Array.isArray(receipt.compositions))
+          fail("INVALID_RECEIPT","Native disk reopen not verified");
+        comp=receipt.compositions[0]??null;
+        status=await native.motion({action:"status"});
+        layers=comp?await native.motion({action:"listLayers",compId:comp.id}):[];
+        if(!Array.isArray(layers)||!Number.isSafeInteger(status?.projectRevision))
+          fail("INVALID_RECEIPT","Native project reopened but composition state was not verified");
+        const stable=await native.motion({action:"status"});
+        if(stable?.projectRevision!==status.projectRevision)
+          fail("REVISION_CONFLICT","Native Motion revision drifted during disk reopen");
+      }catch(error){
+        set({needsReload:true,recoveryStudio:"motion",
+          motion:{ready:false,revision:null,composition:null,layers:[],frame:null,dirty:false,inspector:null}});
+        throw error;
+      }
       set({motion:{ready:true,revision:status.projectRevision,composition:comp,layers,frame:null,dirty:!!status.dirty,inspector:null},
-        ...(state.recoveryStudio==="motion"?{needsReload:false,recoveryStudio:null}:{})});
+        motionGeneration:state.motionGeneration+1,
+        recoveryByStudio:{...state.recoveryByStudio,motion:false}});
       return receipt;
     },{recover:true,studio:"motion"});
   }
@@ -387,15 +483,69 @@ export function createWorkspaceController(native) {
       return receipt;
     },{studio:"motion"});
   }
+  async function verifyVideoSnapshot() {
+    requireReady("video");
+    const expected=requireVideo();
+    return run("Verifying FilmCraft disk readback",async()=>{
+      let observed;
+      try{observed=await readVideo(expected.root,expected.projectPath);}
+      catch(error){
+        set({needsReload:true,recoveryStudio:"video",videoFrame:null,exportReceipt:null,pendingApproval:null});
+        throw error;
+      }
+      if(observed.snapshot.projectSha256!==expected.snapshot.projectSha256 ||
+        observed.snapshot.sessionRevision!==expected.snapshot.sessionRevision ||
+        observed.projectPath!==expected.projectPath) {
+        set({needsReload:true,recoveryStudio:"video",videoFrame:null,exportReceipt:null,pendingApproval:null});
+        fail("REVISION_CONFLICT","FilmCraft project changed since the last native readback");
+      }
+      set({video:observed});
+      return observed;
+    },{studio:"video"});
+  }
+  async function verifyMotionSnapshot() {
+    requireReady("motion");
+    const expected=state.motion;
+    return run("Verifying EffectCraft native revision",async()=>{
+      try {
+        const before=await native.motion({action:"status"});
+        if(before?.native!==true||before?.ready!==true ||
+          !Number.isSafeInteger(before.projectRevision)||
+          before.projectRevision!==expected.revision)
+          fail("REVISION_CONFLICT","EffectCraft revision changed; refresh native composition");
+        let layers=expected.layers;
+        if(expected.composition){
+          const composition=await native.motion({action:"inspectComposition",compId:expected.composition.id});
+          layers=await native.motion({action:"listLayers",compId:expected.composition.id});
+          if(!composition || !Array.isArray(layers) ||
+            composition.id!==expected.composition.id)
+            fail("INVALID_RECEIPT","Native composition readback is incomplete");
+        }
+        const after=await native.motion({action:"status"});
+        if(after?.projectRevision!==before.projectRevision)
+          fail("REVISION_CONFLICT","EffectCraft revision changed during inspection");
+        const oldInspector=expected.inspector;
+        const freshLayer=oldInspector&&layers.find(x=>x.id===oldInspector.layer.id);
+        set({motion:{...expected,layers,
+          inspector:freshLayer?{...oldInspector,layer:freshLayer}:null}});
+        return after;
+      }catch(error){
+        set({needsReload:true,recoveryStudio:"motion",
+          motion:{...state.motion,frame:null,inspector:null}});
+        throw error;
+      }
+    },{studio:"motion"});
+  }
   function stageAiVideoTask(actions,expectedSha) {
     requireReady("video");const v=requireVideo();
     if(!validSha(expectedSha)||expectedSha!==v.snapshot.projectSha256)
       fail("REVISION_CONFLICT","AI plan is stale before owner approval");
-    if(!Array.isArray(actions)||actions.length===0||actions.some(a=>!VIDEO_ACTIONS.has(a?.type)))
-      fail("UNSUPPORTED_ACTION","AI requested an unapproved native action");
+    let checked;
+    try{checked=checkedAiVideoActions(actions);}
+    catch(error){fail("UNSUPPORTED_ACTION",String(error?.message??error));}
     if(state.pendingApproval)fail("APPROVAL_PENDING","Resolve the previous proposed edit first");
     const task={id:"video-task-"+(++taskCounter),studio:"video",kind:"timeline",
-      actions:clone(actions),expectedSha,projectPath:v.projectPath};
+      actions:clone(checked),expectedSha,projectPath:v.projectPath,selectedRoot:v.root};
     set({pendingApproval:task});
     return task;
   }
@@ -404,8 +554,9 @@ export function createWorkspaceController(native) {
     const task=clone(state.pendingApproval);
     set({pendingApproval:null});
     if(task.studio!=="video")fail("UNSUPPORTED_ACTION","Motion AI writes require native atomic revision guard");
-    if(state.video?.snapshot.projectSha256!==task.expectedSha||state.video?.projectPath!==task.projectPath)
-      fail("REVISION_CONFLICT","Project changed since AI action was proposed");
+    if(state.video?.snapshot.projectSha256!==task.expectedSha||
+      state.video?.projectPath!==task.projectPath||state.video?.root!==task.selectedRoot)
+      fail("REVISION_CONFLICT","Project identity or contents changed since AI action was proposed");
     return applyVideo(task.actions);
   }
   return {
@@ -415,8 +566,8 @@ export function createWorkspaceController(native) {
       state.chat.push({role:"assistant",text:"Draft only — AI Director is not connected; no native edit was executed."});emit();},
     stop(){if(!state.busy)return false;set({stopped:true,progress:"Stop requested; waiting for native IPC to settle"});return true;},
     dismissTask(){set({pendingApproval:null});},
-    refreshVideo,applyVideo,moveVideoClip,importVideo,renderVideo,exportVideo,history,
-    motionStatus,createComposition,inspectMotionLayer,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
+    refreshVideo,verifyVideoSnapshot,applyVideo,splitVideoClip,trimVideoClip,deleteVideoClip,moveVideoClip,importVideo,renderVideo,exportVideo,history,
+    motionStatus,verifyMotionSnapshot,createComposition,inspectMotionLayer,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
     stageAiVideoTask,approveTask
   };
 }

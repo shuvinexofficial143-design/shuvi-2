@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "integration": "shuvi-2.0.2-original-motion-to-2.0.3-ai-director",
+  "authority": "read-only handoff contract; never use this JSON as an authorization grant",
+  "runtimeIntegration": "isolated-test-harness-only",
+  "nativeEditor": {
+    "engine": "EffectCraft",
+    "version": "0.18.0",
+    "frontend": "egui/eframe",
+    "projectFormat": ".ecproj"
+  },
+  "aiDirector": {
+    "repository": "shuvinexofficial143-design/shuvi-2",
+    "pinnedSourceCommit": "64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4",
+    "guardHost": "shuvi-ai-provider::host::GuardedHost",
+    "persistence": "SQLite WAL/FULL TransactionalLedger"
+  },
+  "supportedTypedActions": [
+    "motion.createComposition",
+    "motion.addText",
+    "motion.editText",
+    "motion.addShape",
+    "motion.setTransform",
+    "motion.addEffect",
+    "motion.setMaskProperty"
+  ],
+  "limitedShapeKinds": [
+    "rect",
+    "rounded",
+    "ellipse"
+  ],
+  "effectMap": {
+    "gaussianBlur": "ec.blur.gaussian",
+    "brightnessContrast": "ec.color.brightnesscontrast"
+  },
+  "runtimeCapabilities": {
+    "nativeGuarded": false,
+    "sameOwnerAsManual": false,
+    "ownerConsent": false,
+    "durableIdempotency": false,
+    "independentObjectReadback": false
+  },
+  "desktopIntegrationRequirements": [
+    "Review M-AI13 original egui MotionOwnerGate (menu/shortcut, control-channel direct/offloaded admission) but do NOT mistake it for complete global mutation arbitration",
+    "Native egui/eframe manual commands and AI guarded commands must share the SAME exclusive owner and session",
+    "Use trusted owner-originated project and session identity, increment incarnation on project open/revert/new/save as",
+    "Persist SQLite WAL/FULL transaction ledger in a protected owner-local OS path, never under untrusted project input",
+    "Owner UI must display the exact hashed plan and collect one trusted affirmative owner approval per task",
+    "All seven typed Action variants must preflight exact native targets and verify independently inspected affected objects",
+    "Stop or crash recovery must never retry a non-idempotent native mutation when the ledger records UNCERTAIN",
+    "Provider secrets must remain outside renderer and project files in an authorized OS-protected secret store",
+    "Native saved .ecproj must be reopened and verified; optionally verify actual rendered frames",
+    "Windows packaging SHA256, PE, source commit and original license/attribution must be independently checked",
+    "Only integrated desktop runtime may report positive capabilities after independent E2E review"
+  ],
+  "editorRelease": {
+    "nativeWindowsBuildAvailableInCI": "not-yet-verified-for-current-commit",
+    "sqliteBridgeBundled": false,
+    "productionAiEditingEnabled": false
+  },
+  "manualNativeOwnerGateFoundation": {
+    "appOwned": true,
+    "menuAndShortcutCommandRoute": true,
+    "controlChannelEngineExecuteRoute": true,
+    "controlChannelOffloadedCommandAdmission": true,
+    "aiLeaseAvailableInProduction": false,
+    "otherDirectNativeMutationRoutesReconciled": false,
+    "desktopTrustedOwnerApproval": false,
+    "globalCrossProcessLock": false,
+    "statusOnly": "Manual command admission is not a global owner lock or production AI execution authorization"
+  }
+}

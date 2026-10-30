@@ -1,0 +1,9 @@
+V-AI10 Native FilmCraft and canonical A07 SQLite development, 2026-10-30.
+
+CI 41040642933 failed after compiling the actual FilmCraft bridge: first guarded split test returned NativeOutcomeUncertain. The earlier code wrongly rechecked that the left clip strictly contained the exact cut tick after splitting, which is impossible after a correct cut. That has been repaired in a previous commit.
+
+This batch adds sanitized native verification error codes, bounded continuation after a completed independent affected-object SHA-256 proof, and real Windows integration tests covering two distinct video and audio splits with ONE test-owner consent, two durable canonical A07 SQLite receipts, ordered-step and duplicate rejection, database reopen, and original native project SaveAs/Reopen. A separate regression blocks a second edit before prior native proof.
+
+IMPORTANT: proof_returned only protects the isolated adapter. Canonical A07 GuardedHost and its durable verified SQLite receipt gate are independent mandatory authorization, enforced before a second step. Neither the test-owner-consent fixture nor this isolated package is connected to the production egui UI. Same manual/AI lock, trusted owner dialog and Windows real live editor E2E remain to be integrated. No GUI AI edit permissions enabled; do not claim new CI success until latest exact commit finishes.
+
+Additional V-AI10 safety hardening: VideoOwner binds document_epoch, active sequence and project path at the moment it borrows the actual native Session. A tab/project switch causes native state inspections and future actions to fail closed. Every exact clip ID is scanned on all video/audio tracks for uniqueness and checked against lock status and strict split bounds BEFORE mutation. Added a damaged-project duplicate ClipId regression test. This context fence remains in-memory and must not be mistaken for a globally shared manual/AI admission lock.

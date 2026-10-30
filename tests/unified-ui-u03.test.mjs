@@ -33,7 +33,7 @@ function setup(){
       if(req.action==="setEffectParameter"){motionRev++;return {uid:req.uid,parameter:req.parameter,value:req.value,verified:true};}
       if(req.action==="toggleEffect"){motionRev++;effects=effects.map(e=>({...e,enabled:req.enabled}));return effects[0];}
       if(req.action==="removeEffect"){motionRev++;effects=[];return {removed:true,uid:req.uid};}
-      if(req.action==="addPolygonMask"){motionRev++;masks=[{uid:44,name:"Polygon",vertices:req.vertices}];return masks[0];}
+      if(req.action==="addPolygonMask"){motionRev++;masks=[{uid:44,name:"Polygon",closed:true,vertices:req.vertices}];return masks[0];}
       if(req.action==="easeKeys"){motionRev++;return {projectRevision:motionRev};}
       throw Error("Unexpected native request "+req.action);
     }

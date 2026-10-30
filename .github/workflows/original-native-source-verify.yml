@@ -1,0 +1,46 @@
+name: Shuvi 2 Original Native Editor Compilation (source only)
+on:
+  push:
+    branches:
+      - feature/shuvi2-release-integration
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: shuvi-original-native-verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  original-editor-cargo-check:
+    name: ${{ matrix.editor }} original egui native source
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - editor: FilmCraft
+            manifest: original-editors/Shuvi2-Video/Cargo.toml
+            package: filmcraft-ui-egui
+          - editor: EffectCraft
+            manifest: original-editors/Shuvi2-Motion/Cargo.toml
+            package: effectcraft-ui-egui
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          targets: x86_64-pc-windows-msvc
+      - name: Check immutable ORIGINAL native source identity
+        shell: pwsh
+        run: |
+          node scripts/release/assert-original-source-tree.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original source is NOT exact pinned tree' }
+      - name: Verify real original egui Rust UI compilation (NOT installed GUI E2E)
+        shell: pwsh
+        env:
+          CARGO_INCREMENTAL: '0'
+        run: |
+          cargo check --manifest-path ${{ matrix.manifest }} -p ${{ matrix.package }} --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Real original editor native UI cargo check FAILED' }

@@ -6,7 +6,7 @@ import {projectMediaItems,selectedNativeMedia} from "../src/unified-workspace/me
 const sha=x=>String(x).repeat(64);
 function fixture(){
   let videoHash=sha("1"),motionRev=0,midRead=false;
-  let layers=[{id:9,name:"Headline",kind:"text",position:{x:10,y:20},opacity:100,keyframes:[]}];
+  let layers=[{id:9,name:"Headline",kind:"Text",position:[10,20,0],scale:[100,100,100],rotation:0,opacity:100,keyframes:0,revision:0}];
   const effects=[{uid:21,name:"Blur",enabled:true}];
   const masks=[{uid:22,name:"Mask",vertices:[[0,0],[1,0],[1,1]]}];
   const calls=[];
@@ -33,10 +33,19 @@ function fixture(){
       if(request.action==="listLayers")return structuredClone(layers);
       if(request.action==="listEffects")return structuredClone(effects);
       if(request.action==="listMasks")return structuredClone(masks);
-      if(request.action==="setTransform" || request.action==="addKey"){
+      if(request.action==="setTransform"){
         motionRev++;
+        if(request.kind==="position"||request.kind==="scale")
+          layers[0][request.kind]=[request.x,request.y,request.kind==="position"?0:100];
+        else layers[0][request.kind]=request.value;
         layers[0].revision=motionRev;
-        return {native:true,revision:motionRev};
+        return structuredClone(layers[0]);
+      }
+      if(request.action==="addKey"){
+        motionRev++;
+        layers[0].keyframes++;
+        layers[0].revision=motionRev;
+        return {native:true,revision:motionRev,value:request.value};
       }
       throw Error("Unexpected native command "+request.action);
     }
