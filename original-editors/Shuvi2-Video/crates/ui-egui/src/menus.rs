@@ -182,12 +182,9 @@ pub fn targets_source(app: &FilmcraftApp, params: &Value) -> bool {
 
 /// Execute a UI or engine command by id.
 pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params: Value) -> Result<Value, String> {
-    // V-AI13: menu and external-control entry may not run while the
-    // native manual command lane is claimed. More direct panel editing
-    // paths remain unaudited; therefore A07 AI execution is disabled.
-    if let Some(reason) = app.shuvi_manual_admission.blocked_reason() {
-        return Err(format!("{reason}: command entry blocked"));
-    }
+    // Cover direct native menu actions and all downstream command paths.
+    // Same-thread nested UI/logic operations reenter; competing threads fail.
+    let _native_owner=app.shuvi_manual_admission.try_claim().map_err(str::to_owned)?;
     if id == "edit.selectAll" && (crate::panels::graphics::select_all_edited_text(app) || crate::panels::effect_controls::select_all_keyframes(app)) {
         return Ok(Value::Null);
     }

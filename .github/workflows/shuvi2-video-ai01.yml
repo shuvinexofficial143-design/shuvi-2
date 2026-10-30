@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI13 Production Menu and Control Admission Phase 1
+name: Shuvi 2 Video - AI14 Reentrant UI and Logic Pass Native Admission
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai13
+  group: shuvi2-video-ai14
   cancel-in-progress: false
 
 jobs:

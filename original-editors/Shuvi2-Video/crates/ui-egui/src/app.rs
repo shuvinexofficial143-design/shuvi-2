@@ -296,6 +296,12 @@ impl FilmcraftApp {
     /// logic subsystems, advance playback, poll jobs, then drain completed screenshots and ask
     /// for hidden paints. Safe on hidden logic-only callbacks.
     pub fn logic_inner(&mut self, ctx: &egui::Context) {
+        // Real original FilmCraft logic pass: autosave, queue, native input
+        // controls and background results all share this UI admission.
+        let _native_owner=match self.shuvi_manual_admission.try_claim() {
+            Ok(owner)=>owner,
+            Err(reason)=>{self.ui.status=reason.into();return;}
+        };
         // Remember the pass's clock before anything reads `now()`. A hidden logic-only tick keeps
         // the last UI time (which is stale there), so `now()` never runs behind the host clock.
         self.ui_clock = self.ui_clock.max(ctx.input(|i| i.time));
@@ -319,6 +325,16 @@ impl FilmcraftApp {
     /// this pass's commands ran. Screenshots are offered to `capture::issue`, which issues only
     /// on an accepted pass.
     fn ui_inner(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Actual native UI pass includes direct timeline panels and original
+        // keyboard/drag actions, not only the menu command registry.
+        let _native_owner=match self.shuvi_manual_admission.try_claim() {
+            Ok(owner)=>owner,
+            Err(reason)=>{
+                self.ui.status=reason.into();
+                ui.ctx().request_repaint();
+                return;
+            }
+        };
         if self.ui_clock_offset.is_none() {
             let egui_time = ui.ctx().input(|input| input.time);
             if egui_time.is_finite() {
