@@ -158,6 +158,17 @@ try{
   await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
   note("timeline","Real FilmCraft .v-clip built from saved sequence.inspect, not demo fixture DOM");
 
+  // These are independent native IPC calls and FilmCraft CLI processes.
+  // A fake in-process edit history cannot pass this cross-session check.
+  await clickAction("undo","Verified persistent FilmCraft undo",120000);
+  if(await page.locator(".v-lanes .v-clip").count()!==0) {
+    throw Error("Persistent Undo did not remove the placed FilmCraft timeline clip");
+  }
+  note("undo","Verified saved project readback contains no placed clip");
+  await clickAction("redo","Verified persistent FilmCraft redo",120000);
+  await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
+  note("redo","Verified independent CLI session restored same FilmCraft project clip");
+
   await page.locator('[data-v="seconds"]').fill("0.25");
   await clickAction("preview","Verified real FilmCraft frame",180000);
   await page.waitForFunction(()=>{
