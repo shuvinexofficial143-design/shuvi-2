@@ -318,7 +318,7 @@ test("M18 unsigned installer is gated on genuine GUI success AND rejection of ei
   ];
   for(const name of negative)assert.ok(proofTamper.includes('"'+name+'"'),"missing forgery test "+name);
   assert.ok(proofTamper.includes("Copy-Item -LiteralPath"));
-  assert.ok(proofTamper.includes("if ($LASTEXITCODE -eq 0)"));
+  assert.ok(proofTamper.includes("if ($rejectionCode -eq 0)"));
   assert.ok(proofTamper.includes("Remove-Item -LiteralPath $copy"));
   assert.ok(motionCi.includes("./scripts/motion/test-desktop-proof-failclosed.ps1"));
   const verify=motionCi.indexOf("Independently verify actual GUI screenshot");
@@ -326,4 +326,19 @@ test("M18 unsigned installer is gated on genuine GUI success AND rejection of ei
   const upload=motionCi.indexOf("Upload real desktop screenshot and E2E receipt");
   assert.ok(verify>=0&&tamper>verify&&upload>tamper);
   assert.ok(motionCi.includes("needs: motion-desktop-e2e-windows"));
+});
+
+test("M19 Windows negative verification succeeds only after all genuine expected forgery rejections",()=>{
+  assert.ok(proofTamper.includes('$baselineExitCode = $LASTEXITCODE'));
+  assert.ok(proofTamper.includes('if ($baselineExitCode -ne 0)'));
+  assert.ok(proofTamper.includes('$expectedReason = @{'));
+  assert.ok(proofTamper.includes('$rejectionCode = $LASTEXITCODE'));
+  assert.ok(proofTamper.includes('!$diagnostic.Contains($expectedReason[$case])'));
+  assert.ok(proofTamper.includes('if ($passed.Count -ne $cases.Count)'));
+  assert.ok(proofTamper.includes('baselineRealReceiptVerified = $true'));
+  assert.ok(proofTamper.includes('allExpectedFailureReasonsVerified = $true'));
+  assert.ok(proofTamper.includes('tamper-report.json'));
+  assert.ok(proofTamper.includes('$global:LASTEXITCODE = 0'));
+  assert.match(proofTamper,/exit 0\s*$/);
+  assert.ok(!proofTamper.includes('if ($LASTEXITCODE -eq 0)'));
 });
