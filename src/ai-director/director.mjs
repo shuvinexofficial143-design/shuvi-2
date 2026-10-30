@@ -88,9 +88,10 @@ export class AiDirector {
       task.cancel=true;
       if (task.status==="prepared") task.status="cancelled";
     } else if (result.state==="intent_uncertain") {
-      // Never mark a possibly executed native action as Cancelled.
-      task.status="uncertain";
-      task.error="NATIVE_INTENT_UNCERTAIN: reload verified native status";
+      // Stop was refused. A native edit may still finish; preserve the active
+      // run state and let its verified readback determine completion instead.
+      // The Stop caller gets cancelled:false, never a false success.
+      task.error="STOP_REFUSED_NATIVE_INTENT_IN_FLIGHT";
     }
     return result;
   }
