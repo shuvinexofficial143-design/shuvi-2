@@ -138,7 +138,7 @@ impl MotionBridge {
         })).map_err(|e|format!("native mask.new failed: {e}"))?;
         let uid=result["mask"].as_u64().ok_or("native mask.new returned no uid")?;
         let now=self.list_masks(comp_id,layer_id)?;
-        now.into_iter().find(|m|m.uid==uid&&m.closed&&m.vertices==points)
+        now.into_iter().find(|m|m.uid==uid&&m.closed&&m.vertices.as_slice()==points)
             .ok_or("native mask path readback mismatch".into())
     }
     pub fn set_mask_vertex(&mut self,comp_id:u64,layer_id:u64,uid:u64,
