@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 const read=(p)=>readFileSync(new URL("../"+p,import.meta.url),"utf8");
 const ui=read("src/studios/motion/bootstrap.ts");
 const e2e=read("tests/motion/desktop-e2e.mjs");
+const workflow=read(".github/workflows/motion-smoke.yml");
 const actionMap=[
   ["#motion-create","Creating composition"],
   ["#motion-add-shape","Creating shape"],
@@ -60,4 +61,15 @@ test("M17 real Windows WebDriver session startup exceeds legacy 25-second abort 
   assert.ok(e2e.includes("sessionTimeoutMs:SESSION_STARTUP_MS"));
   assert.ok(e2e.includes('failedStep:"start-real-webview2-session"'));
   assert.ok(e2e.includes("controller.signal.aborted"));
+});
+
+test("M17 true GUI E2E uses known-compatible Windows 2022, not latest elevated WebView2 regression",()=>{
+  const gui=workflow.split("  motion-desktop-e2e-windows:")[1]
+    ?.split("  motion-windows-installer:")[0];
+  assert.ok(gui,"actual WebView2 UI job missing");
+  assert.ok(gui.includes("runs-on: windows-2022"));
+  assert.ok(gui.includes("needs: motion-engine-windows"));
+  assert.ok(gui.includes("tests/motion/desktop-e2e.mjs"));
+  assert.ok(workflow.includes("needs: motion-desktop-e2e-windows"));
+  assert.ok(workflow.includes("actions/runner-images/issues/14738"));
 });
