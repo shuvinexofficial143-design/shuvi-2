@@ -28,6 +28,61 @@ fn changed(before:&Snapshot,after:&Snapshot)->bool {
         _=>false
     }
 }
+
+/// A08: re-derive every persisted step key from the approved stored action,
+/// then check a contiguous, fully linked verified receipt chain. A partial
+/// native intent is *uncertain* and must be the last present step. This detects
+/// accidental corruption/inconsistent journal state; it is NOT a MAC against
+/// an attacker who can rewrite a user-writable database.
+fn checked_steps(conn:&Connection,id:&str,scope:&Scope)
+    ->Result<Vec<&'static str>,GuardError>{
+    let mut states=vec!["not_started";scope.actions.len()];
+    let mut cursor=conn.prepare(
+        "SELECT step_index,state,step_key,receipt_json FROM ai_steps
+         WHERE task_id=?1 ORDER BY step_index"
+    ).map_err(sql_error)?;
+    let rows=cursor.query_map(params![id],|r|Ok((
+        r.get::<_,usize>(0)?,r.get::<_,String>(1)?,
+        r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?
+    ))).map_err(sql_error)?;
+    let mut previous=scope.snapshot.clone();
+    let mut next=0usize;
+    let mut unresolved=false;
+    for row in rows {
+        let (index,status,key,receipt_json)=row.map_err(sql_error)?;
+        if unresolved || index!=next || index>=scope.actions.len(){
+            return Err(GuardError::DuplicateOrUncertain);
+        }
+        let expected_key=digest(&(scope.plan_hash.as_str(),index,&scope.actions[index]))?;
+        if key!=expected_key || !valid_sha(&key){
+            return Err(GuardError::DuplicateOrUncertain);
+        }
+        match status.as_str(){
+            "intent"=>{
+                if receipt_json.is_some(){return Err(GuardError::DuplicateOrUncertain);}
+                states[index]="uncertain";
+                unresolved=true;
+            },
+            "verified"=>{
+                let data=receipt_json.ok_or(GuardError::DuplicateOrUncertain)?;
+                let proof:Receipt=serde_json::from_str(&data)
+                    .map_err(|_|GuardError::DuplicateOrUncertain)?;
+                if proof.task_id!=id || proof.index!=index ||
+                   proof.key!=expected_key || !proof.native_verified ||
+                   proof.before!=previous || !changed(&proof.before,&proof.after) ||
+                   !valid_sha(&proof.object_proof_sha256){
+                    return Err(GuardError::DuplicateOrUncertain);
+                }
+                previous=proof.after;
+                states[index]="verified";
+            },
+            _=>return Err(GuardError::DuplicateOrUncertain)
+        }
+        next+=1;
+    }
+    Ok(states)
+}
+
 #[derive(Debug,PartialEq,Eq,Clone,Copy)]
 pub enum CancelOutcome { BeforeFirstEdit, BetweenVerifiedSteps }
 
@@ -96,12 +151,14 @@ impl TransactionalLedger {
     }
     fn load(&self,task_id:&str)->Result<(Scope,String,bool),GuardError>{
         if !id(task_id){return Err(GuardError::Invalid);}
-        let record:(String,String,i64)=self.conn.query_row(
-            "SELECT scope_json,approval,cancelled FROM ai_tasks WHERE task_id=?1",
-            params![task_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))
+        let record:(String,String,i64,String)=self.conn.query_row(
+            "SELECT scope_json,approval,cancelled,plan_hash FROM ai_tasks WHERE task_id=?1",
+            params![task_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))
                 .optional().map_err(sql_error)?.ok_or(GuardError::Invalid)?;
         let scope:Scope=serde_json::from_str(&record.0).map_err(|_|GuardError::Io)?;
-        if !scope.is_valid()||scope.task_id!=task_id{return Err(GuardError::Invalid);}
+        if !scope.is_valid()||scope.task_id!=task_id||scope.plan_hash!=record.3{
+            return Err(GuardError::DuplicateOrUncertain);
+        }
         Ok((scope,record.1,record.2!=0))
     }
     pub fn approve(&mut self,id:&str,consent:&mut dyn OwnerConsent)
@@ -169,13 +226,9 @@ impl TransactionalLedger {
         let (scope,_,_)=self.load(id)?;
         let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
-        let total:i64=tx.query_row(
-            "SELECT COUNT(*) FROM ai_steps WHERE task_id=?1",params![id],
-            |r|r.get(0)).map_err(sql_error)?;
-        let verified:i64=tx.query_row(
-            "SELECT COUNT(*) FROM ai_steps WHERE task_id=?1 AND state='verified'",
-            params![id],|r|r.get(0)).map_err(sql_error)?;
-        if total!=verified || verified as usize==scope.actions.len(){
+        let states=checked_steps(&tx,id,&scope)?;
+        let verified=states.iter().take_while(|v|**v=="verified").count();
+        if states.iter().any(|v|*v=="uncertain") || verified==scope.actions.len(){
             return Err(GuardError::DuplicateOrUncertain);
         }
         let updated=tx.execute(
@@ -206,22 +259,19 @@ impl TransactionalLedger {
             params![id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?;
         if gates.1!=0{return Err(GuardError::DuplicateOrUncertain);}
         if gates.0!="approved"{return Err(GuardError::NotApproved);}
-        let existing:i64=tx.query_row("SELECT COUNT(*) FROM ai_steps WHERE task_id=?1",
-            params![id],|r|r.get(0)).map_err(sql_error)?;
-        let verified:i64=tx.query_row(
-            "SELECT COUNT(*) FROM ai_steps WHERE task_id=?1 AND state='verified'",
-            params![id],|r|r.get(0)).map_err(sql_error)?;
-        if existing!=verified{return Err(GuardError::DuplicateOrUncertain);}
-        if index as i64 !=verified{return Err(GuardError::OutOfOrder);}
+        let history=checked_steps(&tx,id,&scope)?;
+        if history.iter().any(|v|*v=="uncertain"){
+            return Err(GuardError::DuplicateOrUncertain);
+        }
+        let verified=history.iter().take_while(|v|**v=="verified").count();
+        if index!=verified{return Err(GuardError::OutOfOrder);}
         let last=if index==0{scope.snapshot.clone()}else{
             let data:String=tx.query_row(
                 "SELECT receipt_json FROM ai_steps
                  WHERE task_id=?1 AND step_index=?2 AND state='verified'",
                 params![id,index-1],|r|r.get(0)).map_err(sql_error)?;
-            let receipt:Receipt=serde_json::from_str(&data).map_err(|_|GuardError::Io)?;
-            if receipt.task_id!=id||receipt.index!=index-1||!receipt.native_verified{
-                return Err(GuardError::DuplicateOrUncertain);
-            }
+            let receipt:Receipt=serde_json::from_str(&data)
+                .map_err(|_|GuardError::DuplicateOrUncertain)?;
             receipt.after
         };
         if *expected!=last{return Err(GuardError::StaleProject);}
@@ -262,17 +312,7 @@ impl TransactionalLedger {
     }
     pub fn recovery(&self,id:&str)->Result<Vec<&'static str>,GuardError>{
         let (scope,_,cancelled)=self.load(id)?;
-        let mut result=vec!["not_started";scope.actions.len()];
-        let mut statement=self.conn.prepare(
-            "SELECT step_index,state FROM ai_steps WHERE task_id=?1 ORDER BY step_index")
-            .map_err(sql_error)?;
-        let rows=statement.query_map(params![id],|r|
-            Ok((r.get::<_,usize>(0)?,r.get::<_,String>(1)?))).map_err(sql_error)?;
-        for row in rows{
-            let (i,state)=row.map_err(sql_error)?;
-            if i>=result.len(){return Err(GuardError::Invalid);}
-            result[i]=if state=="verified"{"verified"}else{"uncertain"};
-        }
+        let mut result=checked_steps(&self.conn,id,&scope)?;
         if cancelled {
             for state in &mut result{
                 if *state=="not_started"{*state="cancelled";}
