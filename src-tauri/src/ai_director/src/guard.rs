@@ -183,8 +183,15 @@ impl Ledger {
     pub fn approve(&self,id:&str,owner:&mut dyn OwnerConsent)->Result<bool,GuardError>{
         let p=self.scope(id)?;
         let dir=self.dir(id)?;
-        if dir.join("approved.sha256").exists(){return Err(GuardError::AlreadyExists);}
-        if !owner.grant(&p){return Ok(false);}
+        // Claim approval before showing consent. A denial, duplicate UI event
+        // or crash can never silently request another approval for this task.
+        let claim=dir.join("approval.claim");
+        if claim.exists(){return Err(GuardError::AlreadyExists);}
+        persist_new(&claim,digest(&p)?.as_bytes())?;
+        if !owner.grant(&p){
+            persist_new(&dir.join("approval.denied"),b"denied")?;
+            return Ok(false);
+        }
         let sha=digest(&p)?;
         persist_new(&dir.join("approved.sha256"),sha.as_bytes())?;
         Ok(true)
