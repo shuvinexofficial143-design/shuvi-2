@@ -271,7 +271,10 @@ mod tests{
     }
     #[test]
     fn real_native_png_export_is_verified_and_never_overwrites(){
-        let folder=tempfile::tempdir().unwrap();
+        let folder=std::env::temp_dir().join(format!("shuvi-m08-ipc-{}-{}",
+            std::process::id(),std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&folder).unwrap();
         let host=MotionHost::new();
         let comp=host.execute(MotionRequest::CreateComposition{
             name:"Export Native".into(),width:320,height:180,fps:30.0,duration_seconds:2.0
@@ -280,7 +283,7 @@ mod tests{
             comp_id:comp,name:"Export Plate".into(),kind:"rect".into(),
             x:160.0,y:90.0,width:150.0,height:85.0,fill:"#557799".into()
         }).unwrap();
-        let folder=folder.path().to_string_lossy().to_string();
+        let folder=folder.to_string_lossy().to_string();
         let request=||MotionRequest::ExportPng{
             workspace:folder.clone(),filename:"native_frame.png".into(),
             comp_id:comp,time:0.0,max_side:320,transparent:true
