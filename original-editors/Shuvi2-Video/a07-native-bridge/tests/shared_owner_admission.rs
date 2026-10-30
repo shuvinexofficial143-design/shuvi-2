@@ -315,13 +315,14 @@ fn direct_native_timeline_gesture_is_blocked_during_a07_guarded_transaction() {
     use filmcraft_time::{Tick,TICKS_PER_SECOND};
     let admission=gate();
     let before=admission.native_readback().unwrap();
-    let mut ledger=Tmp::new().open();
+    let tmp=Tmp::new();
+    let mut ledger=tmp.open();
     let result=admission.with_guarded_a07(&mut ledger,|_host|{
         let attempt=admission.with_manual_session(|native|{
             // This is a REAL FilmCraft edit_sequence path used by timeline
             // gestures, and would change the native project if admitted.
             let clip=native.active_sequence().unwrap().video_tracks[0].items[0].id;
-            let tick=Tick(2*TICKS_PER_SECOND);
+            let tick=native.sequence_rate().snap_nearest(Tick(2*TICKS_PER_SECOND));
             native.edit_sequence("blocked manual gesture", |seq,ctx,_|{
                 Ok(filmcraft_edit::razor_items(seq,&[ClipId(clip.0)],tick,ctx))
             }).map_err(|e|e.to_string())
@@ -351,7 +352,7 @@ fn admitted_direct_manual_razor_invalidates_pending_a07_plan_before_owner_prompt
     // a fake UI command. The admitted mutable borrow is the same Session.
     let created=admission.with_manual_session(|native|{
         let active=native.active_sequence().unwrap();
-        let tick=Tick(2*TICKS_PER_SECOND);
+        let tick=native.sequence_rate().snap_nearest(Tick(2*TICKS_PER_SECOND));
         let target=active.video_tracks[0].items.iter()
             .find(|c|c.start.0<tick.0&&tick.0<c.end().0)
             .unwrap().id;
