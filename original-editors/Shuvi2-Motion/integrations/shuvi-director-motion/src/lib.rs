@@ -498,6 +498,79 @@ mod tests{
     }
 
     #[test]
+    fn real_native_sqlite_edit_is_saved_and_reopened_as_effectcraft_project(){
+        let t=TestDb::new();
+        let path=t.0.join("verified-motion.ecproj");
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let (plan,reserve,consent,bind)=plan(0,vec![json!({
+            "type":"motion.createComposition","name":"Saved Real Comp",
+            "width":720,"height":404,"fps":30.0,"durationSeconds":6.0
+        })]);
+        let mut db=t.open();
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            host.reserve(&reserve).unwrap();
+            host.request_consent(&consent,&mut TestOwnerConsent{count:0,yes:true}).unwrap();
+            let receipt=host.execute(wire(&plan,0,0)).unwrap();
+            assert_eq!(receipt["nativeVerified"],true);
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["verified"]));
+        }).unwrap();
+        let path_str=path.to_str().unwrap().to_string();
+        let written=gate.manual_command("file.saveAs",json!({"path":path_str})).unwrap();
+        assert!(written["bytes"].as_u64().unwrap()>100);
+        let data=fs::read(&path).unwrap();
+        assert!(data.len()>100);
+        let sha_before=format!("{:x}",Sha256::digest(&data));
+        let mut reopened=Session::new();
+        reopened.execute_checked("file.open",json!({"path":path.to_str().unwrap()})).unwrap();
+        let restored=reopened.project.items.values().find(|i|i.name=="Saved Real Comp").unwrap();
+        let comp=reopened.project.comp(restored.id).unwrap();
+        assert_eq!((comp.width,comp.height),(720,404));
+        assert!((comp.duration.seconds()-6.0).abs()<0.04);
+        assert_eq!(fs::read(&path).unwrap(),data,"readback must not mutate original saved bytes");
+        assert_eq!(format!("{:x}",Sha256::digest(fs::read(&path).unwrap())),sha_before);
+        assert_eq!(t.open().recovery("realmotion1234").unwrap(),vec!["verified"]);
+    }
+
+    #[test]
+    fn two_real_native_steps_stop_between_receipts_without_duplicate_second_write(){
+        let tmp=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let comp=gate.manual_command("comp.new",json!({"name":"Existing",
+            "width":640,"height":360,"frameRate":30.0,"duration":5.0}))
+            .unwrap()["comp"].as_u64().unwrap();
+        let rev=gate.revision().unwrap();
+        let (p,reserve,consent,bind)=plan(rev,vec![
+            json!({"type":"motion.addText","compId":comp,"name":"A",
+                "text":"First","x":10.0,"y":20.0,"size":36.0}),
+            json!({"type":"motion.addText","compId":comp,"name":"B",
+                "text":"Second","x":40.0,"y":50.0,"size":32.0}),
+        ]);
+        let mut db=tmp.open();
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            host.reserve(&reserve).unwrap();
+            host.request_consent(&consent,&mut TestOwnerConsent{count:0,yes:true}).unwrap();
+            let first=host.execute(wire(&p,0,rev)).unwrap();
+            assert_eq!(first["nativeVerified"],true);
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["verified","not_started"]));
+            let stopped=host.cancel(&bind).unwrap();
+            assert_eq!(stopped["state"],"between_verified_steps");
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["verified","cancelled"]));
+            assert!(host.execute(wire(&p,1,rev+1)).is_err());
+        }).unwrap();
+        gate.with_native_owner(|owner|{
+            let c=owner.session.project.comp(ItemId(comp)).unwrap();
+            assert_eq!(c.layers.iter().filter(|l|l.name=="A").count(),1);
+            assert_eq!(c.layers.iter().filter(|l|l.name=="B").count(),0);
+        }).unwrap();
+        assert_eq!(tmp.open().recovery("realmotion1234").unwrap(),
+            vec!["verified","cancelled"]);
+    }
+
+    #[test]
     fn real_ai_director_provider_accepts_only_native_bounded_inventory(){
         use shuvi_ai_provider::{NativeModelRequest,build_request};
         let mut s=Session::new();
