@@ -21,4 +21,4 @@ sha2 = "0.10"
 # Native Windows confirmation: REAL OS-level owner Yes/No only.
 # No WebView, model response, JSON flag or in-app fake approval.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
