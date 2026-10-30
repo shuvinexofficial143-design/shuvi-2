@@ -89,6 +89,18 @@ impl GuardedStep{
     pub fn execute<O:NativeOwner>(&self,ledger:&Ledger,owner:&mut O)->Result<Value,GuardError>{
         let r:Receipt=ledger.execute_bound(&self.task_id,self.step_index,
             &self.expected,&self.action,owner)?;
+        self.format_receipt(r)
+    }
+    /// A06: preferred atomic SQLite step admission, native edit and verified
+    /// readback. The single actual editor owner lock must span this full call.
+    pub fn execute_transactional<O:NativeOwner>(
+        &self,ledger:&mut crate::transactional::TransactionalLedger,owner:&mut O
+    )->Result<Value,GuardError>{
+        let r:Receipt=ledger.execute_bound(&self.task_id,self.step_index,
+            &self.expected,&self.action,owner)?;
+        self.format_receipt(r)
+    }
+    fn format_receipt(&self,r:Receipt)->Result<Value,GuardError>{
         // The native owner must return its exact affected-object SHA-256.
         if !lowercase_sha(&r.object_proof_sha256){
             return Err(GuardError::NativeOutcomeUncertain);
