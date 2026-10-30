@@ -247,6 +247,15 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     const p=paths();const found=await inspectVideoProject(p.selectedRoot,p.projectPath);
     const h=await inspectVideoHistory(p.selectedRoot,p.projectPath);
     if(h.projectSha256!==found.projectSha256)throw Error("Project changed between snapshot and history readback");
+    // Rust checked_project() canonicalizes 8.3 Windows aliases and UNC paths.
+    // Verify selection has not changed during both native reads before updating.
+    if (value("project")!==p.projectPath || value("root")!==p.selectedRoot)
+      throw Error("Project selection changed during native readback; refresh before editing");
+    if(!localWindowsPath(found.projectPath)||!found.projectPath.toLowerCase().endsWith(".fcproj"))
+      throw Error("Native snapshot returned a non-Windows or invalid project path");
+    // Use ONLY the verified native identity, never string-compare a short alias
+    // with the canonical OS path on the next sequence/timeline edit.
+    e<HTMLInputElement>("project").value=found.projectPath;
     snapshot=found;history=h;clearFrame();draw();return found;
   }
   function renderCurrentFrame(immediate:boolean):void {

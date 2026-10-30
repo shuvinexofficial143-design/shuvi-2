@@ -118,3 +118,15 @@ test('installed WebView2 driver version is matched to actual native runtime, not
   assert.match(source,/edgeDriverSha256/);
   assert.doesNotMatch(source,/cargo install --git https:\/\/github\.com\/chippers\/msedgedriver-tool/);
 });
+
+test('even an installed WebView2 failure writes fail-closed aggregate release evidence',()=>{
+  const run=readFileSync(new URL('../scripts/release/run-installed-e2e.ps1',import.meta.url),'utf8');
+  assert.match(run,/\$runnerFailure = \$null/);
+  assert.match(run,/catch \{/);
+  assert.match(run,/\$runnerFailure = \$_.Exception\.Message/);
+  assert.match(run,/node scripts\/release\/verify-installed-proof\.mjs/);
+  assert.match(run,/proof exit=\$proofExit/);
+  const proof=readFileSync(new URL('../scripts/release/verify-installed-proof.mjs',import.meta.url),'utf8');
+  assert.match(proof,/editingSliceVerified:false/);
+  assert.match(proof,/result\.error=String/);
+});

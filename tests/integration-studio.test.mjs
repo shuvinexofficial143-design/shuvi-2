@@ -18,3 +18,19 @@ test("both studios mount into the SAME window and Video DOM survives switching",
   assert.match(motion,/preview\.replaceChildren\(\.\.\.originalPreviewNodes\)/);
   assert.match(motion,/timeline\.replaceChildren\(\.\.\.originalTimelineNodes\)/);
 });
+
+test("native Windows canonical FilmCraft readback is used for edits and static M0 splash is removed",()=>{
+  const view=read("src/studios/video/view.ts");
+  const shell=read("src/main.ts");
+  const installed=read("scripts/release/video-installed-e2e.mjs");
+  const rust=read("src-tauri/src/video/timeline.rs");
+  assert.match(rust,/fs::canonicalize\(file\)/);
+  assert.match(view,/value\("project"\)!==p\.projectPath/);
+  assert.match(view,/value\("root"\)!==p\.selectedRoot/);
+  assert.match(view,/e<HTMLInputElement>\("project"\)\.value=found\.projectPath/);
+  assert.match(view,/snapshot=found;history=h;clearFrame\(\);draw\(\);return found/);
+  assert.match(installed,/canonicalProjectPath=await driver\.property/);
+  assert.match(installed,/result\.canonicalProjectPath/);
+  assert.match(shell,/\.preview > \.screen/);
+  assert.match(shell,/Native editing · AI offline/);
+});

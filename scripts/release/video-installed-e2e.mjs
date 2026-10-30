@@ -58,6 +58,11 @@ try {
     for (const [name,value] of Object.entries({root,project,source:media,output,width:64,height:64,fps:12})) await driver.fill(field(name),value);
     await action('import','Imported real media');
     assert.ok((await stat(project)).size>100);
+    // Native checked_project() canonicalizes Windows 8.3 temp-path aliases.
+    // The UI must retain the canonical readback, not the raw typed alias.
+    result.canonicalProjectPath=await driver.property(field('project'),'value');
+    assert.ok(result.canonicalProjectPath.toLowerCase().endsWith('studio.fcproj'));
+    assert.equal(sha256(await readFile(result.canonicalProjectPath)),sha256(await readFile(project)));
   });
   await step('create sequence and place native media',async()=>{
     await action('sequence','Verified createSequence');
@@ -112,7 +117,7 @@ try {
     await driver.click('button[data-studio="motion"]');
     await until('native Motion mounted',()=>driver.element('#motion-create'));
     await selectVideo();assert.equal((await driver.elements('.v-lanes .v-clip')).length,1);
-    assert.equal(await driver.property(field('project'),'value'),project);
+    assert.equal(await driver.property(field('project'),'value'),result.canonicalProjectPath);
   });
   await step('cold restart and native saved project readback',async()=>{
     const before=sha256(await readFile(project));

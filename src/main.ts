@@ -12,7 +12,14 @@ const prompt = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 
 let selectedStudio: "video" | "motion" = "video";
 const videoStudio = mountVideoStudio();
-// Video is the default tab; hide the M0 placeholder immediately.
+// After native Video has mounted, remove the old M0 static splash. It is not
+// an actual FilmCraft monitor and must not appear beside verified frames.
+document.querySelector<HTMLElement>(".preview > .screen")?.remove();
+const phase=document.querySelector<HTMLElement>(".top-note .phase");
+if(phase)phase.textContent="Native editing · AI offline";
+const rail=document.querySelector<HTMLElement>(".rail-bottom");
+if(rail)rail.textContent="Video / Motion · native verification required";
+// Video is the default tab; show actual mounted Video editor.
 videoStudio.setActive(true);
 let engines: EngineStatus[] = [];
 
