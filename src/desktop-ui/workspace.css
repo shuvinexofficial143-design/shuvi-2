@@ -75,3 +75,9 @@
 .su .su-lane{cursor:crosshair}
 .su .su-lane button{cursor:grab}
 .su .su-lane button:focus-visible{outline:2px solid #a4c8ff;outline-offset:-2px}
+
+/* U07: persistent native recovery indicator, one window and no fake status. */
+.su [data-tab].recovery{outline:2px solid #e9a65d;outline-offset:-2px}
+.su [data-tab].recovery::after{content:" · refresh";font-size:11px}
+.su button:disabled{cursor:not-allowed;opacity:.53}
+.su .su-inspector button:not(:disabled):focus-visible{outline:2px solid #add6ff;outline-offset:2px}

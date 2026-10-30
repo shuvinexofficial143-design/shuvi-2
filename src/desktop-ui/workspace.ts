@@ -9,6 +9,7 @@ import {describeApprovalState} from "../unified-workspace/approval.mjs";
 import {keyframeReadback} from "../unified-workspace/keyframes.mjs";
 import {nativeDiagnosticText} from "../unified-workspace/diagnostics.mjs";
 import {nativeClipInspector,timelineSeekFromX,splitPreflight} from "../unified-workspace/video-inspector.mjs";
+import {workspaceActionAvailable,studioRecovery} from "../unified-workspace/ui-guards.mjs";
 import "./workspace.css";
 
 export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=nativeWorkspaceBridge){
@@ -208,9 +209,11 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     for(const studio of ["video","motion"]){
       root.querySelectorAll<HTMLElement>('[data-panel="'+studio+'"]').forEach(el=>el.hidden=studio!==state.studio);
       const tab=node<HTMLButtonElement>('[data-tab="'+studio+'"]');tab.setAttribute("aria-pressed",String(studio===state.studio));
+      tab.classList.toggle("recovery",studioRecovery(state,studio as "video"|"motion"));
+      tab.title=studioRecovery(state,studio as "video"|"motion")?"Native recovery needed: refresh "+studio:"";
     }
     node('[data-ui="title"]').textContent=state.studio==="video"?"Video Studio":"Motion Studio";
-    node('[data-ui="health"]').textContent=state.needsReload&&state.recoveryStudio===state.studio?"Native refresh required":state.busy?"Native operation running":
+    node('[data-ui="health"]').textContent=studioRecovery(state,state.studio)?"Native refresh required":state.busy?"Native operation running":
       state.studio==="motion"?(state.motion.ready?"EffectCraft native ready":"EffectCraft unverified"):
       state.video?"FilmCraft project readback verified":"FilmCraft unverified";
     node('[data-ui="revision"]').textContent=state.studio==="video"?(state.video?"SHA "+state.video.snapshot.projectSha256.slice(0,12):"No native project"):
@@ -233,15 +236,6 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         projectBookmarks?"No saved project reference":"Local project storage unavailable");
     node('[data-ui="error"]').textContent=state.error??"";
     node('[data-ui="error"]').hidden=!state.error;
-    root.querySelectorAll<HTMLButtonElement>("[data-act]").forEach(button=>{
-      const key=button.dataset.act??"";
-      if(key==="stop")button.disabled=!state.busy;
-      else if(key==="approve"||key==="reject")button.disabled=state.busy;
-      else button.disabled=state.busy||
-        (state.needsReload&&state.recoveryStudio===state.studio&&!["video-open","motion-status","motion-open","diagnostic-copy","bookmark-forget"].includes(key))||
-        (key==="video-verify"&&!state.video)||
-        (key==="motion-verify"&&!state.motion.ready);
-    });
     const zoom=Math.max(100,Math.min(400,Number(s("timelineZoom"))||100));
     node('[data-ui="zoom-label"]').textContent=zoom+"% · display only";
     const videoKey=state.video?state.video.projectPath+":"+state.video.snapshot.projectSha256+":"+zoom:null;
@@ -342,13 +336,13 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         "Native masks: "+(inspector.masks.length?inspector.masks.map((m:{name:string;uid:number})=>m.name+" #"+m.uid).join(", "):"none"):
         "Native masks: select layer";
     }
-    const layerSelected=selectedLayer!==null&&state.motion.layers.some(layer=>layer.id===selectedLayer);
-    for(const action of ["motion-inspect","motion-transform","motion-key","motion-edit",
-      "motion-add-effect","motion-set-effect","motion-toggle-effect","motion-remove-effect",
-      "motion-ease","motion-add-mask","motion-remove-mask"]){
-      const button=node<HTMLButtonElement>('[data-act="'+action+'"]');
-      button.disabled=button.disabled||!layerSelected||(action!=="motion-inspect"&&!inspector);
-    }
+    // Refresh availability after native effects/masks were rebuilt and option
+    // selections were restored. Never retain the previous render's disabled flag.
+    const selectedIds={clipId:selectedClip,layerId:selectedLayer,
+      effectUid:Number(s("effectUid")),maskUid:Number(s("maskUid"))};
+    root.querySelectorAll<HTMLButtonElement>("[data-act]").forEach(button=>{
+      button.disabled=!workspaceActionAvailable(state,button.dataset.act??"",selectedIds);
+    });
     refreshFrame(state);
     if(state.chat.length!==seenChat){
       seenChat=state.chat.length;
@@ -390,7 +384,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       case "bookmark-remember":{
         if(!projectBookmarks)throw Error("On-device project bookmarks are unavailable");
         const state=ctrl.getState();
-        if(state.busy||state.needsReload&&state.recoveryStudio===state.studio)
+        if(state.busy||studioRecovery(state,state.studio))
           throw Error("Native state must be verified before saving a bookmark");
         if(state.studio==="video"){
           if(!state.video)throw Error("Open a real FilmCraft project before remembering its path");
@@ -567,13 +561,13 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         f("moveTime").value=String(clipState.start);
       }
       root.querySelectorAll("[data-clip]").forEach(el=>el.classList.toggle("selected",el===c));
-      showSelectedClip(ctrl.getState());
+      render(ctrl.getState());
       return;
     }
     const lane=t.closest<HTMLElement>(".su-lane");
     if(lane&&ctrl.getState().studio==="video"&&!ctrl.getState().busy){
       const snapshot=ctrl.getState(),v=snapshot.video;
-      if(!v||snapshot.needsReload&&snapshot.recoveryStudio==="video")return;
+      if(!v||studioRecovery(snapshot,"video"))return;
       const rect=lane.getBoundingClientRect();
       const seconds=timelineSeekFromX({clientX:event.clientX,laneLeft:rect.left,laneWidth:rect.width,
         sequence:v.snapshot.sequence,clips:v.clips});
@@ -602,7 +596,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     const button=t?.closest<HTMLButtonElement>("[data-clip]");
     if(!button||button.dataset.dragDisabled==="true")return;
     const state=ctrl.getState();
-    if(state.studio!=="video"||!state.video||state.needsReload&&state.recoveryStudio==="video")return;
+    if(state.studio!=="video"||!state.video||studioRecovery(state,"video"))return;
     const id=Number(button.dataset.clip);
     const clip=state.video.clips.find((c:{clipId:number})=>c.clipId===id);
     const lane=button.closest<HTMLElement>(".su-lane");
@@ -623,7 +617,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     // Never accidentally suppress the user's following deliberate clip selection.
     setTimeout(()=>{skipClipClick=false;},0);
     const state=ctrl.getState(),v=state.video;
-    if(state.studio!=="video"||!v||state.busy||state.needsReload&&state.recoveryStudio==="video")return;
+    if(state.studio!=="video"||!v||state.busy||studioRecovery(state,"video"))return;
     const actual=v.clips.find((c:{clipId:number})=>c.clipId===gesture.clipId);
     if(!actual||v.snapshot.projectSha256!==gesture.sha||
       actual.track!==gesture.track||actual.start!==gesture.start){
@@ -655,7 +649,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     const command=workspaceKeyCommand({key:event.key,ctrlKey:event.ctrlKey,metaKey:event.metaKey,
       altKey:event.altKey,shiftKey:event.shiftKey,editable,studio:state.studio,
       selectedClip:selectedClip!==null});
-    if(!command||state.busy||state.needsReload&&state.recoveryStudio==="video")return;
+    if(!command||state.busy||studioRecovery(state,"video"))return;
     event.preventDefault();
     if(command==="undo"||command==="redo"){safe(()=>ctrl.history(command));return;}
     if(command==="split"||command==="delete"){
@@ -685,6 +679,8 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       root.style.setProperty("--chat-width",Math.max(240,Math.min(420,width))+"px");
     }else if(target.dataset.field==="timelineZoom"){
       if(!Number.isFinite(Number(target.value)))return;
+      render(ctrl.getState());
+    }else if(["effectUid","maskUid","transformKind","keyProperty"].includes(target.dataset.field??"")){
       render(ctrl.getState());
     }
   };

@@ -3,9 +3,9 @@
  * gateway; no LLM text can mint owner consent or guarded edit proof.
  */
 const sha=value=>typeof value==="string"&&/^[a-f0-9]{64}$/i.test(value);
-export function describeApprovalState({studio,video,motion,pendingApproval,needsReload,recoveryStudio,busy}){
+export function describeApprovalState({studio,video,motion,pendingApproval,needsReload,recoveryStudio,recoveryByStudio,busy}){
   const blocked=busy?"Native operation running":
-    needsReload&&recoveryStudio===studio?"Native recovery required":null;
+    (recoveryByStudio?.[studio]??(needsReload&&recoveryStudio===studio))?"Native recovery required":null;
   if(studio==="motion")
     return {eligible:false,reason:blocked??"Motion AI guarded execution is not connected; manual editing only",nativeGuarded:false};
   if(!video?.snapshot||!sha(video.snapshot.projectSha256))

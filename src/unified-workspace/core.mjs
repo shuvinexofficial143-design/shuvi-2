@@ -51,7 +51,7 @@ export function createWorkspaceController(native) {
   const listeners = new Set();
   const state = {
     studio:"video", busy:false, progress:"Idle", error:null, stopped:false,
-    needsReload:false, recoveryStudio:null, video:null, videoFrame:null, exportReceipt:null,
+    needsReload:false, recoveryStudio:null, recoveryByStudio:{video:false,motion:false}, video:null, videoFrame:null, exportReceipt:null,
     videoGeneration:0,motionGeneration:0,verificationHistory:[],
     motion:{ready:false,revision:null,composition:null,layers:[],frame:null,dirty:false,inspector:null},
     pendingApproval:null, chat:[{role:"assistant",text:"Shuvi AI Director is not connected. Drafts cannot edit a project."}]
@@ -70,15 +70,27 @@ export function createWorkspaceController(native) {
     const current = clone(state);
     for (const listener of listeners) listener(current);
   };
-  const set = (patch) => { Object.assign(state,patch); emit(); };
+  const set = (patch) => {
+    // Native command failures can quarantine BOTH engines in one session.
+    // Keep legacy needsReload/recoveryStudio only as a backwards-compatible
+    // current-view summary. They must never discard the other studio's guard.
+    const recovery={...state.recoveryByStudio,...(patch.recoveryByStudio??{})};
+    if(patch.needsReload===true&&["video","motion"].includes(patch.recoveryStudio))
+      recovery[patch.recoveryStudio]=true;
+    Object.assign(state,patch,{recoveryByStudio:recovery});
+    state.needsReload=recovery.video||recovery.motion;
+    state.recoveryStudio=recovery[state.studio]?state.studio:
+      recovery.video?"video":recovery.motion?"motion":null;
+    emit();
+  };
   const requireReady = (studio) => {
     if(state.busy) fail("BUSY","A native operation is already in progress");
-    if(state.needsReload && state.recoveryStudio===studio)
+    if(state.recoveryByStudio[studio])
       fail("RELOAD_REQUIRED","A stopped or divergent native operation must be re-inspected");
   };
   async function run(label, job, {recover=false,studio="video",mutating=false}={}) {
     if (state.busy) fail("BUSY", "A native operation is already in progress");
-    if (state.needsReload && state.recoveryStudio===studio && !recover) fail("RELOAD_REQUIRED", "Refresh the affected native studio before another edit");
+    if (state.recoveryByStudio[studio] && !recover) fail("RELOAD_REQUIRED", "Refresh the affected native studio before another edit");
     const token = ++operationId;
     inFlight = token;
     evidence(studio,label,"started");
@@ -121,7 +133,7 @@ export function createWorkspaceController(native) {
     return run("Inspecting native FilmCraft project", async()=>{
       const video=await readVideo(root,projectPath);
       set({video,videoFrame:null,exportReceipt:null,pendingApproval:null,videoGeneration:state.videoGeneration+1,
-        ...(state.recoveryStudio==="video"?{needsReload:false,recoveryStudio:null}:{})});
+        recoveryByStudio:{...state.recoveryByStudio,video:false}});
       return video;
     },{recover:true});
   }
@@ -278,7 +290,7 @@ export function createWorkspaceController(native) {
       const changed=status.projectRevision!==previous.revision;
       set({motion:{...previous,ready:true,composition,layers,revision:status.projectRevision,
         frame:changed?null:previous.frame,inspector:null,dirty:!!status.dirty},
-        ...(state.recoveryStudio==="motion"?{needsReload:false,recoveryStudio:null}:{})});
+        recoveryByStudio:{...state.recoveryByStudio,motion:false}});
       return status;
     },{recover:true,studio:"motion"});
   }
@@ -428,7 +440,7 @@ export function createWorkspaceController(native) {
       }
       set({motion:{ready:true,revision:status.projectRevision,composition:comp,layers,frame:null,dirty:!!status.dirty,inspector:null},
         motionGeneration:state.motionGeneration+1,
-        ...(state.recoveryStudio==="motion"?{needsReload:false,recoveryStudio:null}:{})});
+        recoveryByStudio:{...state.recoveryByStudio,motion:false}});
       return receipt;
     },{recover:true,studio:"motion"});
   }

@@ -18,7 +18,7 @@ export type WorkspaceNative = {
 };
 export type WorkspaceState = {
  studio:"video"|"motion";busy:boolean;progress:string;error:string|null;
- stopped:boolean;needsReload:boolean;recoveryStudio:"video"|"motion"|null;
+ stopped:boolean;needsReload:boolean;recoveryStudio:"video"|"motion"|null;recoveryByStudio:{video:boolean;motion:boolean};
  videoGeneration:number;motionGeneration:number;
  verificationHistory:{id:number;studio:"video"|"motion";label:string;outcome:string;code:string|null}[];
  video:any;videoFrame:any;exportReceipt:any;
