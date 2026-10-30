@@ -191,7 +191,14 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     // Clicking empty space deselects the effects.
     let bg = ui.interact(body, egui::Id::unique("ec-bg"), Sense::click());
     if bg.clicked() {
-        app.session.state.selected_props.retain(|(l, u)| !(*l == layer.id && fx.iter().any(|g| effect_active(g, layer.id, &[(*l, *u)]))));
+        // Clearing property selection mutates original Session state too.
+        // A pending guarded AI step must not race this manual click.
+        if let Err(error) = app.motion_owner_gate.manual_transaction(|| {
+            app.session.state.selected_props.retain(|(l, u)| !(*l == layer.id && fx.iter().any(|g| effect_active(g, layer.id, &[(*l, *u)]))));
+            Ok(())
+        }) {
+            app.ui.status = error;
+        }
     }
     let has_clip = !app.session.state.effect_clipboard.is_empty();
     let drag_id = egui::Id::unique("ec-drag-effect");
