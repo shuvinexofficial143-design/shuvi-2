@@ -11,4 +11,4 @@ export declare function realClipDetail(sequence:unknown,clipId:number):RealClipD
 export declare function realSequenceMarkers(sequence:unknown):RealSequenceMarker[];
 export declare function revealTimeOffset(time:number,viewport:{
  start:number;end:number;duration:number;maxStart:number
-}):number|null;
+}|null):number|null;

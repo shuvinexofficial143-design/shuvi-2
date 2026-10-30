@@ -181,8 +181,16 @@ try{
     throw Error("Reveal selected clip mutated saved FilmCraft .fcproj");
   if(!await page.locator('[data-inspect-action="seekClip"]').isEnabled())
     throw Error("Real clip frame navigation not enabled");
-  if(await page.locator('[data-v="markerSelect"] option').count()!==1)
-    throw Error("Fixture without markers invented a fake sequence marker");
+  const nativeSequence=JSON.parse(execFileSync(staged,[
+    "--compact","--project",project,"inspect","sequence"
+  ],{encoding:"utf8",timeout:25000,maxBuffer:1024*1024}));
+  const nativeMarkerIds=new Set((Array.isArray(nativeSequence.markers)?nativeSequence.markers:[])
+    .filter(m=>Number.isSafeInteger(m?.id)&&m.id>0&&Number.isFinite(m?.start)&&m.start>=0)
+    .map(m=>m.id));
+  const actualMarkerCount=(await page.locator('[data-v="markerSelect"] option').count())-1;
+  if(actualMarkerCount!==nativeMarkerIds.size)
+    throw Error("Marker UI does not match real FilmCraft saved marker IDs: "+
+      actualMarkerCount+" UI vs "+nativeMarkerIds.size+" in saved sequence");
   note("clip-inspector","Real FilmCraft clip metadata and reveal inspected without project write");
 
 
@@ -194,8 +202,13 @@ try{
     el.value=String(Number(el.max)/2);
     el.dispatchEvent(new Event("input",{bubbles:true}));
   });
-  await page.locator('.v-lanes .v-track-lane .v-clipped-left').first()
-    .waitFor({state:"visible",timeout:10000});
+  // The actual saved clip may cover the full fixture duration, or be shorter.
+  // Check the inspected clip's real geometry rather than assuming a
+  // synthetic "clipped left" marker always exists at this pan position.
+  const zoomedClips=await page.locator('.v-lanes .v-clip').count();
+  if(zoomedClips<1)throw Error("Timeline zoom/pan lost real saved FilmCraft clip");
+  const clipped=await page.locator('.v-lanes .v-clipped-left,.v-lanes .v-clipped-right').count();
+  if(clipped<1)throw Error("Zoomed clip viewport did not mark any clipped edge");
   if(!(await page.locator('[data-v="viewRange"]').textContent())?.includes("4× zoom"))
     throw Error("Native FilmCraft timeline zoom viewport label missing");
   if(!readFileSync(project).equals(preZoomProject))

@@ -32,3 +32,8 @@ test("viewport reveal centers offscreen clip without a project edit",()=>{
  assert.equal(revealTimeOffset(10000,view),6300);
  assert.equal(revealTimeOffset(NaN,view),null);
 });
+
+test("null viewport is a benign no-navigation state, not a crash",()=>{
+  assert.equal(revealTimeOffset(1,null),null);
+  assert.equal(revealTimeOffset(Infinity,{start:0,end:1,duration:1,maxStart:0}),null);
+});
