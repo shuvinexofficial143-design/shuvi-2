@@ -4,7 +4,7 @@
 use std::{path::Path, sync::mpsc::{self,Sender,Receiver}, thread, time::Duration};
 use serde::Deserialize;
 use serde_json::{json,Value};
-use shuvi_motion_bridge::{BuiltinEffect,CompositionSpec,MotionBridge,Property,ShapeKind,Transform};
+use shuvi_motion_bridge::{BuiltinEffect,CompositionSpec,MaskProperty,MotionBridge,Property,ShapeKind,Transform};
 use base64::{engine::general_purpose::STANDARD,Engine as _};
 
 #[derive(Debug,Deserialize)]
@@ -32,6 +32,9 @@ pub enum MotionRequest{
     SetMaskVertex { comp_id:u64,layer_id:u64,uid:u64,index:usize,point:[f64;2] },
     RemoveMask { comp_id:u64,layer_id:u64,uid:u64 },
     ExportPng { workspace:String,filename:String,comp_id:u64,time:f64,max_side:u32,transparent:bool },
+    InspectEffectParameter { comp_id:u64,layer_id:u64,uid:u64,effect:String,parameter:String },
+    GetMaskSettings { comp_id:u64,layer_id:u64,uid:u64 },
+    SetMaskProperty { comp_id:u64,layer_id:u64,uid:u64,property:String,value:f64 },
 }
 
 struct Work { request:MotionRequest, respond:Sender<Result<Value,String>> }
@@ -88,6 +91,17 @@ fn effect_json(f:shuvi_motion_bridge::EffectInfo)->Value{
 }
 fn mask_json(m:shuvi_motion_bridge::MaskInfo)->Value{
     json!({"uid":m.uid,"name":m.name,"closed":m.closed,"vertices":m.vertices})
+}
+fn mask_property(name:&str)->Result<MaskProperty,String>{
+    match name{
+        "feather"=>Ok(MaskProperty::Feather),
+        "expansion"=>Ok(MaskProperty::Expansion),
+        "opacity"=>Ok(MaskProperty::Opacity),
+        _=>Err("allowed mask properties: feather|expansion|opacity".into()),
+    }
+}
+fn mask_settings_json(m:shuvi_motion_bridge::MaskSettings)->Value{
+    json!({"uid":m.uid,"feather":m.feather,"expansion":m.expansion,"opacity":m.opacity})
 }
 fn coords(x:Option<f64>,y:Option<f64>)->Result<(f64,f64),String>{
     match (x,y){(Some(x),Some(y))=>Ok((x,y)),_=>Err("both x and y are required".into())}
@@ -186,6 +200,17 @@ fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
                 "transparent":receipt.transparent,
                 "verifiedFromDisk":receipt.verified_from_disk,
                 "source":"native-effectcraft"}))
+        }
+        MotionRequest::InspectEffectParameter{comp_id,layer_id,uid,effect,parameter}=>{
+            let p=e.effect_parameter_state(comp_id,layer_id,uid,builtin(&effect)?,&parameter)?;
+            Ok(json!({"uid":p.uid,"parameter":p.parameter,"value":p.value,
+                "minimum":p.minimum,"maximum":p.maximum,"source":"native-effectcraft"}))
+        }
+        MotionRequest::GetMaskSettings{comp_id,layer_id,uid}=>
+            Ok(mask_settings_json(e.mask_settings(comp_id,layer_id,uid)?)),
+        MotionRequest::SetMaskProperty{comp_id,layer_id,uid,property,value}=>{
+            let state=e.set_mask_property(comp_id,layer_id,uid,mask_property(&property)?,value)?;
+            Ok(mask_settings_json(state))
         }
     }
 }
@@ -293,6 +318,39 @@ mod tests{
         assert_eq!(receipt["source"],"native-effectcraft");
         assert!(std::path::Path::new(receipt["path"].as_str().unwrap()).exists());
         assert!(host.execute(request()).is_err());
+    }
+    #[test]
+    fn native_mask_advanced_properties_and_effect_inspection_roundtrip_in_one_worker(){
+        let host=MotionHost::new();
+        let comp=host.execute(MotionRequest::CreateComposition{
+            name:"IPC Advanced M09".into(),width:320,height:180,fps:30.0,duration_seconds:3.0
+        }).unwrap()["id"].as_u64().unwrap();
+        let layer=host.execute(MotionRequest::AddShape{
+            comp_id:comp,name:"M09 Plate".into(),kind:"rect".into(),
+            x:160.0,y:90.0,width:160.0,height:110.0,fill:"#557799".into()
+        }).unwrap()["id"].as_u64().unwrap();
+        let mask=host.execute(MotionRequest::AddPolygonMask{
+            comp_id:comp,layer_id:layer,
+            vertices:vec![[-50.0,-40.0],[50.0,-40.0],[50.0,40.0],[-50.0,40.0]]
+        }).unwrap()["uid"].as_u64().unwrap();
+        let state=host.execute(MotionRequest::SetMaskProperty{
+            comp_id:comp,layer_id:layer,uid:mask,property:"feather".into(),value:12.0
+        }).unwrap();
+        assert_eq!(state["feather"],json!([12.0,12.0]));
+        assert_eq!(host.execute(MotionRequest::GetMaskSettings{
+            comp_id:comp,layer_id:layer,uid:mask
+        }).unwrap()["feather"],json!([12.0,12.0]));
+        assert!(host.execute(MotionRequest::SetMaskProperty{
+            comp_id:comp,layer_id:layer,uid:mask,property:"filesystem".into(),value:2.0
+        }).is_err());
+        let uid=host.execute(MotionRequest::AddEffect{
+            comp_id:comp,layer_id:layer,effect:"brightnessContrast".into()
+        }).unwrap()["uid"].as_u64().unwrap();
+        let p=host.execute(MotionRequest::InspectEffectParameter{
+            comp_id:comp,layer_id:layer,uid,effect:"brightnessContrast".into(),
+            parameter:"brightness".into()
+        }).unwrap();
+        assert_eq!(p["value"],0.0);
     }
     #[test]
     fn frontend_json_contract_uses_only_typed_camel_case_actions(){
