@@ -71,6 +71,15 @@ impl ReserveWire {
         ledger.reserve(&scope)?;
         Ok(self.plan_hash.clone())
     }
+    /// Preferred A06 backend: full plan independently checked before SQLite
+    /// WAL FULL reservation. The native owner must be exclusively held.
+    pub fn reserve_transactional<O:NativeOwner>(
+        &self,ledger:&mut crate::transactional::TransactionalLedger,owner:&mut O
+    )->Result<String,GuardError>{
+        let scope=build_scope(self)?;
+        ledger.reserve(&scope,owner)?;
+        Ok(self.plan_hash.clone())
+    }
 }
 #[cfg(test)]
 mod tests{
