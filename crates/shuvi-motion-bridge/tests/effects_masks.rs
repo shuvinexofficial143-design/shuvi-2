@@ -95,3 +95,24 @@ fn invalid_mask_and_effect_inputs_cannot_mutate_project(){
     assert!(b.remove_effect(c,l,900_000).is_err());
     assert_eq!(b.revision(),after);
 }
+
+#[test]
+fn native_png_export_matches_renderer_and_never_overwrites(){
+    let folder=tempfile::tempdir().unwrap();
+    let (mut b,c,l)=scene();
+    let fx=b.add_effect(c,l,BuiltinEffect::BrightnessContrast).unwrap();
+    b.set_effect_numeric(c,l,fx.uid,BuiltinEffect::BrightnessContrast,
+        "brightness",65.0).unwrap();
+    let frame=b.render_preview(c,0.0,320,true).unwrap();
+    let receipt=b.export_png_frame(folder.path(),"M08_export.png",c,0.0,320,true).unwrap();
+    assert!(receipt.verified_from_disk);
+    assert!(receipt.transparent);
+    assert_eq!((receipt.width,receipt.height),(frame.width,frame.height));
+    assert!(receipt.bytes>100);
+    let bytes=std::fs::read(&receipt.path).unwrap();
+    assert_eq!(bytes,frame.png().unwrap());
+    assert!(b.export_png_frame(folder.path(),"M08_export.png",c,0.0,320,true).is_err());
+    assert_eq!(std::fs::read(&receipt.path).unwrap(),bytes);
+    assert!(b.export_png_frame(folder.path(),"../outside.png",c,0.0,320,true).is_err());
+    assert!(b.export_png_frame(folder.path(),"wrong.jpg",c,0.0,320,true).is_err());
+}
