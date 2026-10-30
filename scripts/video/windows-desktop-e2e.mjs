@@ -94,7 +94,8 @@ async function clickAction(action,expected,timeout=120000){
   note(action,msg);
 }
 try{
-  const port=await freePort();
+  const port=process.env.SHUVI_CI_E2E_CDP_PORT?Number(process.env.SHUVI_CI_E2E_CDP_PORT):await freePort();
+  if(!Number.isInteger(port)||port<1024||port>65535)throw Error("CI CDP port invalid");
   report.cdpPort=port;
   applyCiOnlyPolicy(port);
   note("debug-policy","Applied temporary per-app WebView2 CDP port on ephemeral Windows CI runner");

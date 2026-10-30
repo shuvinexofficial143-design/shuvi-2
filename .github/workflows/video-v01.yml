@@ -87,9 +87,29 @@ jobs:
         shell: pwsh
         timeout-minutes: 3
         run: ./scripts/video/desktop-launch-smoke.ps1
-      - name: End-to-end real WebView2 UI + FilmCraft MP4 export
+      - name: Save production Windows exe checksum before CI-only instrumented build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/target/video-production-proof | Out-Null
+          $exe = (Resolve-Path src-tauri/target/release/shuvi2.exe).Path
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content src-tauri/target/video-production-proof/original-exe-sha256.txt -Value $hash
+          Write-Host "Original uninstrumented Shuvi production exe SHA256: $hash"
+      - name: Build isolated real Windows WebView2 UI test binary with CI-only CDP config
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          npm run tauri -- build --no-bundle --config src-tauri/tauri.video.conf.json --config src-tauri/tauri.video.e2e.conf.json
+          if ($LASTEXITCODE -ne 0) { throw "CI-only WebView2 CDP build failed." }
+          $oldHash = (Get-Content src-tauri/target/video-production-proof/original-exe-sha256.txt).Trim()
+          $newHash = (Get-FileHash src-tauri/target/release/shuvi2.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($oldHash -eq $newHash) { throw "CI browser-arguments overlay did not produce a distinct test binary." }
+          Write-Host "CI-only instrumented EXE SHA256: $newHash (NOT bundled into production NSIS)"
+      - name: End-to-end real WebView2 UI + FilmCraft MP4 export (instrumented native app)
         shell: pwsh
         timeout-minutes: 12
+        env:
+          SHUVI_CI_E2E_CDP_PORT: "9222"
         run: node scripts/video/windows-desktop-e2e.mjs
       - name: Preserve Windows desktop E2E proof and failures
         if: always()
@@ -98,6 +118,7 @@ jobs:
           name: shuvi2-video-desktop-e2e-proof
           path: |
             src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/video-production-proof/original-exe-sha256.txt
             src-tauri/target/video-desktop-e2e.json
             src-tauri/target/video-desktop-e2e.png
           if-no-files-found: warn
@@ -118,6 +139,7 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/binaries/filmcraft-cli.build.json
             src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/video-production-proof/original-exe-sha256.txt
             src-tauri/target/video-desktop-e2e.json
             src-tauri/target/video-desktop-e2e.png
           if-no-files-found: error
