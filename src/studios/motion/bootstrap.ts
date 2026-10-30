@@ -51,10 +51,15 @@ function info(message:string,failed=false):void {
 async function execute(label:string,work:()=>Promise<void>):Promise<void> {
   if (busy) {
     // Never silently drop an owner command while a prior operation is pending.
-    if(mounted)info("FAIL: Native editor busy; "+label+" was not accepted. Retry.",true);
+    if(mounted){
+      const warning="Native editor busy; "+label+" was not accepted. Retry.";
+      node<HTMLElement>("#motion-command-notice").textContent=warning;
+      info("FAIL: "+warning,true);
+    }
     return;
   }
   busy = true;
+  if(mounted)node<HTMLElement>("#motion-command-notice").textContent="";
   const generation=uiGeneration;
   let error:unknown=null;
   info(label+"…");
@@ -276,6 +281,7 @@ function paintUi():void {
         <span id="motion-history-status">Native history loading…</span>
       </div>
       <span id="motion-status" role="status" aria-live="polite">Connecting to Windows engine…</span>
+      <span id="motion-command-notice" role="alert" aria-live="assertive"></span>
     </div>
     <div class="motion-preview"><img id="motion-native-frame" alt="No native composition frame yet"/>
       <p id="motion-frame-info">Create a composition to render a real frame</p></div>
