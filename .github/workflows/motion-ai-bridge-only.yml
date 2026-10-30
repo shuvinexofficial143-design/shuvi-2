@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion SQLite Native Bridge (M-AI10)
+name: Shuvi 2 Motion SQLite Native Bridge (M-AI11)
 on:
   push:
     branches:
@@ -60,7 +60,66 @@ jobs:
         run: |
           set -euo pipefail
           export RUST_BACKTRACE=1
-          cargo test --manifest-path original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml --all-targets -- --nocapture
+          cargo test --manifest-path original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml --all-targets -- --nocapture 2>&1 | tee native-bridge-tests.log
+      - name: Generate source-linked test evidence and fail-closed desktop handoff
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          root = Path("original-editors/Shuvi2-Motion/integrations/shuvi-director-motion")
+          contract = json.loads((root / "integration-contract.json").read_text())
+          log_bytes = Path("native-bridge-tests.log").read_bytes()
+          log = log_bytes.decode("utf-8", errors="replace")
+          totals = re.findall(r"test result: ok\. (\d+) passed; (\d+) failed;", log)
+          count = sum(int(a) for a, _ in totals)
+          failures = sum(int(b) for _, b in totals)
+          test_names = re.findall(r"test tests::([a-zA-Z0-9_]+) \.\.\. ok", log)
+          if count < 26 or failures != 0 or len(test_names) < 26:
+              raise SystemExit(f"Insufficient native test evidence: passed={count} failed={failures} names={len(test_names)}")
+          if contract["runtimeIntegration"] != "isolated-test-harness-only":
+              raise SystemExit("Production integration wrongly claimed")
+          if any(contract["runtimeCapabilities"].values()):
+              raise SystemExit("Production capabilities unexpectedly enabled")
+          if contract["editorRelease"]["productionAiEditingEnabled"]:
+              raise SystemExit("Production AI editing wrongly enabled")
+          sha = os.environ["GITHUB_SHA"]
+          director = contract["aiDirector"]["pinnedSourceCommit"]
+          if director != "64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4":
+              raise SystemExit("Pinned 2.0.3 Director revision changed")
+          out = Path("motion-bridge-evidence")
+          out.mkdir(exist_ok=True)
+          attestation = {
+              "schemaVersion": 1,
+              "sourceCommit": sha,
+              "githubRunId": os.environ["GITHUB_RUN_ID"],
+              "githubRunUrl": "https://github.com/shuvinexofficial143-design/shuvi-2/actions/runs/" + os.environ["GITHUB_RUN_ID"],
+              "directorPinnedCommit": director,
+              "nativeEngine": "EffectCraft v0.18.0",
+              "sqliteNativeTestsPassed": count,
+              "sqliteNativeTestsFailed": failures,
+              "nativeTestNames": sorted(test_names),
+              "testLogSha256": hashlib.sha256(log_bytes).hexdigest(),
+              "productionAiEditingEnabled": False,
+              "nativeWindowsReleaseAttested": False,
+              "integrationMode": "isolated-test-harness-only",
+          }
+          (out / "evidence.json").write_text(json.dumps(attestation, indent=2, sort_keys=True) + "\n")
+          (out / "native-bridge-tests.log").write_bytes(log_bytes)
+          (out / "integration-contract.json").write_text(json.dumps(contract, indent=2, sort_keys=True) + "\n")
+          print("VERIFIED:", count, "actual native EffectCraft/SQLite tests, all passed")
+          print("NO PRODUCTION EDITING; Windows release NOT ATTESTED by this evidence")
+          PY
+      - name: Upload verified M-AI11 handoff evidence for 2.0.5 owner review
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shuvi2-Motion-MAI11-GuardedSQLite-Evidence
+          path: motion-bridge-evidence/
+          retention-days: 21
+          if-no-files-found: error
       - name: Confirm production Motion AI permit is not unlocked
         run: |
           set -euo pipefail
