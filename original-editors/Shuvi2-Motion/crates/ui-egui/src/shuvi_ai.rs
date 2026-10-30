@@ -55,7 +55,7 @@ pub struct CompositionDraft {
 }
 
 /// Preview data only. M-AI01 deliberately has no execution method.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct PendingCommand {
     pub native_command: &'static str,
     pub expected_revision: u64,
