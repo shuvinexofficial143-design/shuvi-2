@@ -30,6 +30,8 @@ pub mod prefs_live;
 pub mod shuvi_ai;
 // M-AI03 test-gated native command/readback adapter; AI editing remains OFF.
 mod shuvi_motion_owner;
+// M-AI13 app-owned manual command gate; guarded AI lease unavailable in production.
+mod shuvi_owner_gate;
 pub mod state;
 pub mod theme;
 pub mod updates_ui;
@@ -230,6 +232,8 @@ pub struct EffectcraftApp {
     pub ui: UiState,
     /// Ephemeral native Shuvi AI dock/chat state; no credentials or approvals are persisted.
     pub shuvi_ai: panels::shuvi_ai::ShuviAiState,
+    /// Shared manual menu / control command admission. No production AI lease.
+    pub(crate) motion_owner_gate: shuvi_owner_gate::MotionOwnerGate,
     workspace_store: workspace_state::WorkspaceStore,
     pub tokens: Tokens,
     pub auto: automation::Registry,
