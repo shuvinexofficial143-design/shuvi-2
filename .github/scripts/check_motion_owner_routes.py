@@ -85,10 +85,10 @@ def main():
             errors.append(f"Missing selected original native source: {file}")
             continue
         src = path.read_text(encoding="utf-8")
-        if file == "app/frame.rs":
+        if file in {"app/frame.rs", "dock_ui.rs"}:
             count = src.count("self.motion_owner_gate.manual_menu_command(&mut self.session, ")
-            if 'self.session.execute("file.watchFolder.poll",' in src:
-                errors.append("app/frame.rs file watcher bypasses owner admission")
+            if "self.session.execute(" in src:
+                errors.append(f"Direct native command bypass reintroduced: {file}")
         else:
             count = src.count(GATE)
             # Test modules intentionally use raw Session methods to create
