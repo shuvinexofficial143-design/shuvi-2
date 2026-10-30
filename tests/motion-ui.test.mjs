@@ -108,7 +108,7 @@ test("stale native responses cannot draw in an unmounted window or wrong playhea
 });
 
 test("M10 WebView2 E2E actually launches Shuvi Tauri exe and performs mouse clicks",()=>{
-  assert.ok(desktopE2e.includes('browserName:"wry"'),"must launch real Tauri WebView");
+  assert.ok(desktopE2e.includes('"browserName":"wry"'),"must launch real Tauri WebView");
   assert.ok(desktopE2e.includes('tauri:options'),"must provide app binary");
   assert.ok(desktopE2e.includes('button[data-studio="motion"]'));
   for(const action of ["#motion-create","#motion-add-shape","#motion-add-effect",
