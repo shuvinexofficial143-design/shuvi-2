@@ -53,7 +53,7 @@ function validateAction(action, engine) {
   for (const field of ["compId", "layerId", "clipId", "itemId", "uid"]) if (field in action) id(action[field], field);
   for (const field of ["name", "track"]) if (field in action) text(action[field], field, 120);
   for (const field of ["video", "audio", "ripple", "insert"]) if (field in action) bool(action[field], field);
-  for (const field of ["x", "y"]) if (field in action) coord(action[field], field);
+  for (const field of ["x", "y"]) if (field in action && action[field] !== null) coord(action[field], field);
   for (const field of ["seconds", "time"]) if (field in action) duration(action[field], field);
   for (const field of ["width", "height"]) if (field in action) number(action[field], field, 1, 8192, true);
   if ("fps" in action) number(action.fps, "fps", 1, 120);
@@ -67,12 +67,14 @@ function validateAction(action, engine) {
   if ("fill" in action && (typeof action.fill !== "string" || !/^#[0-9a-fA-F]{6}$/.test(action.fill))) throw new Error("fill: six-digit RGB required");
   if ("effect" in action) choice(action.effect, "effect", ["gaussianBlur", "brightnessContrast"]);
   if ("property" in action) choice(action.property, "property", ["feather", "expansion", "opacity"]);
-  if ("value" in action) number(action.value, "value", -100000, 100000);
+  if ("value" in action && action.value !== null) number(action.value, "value", -100000, 100000);
   if (type === "motion.setTransform") {
     if (["position", "scale"].includes(action.kind)) {
       if (action.value !== null) throw new Error("vector transform requires null scalar value");
+      coord(action.x, "x"); coord(action.y, "y");
     } else {
       if (action.x !== null || action.y !== null) throw new Error("scalar transform requires null coordinates");
+      number(action.value, "value", -100000, 100000);
       if (action.kind === "opacity") number(action.value, "opacity", 0, 100);
     }
   }
