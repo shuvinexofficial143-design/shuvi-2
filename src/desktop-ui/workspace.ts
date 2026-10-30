@@ -1,26 +1,9 @@
 /** One real Tauri-window workspace, no fake native actions or AI provider. */
 import {createWorkspaceController,clipsFromSequence,type WorkspaceNative,type WorkspaceState,type VideoAction} from "../unified-workspace/core.mjs";
 import {nativeWorkspaceBridge} from "../unified-workspace/native";
+import {projectMediaItems,selectedNativeMedia} from "../unified-workspace/media.mjs";
 import "./workspace.css";
 
-function mediaFromNativeProject(project:unknown):{id:number;name:string}[]{
-  const entries:{id:number;name:string}[]=[];const seen=new Set<number>();
-  function walk(bin:unknown):void{
-    if(!bin||typeof bin!=="object")return;
-    const kids=(bin as {children?:unknown}).children;
-    if(!Array.isArray(kids))return;
-    for(const node of kids){
-      if(!node||typeof node!=="object")continue;
-      const item=node as Record<string,unknown>;
-      if(typeof item.item==="number" && Number.isSafeInteger(item.item) && item.item>0){
-        if(!seen.has(item.item)&&!/sequence/i.test(String(item.type??""))){
-          seen.add(item.item);entries.push({id:item.item,name:String(item.name??"Media")});
-        }
-      }else walk(node);
-    }
-  }
-  walk((project as {root?:unknown}|null)?.root);return entries;
-}
 export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=nativeWorkspaceBridge){
   if(root.dataset.shuviWorkspace==="mounted")throw Error("Unified workspace already mounted");
   root.dataset.shuviWorkspace="mounted";
@@ -72,6 +55,25 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<button data-act="motion-edit">Edit selected text</button>',
     '<button data-act="motion-render">Render native frame</button></div>',
     '<h3>EffectCraft layers</h3><div data-ui="layers" class="su-track">No native composition</div>',
+    '<section class="su-inspector" aria-label="Native Motion Properties"><h3>Native properties & keyframes</h3>',
+    '<div data-ui="inspector-summary">Select a native layer to inspect</div>',
+    '<button data-act="motion-inspect">Refresh selected layer</button>',
+    '<label>Transform<select data-field="transformKind"><option value="position">Position</option><option value="scale">Scale</option><option value="rotation">Rotation</option><option value="opacity">Opacity</option></select></label>',
+    '<div class="su-pair"><label>X<input data-field="transformX" type="number" step="any" value="0"></label>',
+    '<label>Y<input data-field="transformY" type="number" step="any" value="0"></label></div>',
+    '<label>Rotation / Opacity value<input data-field="transformValue" type="number" step="any" value="100"></label>',
+    '<button data-act="motion-transform">Apply native transform</button>',
+    '<label>Keyframe property<select data-field="keyProperty"><option value="opacity">Opacity</option><option value="rotation">Rotation</option></select></label>',
+    '<label>Keyframe value<input data-field="keyValue" type="number" step="any" value="100"></label>',
+    '<button data-act="motion-key">Add native keyframe at playhead</button>',
+    '<h3>Add real shape</h3><label>Shape name<input data-field="shapeName" value="New Shape"></label>',
+    '<label>Shape type<select data-field="shapeKind"><option value="rect">Rectangle</option><option value="ellipse">Ellipse</option><option value="rounded">Rounded</option><option value="star">Star</option><option value="polygon">Polygon</option></select></label>',
+    '<div class="su-pair"><label>Width<input data-field="shapeW" type="number" value="180"></label>',
+    '<label>Height<input data-field="shapeH" type="number" value="100"></label></div>',
+    '<label>Native fill<input data-field="shapeFill" value="#3478f6"></label>',
+    '<button data-act="motion-shape">Add native shape</button>',
+    '<div data-ui="inspector-effects">Native effects: select layer</div>',
+    '<div data-ui="inspector-masks">Native masks: select layer</div></section>',
     '<label>New PNG filename<input data-field="png" value="frame.png"></label>',
     '<button data-act="motion-export">Export PNG</button></section>',
     '<div class="su-progress" role="status"><span data-ui="progress">Idle</span>',
@@ -97,7 +99,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
   const s=(name:string)=>f(name).value.trim();
   const n=(name:string)=>Number(s(name));
   let selectedClip:number|null=null,selectedLayer:number|null=null,seenVideo:string|null=null,seenLayers:string|null=null;
-  let priorFrameKey="",objectUrl:string|null=null,seenChat=-1,disposed=false;
+  let priorFrameKey="",objectUrl:string|null=null,seenChat=-1,seenInspectorKey="",disposed=false;
   const frame=node<HTMLImageElement>('[data-ui="frame"]');
   const clearFrame=()=>{
     if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null;}
@@ -133,7 +135,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const tab=node<HTMLButtonElement>('[data-tab="'+studio+'"]');tab.setAttribute("aria-pressed",String(studio===state.studio));
     }
     node('[data-ui="title"]').textContent=state.studio==="video"?"Video Studio":"Motion Studio";
-    node('[data-ui="health"]').textContent=state.needsReload?"Native refresh required":state.busy?"Native operation running":
+    node('[data-ui="health"]').textContent=state.needsReload&&state.recoveryStudio===state.studio?"Native refresh required":state.busy?"Native operation running":
       state.studio==="motion"?(state.motion.ready?"EffectCraft native ready":"EffectCraft unverified"):
       state.video?"FilmCraft project readback verified":"FilmCraft unverified";
     node('[data-ui="revision"]').textContent=state.studio==="video"?(state.video?"SHA "+state.video.snapshot.projectSha256.slice(0,12):"No native project"):
@@ -145,7 +147,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const key=button.dataset.act??"";
       if(key==="stop")button.disabled=!state.busy;
       else if(key==="approve"||key==="reject")button.disabled=state.busy;
-      else button.disabled=state.busy||(state.needsReload&&!["video-open","motion-status","motion-open"].includes(key));
+      else button.disabled=state.busy||(state.needsReload&&state.recoveryStudio===state.studio&&!["video-open","motion-status","motion-open"].includes(key));
     });
     const videoKey=state.video?state.video.projectPath+":"+state.video.snapshot.projectSha256:null;
     if(videoKey!==seenVideo){
@@ -156,9 +158,9 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const media=node<HTMLSelectElement>('[data-field="mediaId"]');
       const previouslySelected=media.value;media.replaceChildren();
       const empty=document.createElement("option");empty.value="";empty.textContent="Select imported media";media.append(empty);
-      for(const item of mediaFromNativeProject(state.video?.snapshot.project)){
+      for(const item of projectMediaItems(state.video?.snapshot.project)){
         const option=document.createElement("option");option.value=String(item.id);
-        option.textContent=item.name+" (#"+item.id+")";media.append(option);
+        option.textContent=(item.location?item.location+" / ":"")+item.name+" (#"+item.id+")";media.append(option);
       }
       if([...media.options].some(option=>option.value===previouslySelected))media.value=previouslySelected;
       for(const c of clips){const button=document.createElement("button");button.type="button";
@@ -166,11 +168,42 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     }
     const layerKey=state.motion.composition?.id+":"+state.motion.revision;
     if(layerKey!==seenLayers){
-      seenLayers=layerKey;selectedLayer=null;
+      seenLayers=layerKey;
+      if(!state.motion.layers.some(layer=>layer.id===selectedLayer))selectedLayer=null;
       const layers=node('[data-ui="layers"]');layers.replaceChildren();
       if(!state.motion.layers.length)layers.textContent="No native layers";
       for(const layer of state.motion.layers){const button=document.createElement("button");button.type="button";
-        button.dataset.layer=String(layer.id);button.textContent="#"+layer.id+" · "+layer.kind+" · "+layer.name;layers.append(button);}
+        button.dataset.layer=String(layer.id);button.textContent="#"+layer.id+" · "+layer.kind+" · "+layer.name;
+        button.classList.toggle("selected",selectedLayer===layer.id);layers.append(button);}
+    }
+    const inspector=state.motion.inspector;
+    const inspectorKey=inspector?state.motion.composition?.id+":"+inspector.layer.id+":"+inspector.revision:"none";
+    if(inspectorKey!==seenInspectorKey) {
+      seenInspectorKey=inspectorKey;
+      const summary=node('[data-ui="inspector-summary"]');
+      if(!inspector){summary.textContent="Select a real layer to inspect native properties";}
+      else {
+        const layer=inspector.layer as {name:string;id:number;kind:string;position?:{x:number;y:number}|[number,number];opacity?:number;rotation?:number};
+        summary.textContent=layer.name+" · #"+layer.id+" · "+layer.kind+" · native revision "+inspector.revision;
+        const p=layer.position;
+        if(p){
+          const x=Array.isArray(p)?p[0]:p.x,y=Array.isArray(p)?p[1]:p.y;
+          if(Number.isFinite(x))f("transformX").value=String(x);
+          if(Number.isFinite(y))f("transformY").value=String(y);
+        }
+        if(Number.isFinite(layer.opacity))f("transformValue").value=String(layer.opacity);
+      }
+      node('[data-ui="inspector-effects"]').textContent=inspector?
+        "Native effects: "+(inspector.effects.length?inspector.effects.map((e:{name:string;uid:number})=>e.name+" #"+e.uid).join(", "):"none"):
+        "Native effects: select layer";
+      node('[data-ui="inspector-masks"]').textContent=inspector?
+        "Native masks: "+(inspector.masks.length?inspector.masks.map((m:{name:string;uid:number})=>m.name+" #"+m.uid).join(", "):"none"):
+        "Native masks: select layer";
+    }
+    const layerSelected=selectedLayer!==null&&state.motion.layers.some(layer=>layer.id===selectedLayer);
+    for(const action of ["motion-inspect","motion-transform","motion-key","motion-edit"]){
+      const button=node<HTMLButtonElement>('[data-act="'+action+'"]');
+      button.disabled=button.disabled||!layerSelected||(action!=="motion-inspect"&&!inspector);
     }
     refreshFrame(state);
     if(state.chat.length!==seenChat){
@@ -195,8 +228,8 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       case "video-new":return ctrl.applyVideo([{type:"createSequence",name:"Shuvi Sequence",width:1280,height:720,fps:30}]);
       case "video-import":return ctrl.importVideo(s("source"));
       case "video-place":{
-        const itemId=n("mediaId"),track=s("track");
-        if(!Number.isSafeInteger(itemId)||itemId<1)throw Error("Enter a real imported media ID");
+        const project=ctrl.getState().video?.snapshot.project;
+        const itemId=selectedNativeMedia(project,s("mediaId")).id,track=s("track");
         if(!/^[VA]([1-9]|1[0-6])$/.test(track))throw Error("Invalid FilmCraft track");
         const a:VideoAction={type:"place",itemId,track,seconds:n("videoTime"),video:track.startsWith("V"),audio:track.startsWith("A")};
         return ctrl.applyVideo([a]);
@@ -216,6 +249,39 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       case "motion-edit":{
         if(selectedLayer===null)throw Error("Select a real native text layer");return ctrl.editMotion({action:"editText",compId:comp(),layerId:selectedLayer,text:s("text")});
       }
+      case "motion-inspect":{
+        if(selectedLayer===null)throw Error("Select a real native layer");
+        return ctrl.inspectMotionLayer(selectedLayer);
+      }
+      case "motion-transform":{
+        if(selectedLayer===null)throw Error("Select a real native layer");
+        const kind=s("transformKind");
+        if(!["position","scale","rotation","opacity"].includes(kind))throw Error("Invalid transform");
+        const request:Record<string,unknown>={action:"setTransform",compId:comp(),layerId:selectedLayer,kind};
+        if(kind==="position"||kind==="scale"){
+          if(!s("transformX")||!s("transformY")||!Number.isFinite(n("transformX"))||!Number.isFinite(n("transformY")))
+            throw Error("Native position/scale needs two finite coordinates");
+          request.x=n("transformX");request.y=n("transformY");
+        }else{
+          if(!s("transformValue")||!Number.isFinite(n("transformValue")))throw Error("Enter a finite native transform value");
+          request.value=n("transformValue");
+        }
+        return ctrl.editMotion(request);
+      }
+      case "motion-key":{
+        if(selectedLayer===null)throw Error("Select a real native layer");
+        const property=s("keyProperty"),time=n("motionTime"),value=n("keyValue");
+        if(!["opacity","rotation"].includes(property)||!Number.isFinite(time)||time<0||!s("keyValue")||!Number.isFinite(value))
+          throw Error("Invalid native scalar keyframe");
+        return ctrl.editMotion({action:"addKey",compId:comp(),layerId:selectedLayer,property,time,value});
+      }
+      case "motion-shape":{
+        if(!s("shapeName")||!Number.isFinite(n("shapeW"))||!Number.isFinite(n("shapeH"))||
+          n("shapeW")<=0||n("shapeH")<=0)throw Error("Invalid native shape dimensions");
+        if(!["rect","ellipse","rounded","star","polygon"].includes(s("shapeKind")))throw Error("Unknown native shape");
+        return ctrl.editMotion({action:"addShape",compId:comp(),name:s("shapeName"),kind:s("shapeKind"),
+          x:120,y:120,width:n("shapeW"),height:n("shapeH"),fill:s("shapeFill")});
+      }
       case "motion-render":return ctrl.renderMotion(n("motionTime"));
       case "motion-export":return ctrl.exportMotionPng(s("motionRoot"),s("png"),n("motionTime"));
       case "approve":{const pending=ctrl.getState().pendingApproval;if(!pending)throw Error("No pending owner permission");
@@ -234,7 +300,8 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     const c=t.closest<HTMLButtonElement>("[data-clip]");
     if(c){selectedClip=Number(c.dataset.clip);root.querySelectorAll("[data-clip]").forEach(el=>el.classList.toggle("selected",el===c));return;}
     const l=t.closest<HTMLButtonElement>("[data-layer]");
-    if(l){selectedLayer=Number(l.dataset.layer);root.querySelectorAll("[data-layer]").forEach(el=>el.classList.toggle("selected",el===l));return;}
+    if(l){selectedLayer=Number(l.dataset.layer);root.querySelectorAll("[data-layer]").forEach(el=>el.classList.toggle("selected",el===l));
+      const id=selectedLayer;if(id!==null)safe(()=>ctrl.inspectMotionLayer(id));return;}
     const button=t.closest<HTMLButtonElement>("[data-act]");
     if(button&&!button.disabled)safe(()=>Promise.resolve(execute(button.dataset.act??"")));
   };

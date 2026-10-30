@@ -19,7 +19,7 @@ export type WorkspaceNative = {
 export type WorkspaceState = {
  studio:"video"|"motion";busy:boolean;progress:string;error:string|null;
  stopped:boolean;needsReload:boolean;video:any;videoFrame:any;exportReceipt:any;
- motion:{ready:boolean;revision:number|null;composition:any;layers:any[];frame:any;dirty:boolean};
+ motion:{ready:boolean;revision:number|null;composition:any;layers:any[];frame:any;dirty:boolean;inspector:null|{layer:any;effects:any[];masks:any[];revision:number}};
  pendingApproval:any;
  chat:{role:"assistant"|"user";text:string}[];
 };
@@ -34,6 +34,7 @@ export function createWorkspaceController(native:WorkspaceNative):{
  exportVideo(path:string,scale?:number,includeAudio?:boolean):Promise<any>;
  history(direction:"undo"|"redo"):Promise<any>;
  motionStatus():Promise<any>;createComposition(spec:Record<string,unknown>):Promise<any>;
+ inspectMotionLayer(layerId:number):Promise<any>;
  editMotion(request:Record<string,unknown>):Promise<any>;
  renderMotion(time?:number,transparent?:boolean):Promise<any>;
  saveMotion(workspace:string,basename:string):Promise<any>;

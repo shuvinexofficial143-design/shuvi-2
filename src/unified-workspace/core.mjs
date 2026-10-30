@@ -49,7 +49,7 @@ export function createWorkspaceController(native) {
   const state = {
     studio:"video", busy:false, progress:"Idle", error:null, stopped:false,
     needsReload:false, recoveryStudio:null, video:null, videoFrame:null, exportReceipt:null,
-    motion:{ready:false,revision:null,composition:null,layers:[],frame:null,dirty:false},
+    motion:{ready:false,revision:null,composition:null,layers:[],frame:null,dirty:false,inspector:null},
     pendingApproval:null, chat:[{role:"assistant",text:"Shuvi AI Director is not connected. Drafts cannot edit a project."}]
   };
   let inFlight = null;
@@ -60,13 +60,14 @@ export function createWorkspaceController(native) {
     for (const listener of listeners) listener(current);
   };
   const set = (patch) => { Object.assign(state,patch); emit(); };
-  const requireReady = () => {
+  const requireReady = (studio) => {
     if(state.busy) fail("BUSY","A native operation is already in progress");
-    if(state.needsReload) fail("RELOAD_REQUIRED","A stopped or divergent native operation must be re-inspected");
+    if(state.needsReload && state.recoveryStudio===studio)
+      fail("RELOAD_REQUIRED","A stopped or divergent native operation must be re-inspected");
   };
   async function run(label, job, {recover=false,studio="video"}={}) {
     if (state.busy) fail("BUSY", "A native operation is already in progress");
-    if (state.needsReload && (!recover || state.recoveryStudio!==studio)) fail("RELOAD_REQUIRED", "Refresh the affected native studio before another edit");
+    if (state.needsReload && state.recoveryStudio===studio && !recover) fail("RELOAD_REQUIRED", "Refresh the affected native studio before another edit");
     const token = ++operationId;
     inFlight = token;
     set({busy:true,progress:label,error:null,stopped:false});
@@ -100,7 +101,7 @@ export function createWorkspaceController(native) {
   async function refreshVideo(root,projectPath) {
     return run("Inspecting native FilmCraft project", async()=>{
       const video=await readVideo(root,projectPath);
-      set({video,videoFrame:null,needsReload:false,recoveryStudio:null,exportReceipt:null});
+      set({video,videoFrame:null,exportReceipt:null,...(state.recoveryStudio==="video"?{needsReload:false,recoveryStudio:null}:{})});
       return video;
     },{recover:true});
   }
@@ -109,7 +110,7 @@ export function createWorkspaceController(native) {
     return state.video;
   }
   async function applyVideo(actions) {
-    requireReady();
+    requireReady("video");
     const video=requireVideo();
     if(!Array.isArray(actions)||!actions.length
       || actions.some(a=>!a||!VIDEO_ACTIONS.has(a.type))) fail("UNSUPPORTED_ACTION","Unsupported FilmCraft edit");
@@ -133,7 +134,7 @@ export function createWorkspaceController(native) {
     });
   }
   async function importVideo(sourcePath) {
-    requireReady(); const v=requireVideo();
+    requireReady("video"); const v=requireVideo();
     if(!nonempty(sourcePath)) fail("PATH_REQUIRED","Select a real media path");
     return run("Importing real media", async()=>{
       const receipt=await native.videoImport(v.root,v.projectPath,sourcePath);
@@ -148,7 +149,7 @@ export function createWorkspaceController(native) {
     });
   }
   async function renderVideo(seconds,scale=0.25) {
-    requireReady(); const v=requireVideo();
+    requireReady("video"); const v=requireVideo();
     if(!Number.isFinite(seconds)||seconds<0||!Number.isFinite(scale)||scale<=0||scale>1)
       fail("INVALID_TIME","Invalid preview position or scale");
     return run("Rendering native FilmCraft frame", async()=>{
@@ -163,7 +164,7 @@ export function createWorkspaceController(native) {
     });
   }
   async function exportVideo(outputPath,scale=1,includeAudio=true) {
-    requireReady();const v=requireVideo();
+    requireReady("video");const v=requireVideo();
     if(!nonempty(outputPath)) fail("PATH_REQUIRED","Choose a new output MP4 path");
     return run("Exporting native FilmCraft MP4", async()=>{
       const result=await native.videoExport({selectedRoot:v.root,projectPath:v.projectPath,
@@ -176,7 +177,7 @@ export function createWorkspaceController(native) {
     });
   }
   async function history(direction) {
-    requireReady();const v=requireVideo();
+    requireReady("video");const v=requireVideo();
     if(!["undo","redo"].includes(direction))fail("UNSUPPORTED_ACTION","Invalid history direction");
     return run("Restoring native FilmCraft history", async()=>{
       const result=await native.videoRestore({selectedRoot:v.root,projectPath:v.projectPath,
@@ -191,17 +192,35 @@ export function createWorkspaceController(native) {
     });
   }
   async function motionStatus() {
-    return run("Checking live EffectCraft worker", async()=>{
+    return run("Refreshing live EffectCraft project", async()=>{
       const status=await native.motion({action:"status"});
       if(status?.ready!==true || status?.native!==true
-        || !Number.isSafeInteger(status?.projectRevision)) fail("ENGINE_UNAVAILABLE","Real EffectCraft worker unavailable");
-      set({motion:{...state.motion,ready:true,revision:status.projectRevision,dirty:!!status.dirty},
-        needsReload:false,recoveryStudio:null});
+        || !Number.isSafeInteger(status?.projectRevision))
+        fail("ENGINE_UNAVAILABLE","Real EffectCraft worker unavailable");
+      const previous=state.motion;
+      let composition=previous.composition,layers=previous.layers;
+      if(composition) {
+        try {
+          composition=await native.motion({action:"inspectComposition",compId:composition.id});
+          layers=await native.motion({action:"listLayers",compId:composition.id});
+          if(!composition || !Array.isArray(layers))fail("INVALID_RECEIPT","Motion refresh did not return native layers");
+          const after=await native.motion({action:"status"});
+          if(after?.projectRevision!==status.projectRevision)
+            fail("REVISION_CONFLICT","EffectCraft changed during recovery readback");
+        } catch(error){
+          set({needsReload:true,recoveryStudio:"motion",motion:{...previous,frame:null,inspector:null}});
+          throw error;
+        }
+      }
+      const changed=status.projectRevision!==previous.revision;
+      set({motion:{...previous,ready:true,composition,layers,revision:status.projectRevision,
+        frame:changed?null:previous.frame,inspector:null,dirty:!!status.dirty},
+        ...(state.recoveryStudio==="motion"?{needsReload:false,recoveryStudio:null}:{})});
       return status;
     },{recover:true,studio:"motion"});
   }
   async function createComposition(spec) {
-    requireReady();
+    requireReady("motion");
     if(!nonempty(spec?.name))fail("INVALID_COMPOSITION","Composition name required");
     return run("Creating real EffectCraft composition", async()=>{
       const comp=await native.motion({action:"createComposition",...spec});
@@ -209,12 +228,46 @@ export function createWorkspaceController(native) {
         fail("INVALID_RECEIPT","Native composition readback missing");
       const layers=await native.motion({action:"listLayers",compId:comp.id});
       if(!Array.isArray(layers))fail("INVALID_RECEIPT","Native layers could not be inspected");
-      set({motion:{...state.motion,ready:true,composition:comp,revision:comp.revision,layers,frame:null,dirty:true}});
+      set({motion:{...state.motion,ready:true,composition:comp,revision:comp.revision,layers,frame:null,dirty:true,inspector:null}});
       return comp;
     },{studio:"motion"});
   }
+  async function inspectMotionLayer(layerId) {
+    requireReady("motion");
+    const m=state.motion;
+    if(!m.ready || !m.composition)fail("PROJECT_REQUIRED","Open a real EffectCraft composition");
+    if(!Number.isSafeInteger(layerId)||layerId<=0)fail("LAYER_NOT_FOUND","Select a valid native layer");
+    return run("Inspecting native EffectCraft layer",async()=>{
+      const before=await native.motion({action:"status"});
+      if(before?.projectRevision!==m.revision){
+        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
+        fail("REVISION_CONFLICT","Motion changed before layer inspection; refresh required");
+      }
+      let layers,effects,masks,after;
+      try{
+        layers=await native.motion({action:"listLayers",compId:m.composition.id});
+        if(!Array.isArray(layers))fail("INVALID_RECEIPT","Native layer list unavailable");
+        if(!layers.some(layer=>layer.id===layerId))fail("LAYER_NOT_FOUND","Layer no longer exists in current native composition");
+        effects=await native.motion({action:"listEffects",compId:m.composition.id,layerId});
+        masks=await native.motion({action:"listMasks",compId:m.composition.id,layerId});
+        after=await native.motion({action:"status"});
+      }catch(error){
+        if(error?.code!=="LAYER_NOT_FOUND"){
+          set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
+        }
+        throw error;
+      }
+      if(!Array.isArray(effects)||!Array.isArray(masks)||after?.projectRevision!==before.projectRevision){
+        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
+        fail("REVISION_CONFLICT","Native inspector did not return a stable project revision");
+      }
+      const inspector={layer:layers.find(x=>x.id===layerId),effects,masks,revision:m.revision};
+      set({motion:{...m,layers,inspector}});
+      return inspector;
+    },{studio:"motion"});
+  }
   async function editMotion(request) {
-    requireReady(); const m=state.motion;
+    requireReady("motion"); const m=state.motion;
     if(!m.ready||!m.composition)fail("PROJECT_REQUIRED","Create/open an EffectCraft composition");
     if(!request || !MOTION_MUTATIONS.has(request.action) || request.compId!==m.composition.id)
       fail("UNSUPPORTED_ACTION","Motion edit is not available for this composition");
@@ -231,12 +284,16 @@ export function createWorkspaceController(native) {
       if(!Array.isArray(layers)||!Number.isSafeInteger(after?.projectRevision)
         ||after.projectRevision<=before.projectRevision)
         fail("INVALID_RECEIPT","EffectCraft edit has no verified revision advance");
-      set({motion:{...m,revision:after.projectRevision,layers,frame:null,dirty:!!after.dirty}});
+      const current=m.inspector;
+      const updatedLayer=current&&layers.find(layer=>layer.id===current.layer.id);
+      const changesInspectorData=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
+      set({motion:{...m,revision:after.projectRevision,layers,frame:null,dirty:!!after.dirty,
+        inspector:updatedLayer&&!changesInspectorData?{...current,layer:updatedLayer,revision:after.projectRevision}:null}});
       return receipt;
     },{studio:"motion"});
   }
   async function renderMotion(time=0,transparent=true) {
-    requireReady();const m=state.motion;
+    requireReady("motion");const m=state.motion;
     if(!m.ready||!m.composition)fail("PROJECT_REQUIRED","Open an EffectCraft composition");
     if(!Number.isFinite(time)||time<0)fail("INVALID_TIME","Invalid composition time");
     return run("Rendering native EffectCraft frame",async()=>{
@@ -248,7 +305,7 @@ export function createWorkspaceController(native) {
     },{studio:"motion"});
   }
   async function saveMotion(workspace,basename) {
-    requireReady();
+    requireReady("motion");
     if(!nonempty(workspace)||!nonempty(basename))fail("PATH_REQUIRED","Select a real workspace and .ecproj name");
     return run("Saving real EffectCraft project",async()=>{
       const receipt=await native.motion({action:"saveProject",workspace,basename});
@@ -267,13 +324,13 @@ export function createWorkspaceController(native) {
       const comp=receipt.compositions[0]??null;
       const status=await native.motion({action:"status"});
       const layers=comp?await native.motion({action:"listLayers",compId:comp.id}):[];
-      set({motion:{ready:true,revision:status.projectRevision,composition:comp,layers,frame:null,dirty:!!status.dirty},
+      set({motion:{ready:true,revision:status.projectRevision,composition:comp,layers,frame:null,dirty:!!status.dirty,inspector:null},
         needsReload:false,recoveryStudio:null});
       return receipt;
     },{recover:true,studio:"motion"});
   }
   async function exportMotionPng(workspace,filename,time=0) {
-    requireReady(); const m=state.motion;
+    requireReady("motion"); const m=state.motion;
     if(!m.composition)fail("PROJECT_REQUIRED","Open a composition first");
     return run("Exporting native EffectCraft PNG",async()=>{
       const receipt=await native.motion({action:"exportPng",workspace,filename,compId:m.composition.id,
@@ -284,7 +341,7 @@ export function createWorkspaceController(native) {
     },{studio:"motion"});
   }
   function stageAiVideoTask(actions,expectedSha) {
-    requireReady();const v=requireVideo();
+    requireReady("video");const v=requireVideo();
     if(!validSha(expectedSha)||expectedSha!==v.snapshot.projectSha256)
       fail("REVISION_CONFLICT","AI plan is stale before owner approval");
     if(!Array.isArray(actions)||actions.length===0||actions.some(a=>!VIDEO_ACTIONS.has(a?.type)))
@@ -312,7 +369,7 @@ export function createWorkspaceController(native) {
     stop(){if(!state.busy)return false;set({stopped:true,progress:"Stop requested; waiting for native IPC to settle"});return true;},
     dismissTask(){set({pendingApproval:null});},
     refreshVideo,applyVideo,importVideo,renderVideo,exportVideo,history,
-    motionStatus,createComposition,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
+    motionStatus,createComposition,inspectMotionLayer,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
     stageAiVideoTask,approveTask
   };
 }

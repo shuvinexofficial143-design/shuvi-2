@@ -25,3 +25,11 @@
 .su .su-thread p{border-radius:9px;padding:9px;margin:8px 0;background:#344156;overflow-wrap:anywhere}.su .su-thread p.su-user{margin-left:18px;background:#285889}
 @media(max-width:1060px){.su .su-columns{grid-template-columns:minmax(180px,235px) minmax(320px,1fr)}.su .su-chat{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}.su .su-chat .su-thread{max-height:170px}}
 @media(max-width:650px){.su .su-columns{display:flex;flex-direction:column}.su .su-tools{border-right:0;border-bottom:1px solid var(--line)}}
+
+/* U02: real native inspector, visually separate from the editor monitor. */
+.su .su-inspector{padding:12px;margin-top:14px;border:1px solid var(--line);border-radius:9px;background:#151f2d}
+.su .su-inspector [data-ui="inspector-summary"]{color:var(--fg);font-weight:600;overflow-wrap:anywhere}
+.su .su-inspector [data-ui^="inspector-"]{margin:8px 0;font-size:12px;overflow-wrap:anywhere}
+.su .su-inspector button{margin-top:6px}
+.su [data-ui="health"]{overflow-wrap:anywhere}
+.su .su-track button.selected{outline:2px solid #9dbbf3}
