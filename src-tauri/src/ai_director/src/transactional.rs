@@ -135,10 +135,16 @@ impl TransactionalLedger {
     /// Rejects a WebView-supplied hash without opening a second approval prompt.
     pub fn verify_binding(&self,task_id:&str,plan_hash:&str)
       ->Result<(),GuardError>{
+        self.approved_plan_snapshot(task_id,plan_hash).map(|_|())
+    }
+    /// Read only the original immutable project/session/version from SQLite.
+    /// This is NOT owner authorization; actual owner state must match it.
+    pub fn approved_plan_snapshot(&self,task_id:&str,plan_hash:&str)
+      ->Result<Snapshot,GuardError>{
         if !valid_sha(plan_hash){return Err(GuardError::Invalid);}
         let (scope,_,_)=self.load(task_id)?;
         if scope.plan_hash!=plan_hash{return Err(GuardError::Invalid);}
-        Ok(())
+        Ok(scope.snapshot)
     }
     /// The actual Tauri Stop/Recovery IPC must bind both the task ID and
     /// native persisted plan digest; never trust a bare frontend task ID.
