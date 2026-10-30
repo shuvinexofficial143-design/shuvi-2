@@ -19,7 +19,9 @@ function rig(cancelReply) {
       executed++;
       if(resolution) await resolution;
       current={...current,version:current.version+1};
-      return {guarded:true,nativeVerified:true,idempotencyKey:req.idempotencyKey,after:{...current}};
+      return {guarded:true,nativeVerified:true,idempotencyKey:req.idempotencyKey,
+        taskId:req.taskId,stepIndex:req.stepIndex,objectProofSha256:"c".repeat(64),
+        after:{...current}};
     }
   };
   const approval={async request({taskId,planHash}){
