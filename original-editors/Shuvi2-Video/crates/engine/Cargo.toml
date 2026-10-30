@@ -40,6 +40,7 @@ filmcraft-speech = { workspace = true }
 filmcraft-tts = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"
 thiserror = { workspace = true }
 log = { workspace = true }
 chrono = { workspace = true }

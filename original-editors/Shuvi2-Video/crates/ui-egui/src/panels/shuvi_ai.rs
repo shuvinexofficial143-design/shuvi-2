@@ -67,6 +67,7 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, _rect: Rect) {
             ui.small("Native AI edits disabled");
         });
         ui.label("Original FilmCraft editor · local native Session");
+        ui.small(format!("Native project SHA-256 (read-only): {}", filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session)));
         ui.separator();
         ui.horizontal(|ui| {
             ui.strong("Current project");

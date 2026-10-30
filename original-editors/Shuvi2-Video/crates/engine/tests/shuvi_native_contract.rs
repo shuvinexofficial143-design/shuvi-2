@@ -130,3 +130,42 @@ fn native_a07_model_inventory_is_exact_and_has_no_paths_or_credentials() {
     assert!(inventory["mediaIds"].as_array().unwrap().len() <= 128);
     assert_eq!(session.revision, revision, "inventory is read-only");
 }
+
+#[test]
+fn native_a07_project_sha256_tracks_real_manual_edit_and_undo_without_model_input() {
+    let mut session = Session::default();
+    let original = shuvi_ai_readonly::a07_native_project_sha256(&session);
+    assert_eq!(original.len(), 64);
+    assert!(original.bytes().all(|c| c.is_ascii_hexdigit()));
+    let proof = shuvi_ai_readonly::a07_readonly_native_fingerprint(&mut session).unwrap();
+    assert_eq!(proof["versionSha256"], original);
+    assert_eq!(proof["editor"], "video");
+    assert!(proof.as_object().unwrap().len() == 5);
+    assert_eq!(session.revision, proof["revision"].as_u64().unwrap());
+    session.execute("file.newSequence", json!({"name": "Native SHA test"})).unwrap();
+    let after = shuvi_ai_readonly::a07_native_project_sha256(&session);
+    assert_ne!(after, original, "actual project edit changes canonical native bytes");
+    assert_eq!(after, shuvi_ai_readonly::a07_native_project_sha256(&session));
+    session.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(shuvi_ai_readonly::a07_native_project_sha256(&session), original);
+}
+
+#[test]
+fn native_a07_clip_proof_detects_real_split_and_rejects_invalid_ids() {
+    let mut session = Session::default();
+    session.execute("file.openDemoProject", json!({})).unwrap();
+    let original = shuvi_ai_readonly::snapshot(&mut session).unwrap();
+    let clip = original.sequence.as_ref().unwrap()["video"][0]["items"].as_array()
+        .unwrap().iter().find(|item| item["start"].as_i64().unwrap_or(0) < 2 * filmcraft_engine::time::TICKS_PER_SECOND
+            && item["end"].as_i64().unwrap_or(0) > 2 * filmcraft_engine::time::TICKS_PER_SECOND)
+        .and_then(|item|item["clip"].as_u64()).expect("a real clip crosses two seconds");
+    let sha = shuvi_ai_readonly::a07_native_clip_sha256(&session, clip).unwrap();
+    assert_eq!(sha.len(), 64);
+    assert_eq!(sha, shuvi_ai_readonly::a07_native_clip_sha256(&session, clip).unwrap());
+    assert!(shuvi_ai_readonly::a07_native_clip_sha256(&session, 0).is_err());
+    assert!(shuvi_ai_readonly::a07_native_clip_sha256(&session, u64::MAX).is_err());
+    session.execute("playhead.set", json!({"seconds": 2.0})).unwrap();
+    session.execute("sequence.addEditAllTracks", json!({})).unwrap();
+    let changed = shuvi_ai_readonly::a07_native_clip_sha256(&session, clip).unwrap();
+    assert_ne!(sha, changed, "original clip shorter after native split");
+}

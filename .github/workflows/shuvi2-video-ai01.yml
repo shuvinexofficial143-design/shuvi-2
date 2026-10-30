@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI06 Native A07 Readonly Preflight
+name: Shuvi 2 Video - AI07 Native SHA256 A07 Proof
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai06
+  group: shuvi2-video-ai07
   cancel-in-progress: false
 
 jobs:

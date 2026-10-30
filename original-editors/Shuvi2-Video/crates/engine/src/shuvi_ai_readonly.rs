@@ -7,6 +7,7 @@
 
 use std::collections::BTreeSet;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::{EngineError, Result, Session};
 
@@ -135,6 +136,62 @@ pub struct NativeA07SplitPreview {
 /// enabling edits. Output becomes stale after any change to the native Session.
 pub fn a07_preflight_video_split(session: &mut Session, proposal: Value) -> Result<NativeA07SplitPreview> {
     crate::shuvi_ai_owner::preflight_a07_video_split(session, proposal)
+}
+
+
+/// SHA-256 of the ORIGINAL editable FilmCraft project's native serialized
+/// document, including unsaved edits. No UI/renderer/model-provided hash is
+/// accepted. This fingerprint is a plan VERSION, not an approval or owner ID.
+/// The canonical A07 host must separately bind a unique native editor session,
+/// canonical project ID and a durable task plan while holding the shared lock.
+pub fn a07_native_project_sha256(session: &Session) -> String {
+    let encoded = filmcraft_format::encode(&session.project, false);
+    format!("{:x}", Sha256::digest(&encoded))
+}
+
+/// SHA-256 of the precise original native clip object, queried from the active
+/// sequence in memory. Does not send clip metadata or media paths to an AI.
+/// The canonical A07 host must still validate its ledger binding, before/after
+/// revision fence and independently read this hash after applying a named edit.
+pub fn a07_native_clip_sha256(session: &Session, clip_id: u64) -> Result<String> {
+    if clip_id == 0 || clip_id > MODEL_ID_LIMIT {
+        return Err(EngineError::Other("A07_CLIP_PROOF_INVALID: invalid clip ID".into()));
+    }
+    let sequence = session.active_sequence().ok_or(EngineError::NoSequence)?;
+    let clips = sequence.video_tracks.iter().chain(sequence.audio_tracks.iter());
+    let mut found = None;
+    for track in clips {
+        if let Some(clip) = track.items.iter().find(|clip| clip.id.0 == clip_id) {
+            if found.is_some() {
+                return Err(EngineError::Other("A07_CLIP_PROOF_AMBIGUOUS: reused clip ID".into()));
+            }
+            let bytes = serde_json::to_vec(clip)
+                .map_err(|_| EngineError::Other("A07_CLIP_PROOF_UNAVAILABLE: native serialization failed".into()))?;
+            found = Some(format!("{:x}", Sha256::digest(&bytes)));
+        }
+    }
+    found.ok_or_else(|| EngineError::Other("A07_CLIP_PROOF_NOT_FOUND: native clip missing".into()))
+}
+
+/// Read-only binding that remains stable across read-only inspection, changes
+/// after a real native project edit, and never reads or exposes a secret.
+pub fn a07_readonly_native_fingerprint(session: &mut Session) -> Result<Value> {
+    let view = snapshot(session)?;
+    let project_sha256 = a07_native_project_sha256(session);
+    let active_sequence = view.active_sequence;
+    if session.revision != view.revision
+        || session.document_epoch != view.document_epoch
+        || session.state.active_sequence.map(|id| id.0) != active_sequence
+    {
+        return Err(EngineError::Other("A07_NATIVE_FINGERPRINT_STALE: session changed".into()));
+    }
+    Ok(json!({
+        "editor": "video",
+        "versionSha256": project_sha256,
+        "revision": view.revision,
+        "documentEpoch": view.document_epoch,
+        "activeSequenceId": active_sequence,
+    }))
 }
 
 /// A07 NativeModelRequest requires exactly {"clipIds":[],"mediaIds":[]};

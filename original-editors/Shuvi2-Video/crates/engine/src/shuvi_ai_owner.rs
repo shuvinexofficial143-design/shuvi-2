@@ -173,7 +173,7 @@ pub(crate) fn preflight_a07_video_split(
     };
     let sequence = before.sequence.as_ref().ok_or(EngineError::NoSequence)?;
     let (track_kind, track_id) = clip_target_in(sequence, clip_id, tick)?;
-    let source_item_id = sequence[&track_kind].as_array()
+    let source_item_id = sequence[track_kind.as_str()].as_array()
         .and_then(|tracks| tracks.iter().find(|t| t["id"].as_u64() == Some(track_id)))
         .and_then(|track| track["items"].as_array())
         .and_then(|items| items.iter().find(|item| item["clip"].as_u64() == Some(clip_id)))
