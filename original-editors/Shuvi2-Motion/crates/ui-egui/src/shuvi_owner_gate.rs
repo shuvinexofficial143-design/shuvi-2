@@ -135,6 +135,24 @@ pub(crate) struct MotionOwnerStatus {
     pub all_manual_routes_reconciled: bool,
 }
 
+impl crate::EffectcraftApp {
+    /// Settings-Cancel is a direct native preferences replacement (not an
+    /// engine.execute command). Keep the original snapshot if owner busy.
+    /// No provider access or production AI authorization is involved.
+    pub(crate) fn restore_owner_settings_snapshot(&mut self) -> bool {
+        let Some(saved) = self.dialog_state.prefs_snapshot.as_ref().cloned() else { return true };
+        let result = self.motion_owner_gate.manual_transaction(|| {
+            self.session.prefs = saved;
+            self.session.prefs_changed();
+            Ok(())
+        });
+        match result {
+            Ok(()) => { self.dialog_state.prefs_snapshot = None; true }
+            Err(e) => { self.ui.status = e; false }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +312,21 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing native query: {cmd}"));
             assert!(!spec.journal, "a read-only audit exemption must never permit a native write: {cmd}");
         }
+    }
+
+    #[test]
+    fn original_egui_settings_cancel_restores_snapshot_through_owner_gate() {
+        use crate::EffectcraftApp;
+        let mut app=EffectcraftApp::new(Session::new());
+        let original=serde_json::to_value(&app.session.prefs).unwrap();
+        app.dialog_state.prefs_snapshot=Some(app.session.prefs.clone());
+        app.session.prefs.scripting.error_banner = !app.session.prefs.scripting.error_banner;
+        assert_ne!(serde_json::to_value(&app.session.prefs).unwrap(),original);
+        assert!(app.restore_owner_settings_snapshot());
+        assert!(app.dialog_state.prefs_snapshot.is_none());
+        assert_eq!(serde_json::to_value(&app.session.prefs).unwrap(),original);
+        assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,1);
+        assert!(!app.motion_owner_gate.status().busy);
     }
 
     #[test]

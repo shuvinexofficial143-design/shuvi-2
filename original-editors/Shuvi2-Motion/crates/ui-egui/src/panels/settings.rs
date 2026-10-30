@@ -772,15 +772,23 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
         }
     }
     if cancel {
-        if let Some(p) = app.dialog_state.prefs_snapshot.take() {
-            app.session.prefs = p;
-            app.session.prefs_changed();
+        // A denied owner transaction MUST preserve the dialog and its
+        // original prefs snapshot so Cancel can be attempted safely again.
+        if app.restore_owner_settings_snapshot() {
+            app.dialog = None;
         }
-        app.dialog = None;
     } else if ok {
-        app.dialog_state.prefs_snapshot = None;
-        app.session.save_prefs();
-        app.dialog = None;
+        // Saving settings changes native, owner-local configuration too.
+        match app.motion_owner_gate.manual_transaction(|| {
+            app.session.save_prefs();
+            Ok(())
+        }) {
+            Ok(()) => {
+                app.dialog_state.prefs_snapshot = None;
+                app.dialog = None;
+            }
+            Err(e) => app.ui.status = e,
+        }
     }
 }
 

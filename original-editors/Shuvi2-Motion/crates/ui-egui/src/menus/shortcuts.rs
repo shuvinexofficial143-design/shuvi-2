@@ -214,10 +214,9 @@ fn escape_dialog(app: &mut EffectcraftApp, ctx: &egui::Context) {
         crate::panels::forms::close_info(app);
     } else {
         if app.dialog == Some(crate::Dialog::Settings)
-            && let Some(p) = app.dialog_state.prefs_snapshot.take()
+            && !app.restore_owner_settings_snapshot()
         {
-            app.session.prefs = p;
-            app.session.prefs_changed();
+            return;
         }
         if app.dialog == Some(crate::Dialog::UnsavedChanges) {
             app.dialog_state.unsaved.command = None;
@@ -352,10 +351,9 @@ fn handle_shortcuts_impl(app: &mut EffectcraftApp, ctx: &egui::Context, tab_only
             }
             // Escape in Settings is Cancel: restore the settings from when it opened.
             if app.dialog == Some(crate::Dialog::Settings)
-                && let Some(p) = app.dialog_state.prefs_snapshot.take()
+                && !app.restore_owner_settings_snapshot()
             {
-                app.session.prefs = p;
-                app.session.prefs_changed();
+                continue;
             }
             app.dialog = None;
             continue;
