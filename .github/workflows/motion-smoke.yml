@@ -104,6 +104,10 @@ jobs:
           node-version: '22'
       - name: Install desktop/frontend packages
         run: npm install --no-audit --no-fund
+      - name: Preflight validate desktop WebDriver JavaScript and UI contracts
+        run: |
+          node --check tests/motion/desktop-e2e.mjs
+          npm test
       - name: Build actual Shuvi 2 Windows WebView2 binary
         run: |
           npm run build
