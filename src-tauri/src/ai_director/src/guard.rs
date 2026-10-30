@@ -22,6 +22,9 @@ fn token(s:&str)->bool{s.len()>=8&&s.len()<=64&&s.bytes().all(|b|b.is_ascii_alph
 fn positive(n:u64)->bool{n>0}
 fn finite(t:f64)->bool{t.is_finite()&&(0.0..=21600.0).contains(&t)}
 fn name(s:&str)->bool{!s.is_empty()&&s.len()<=120&&s.trim()==s&&!s.chars().any(char::is_control)}
+fn bounded_text(s:&str,max:usize)->bool {
+    !s.is_empty()&&s.chars().count()<=max&&s.trim()==s&&!s.chars().any(char::is_control)
+}
 fn track(s:&str)->bool {
     s.len()>=2&&s.len()<=3&&(s.starts_with('V')||s.starts_with('A'))&&
     s[1..].bytes().all(|b|b.is_ascii_digit())&&
@@ -66,7 +69,7 @@ impl Action {
             VideoPlace{item_id,track:tr,seconds,video,audio}=>*editor==Editor::Video&&positive(*item_id)&&track(tr)&&finite(*seconds)&&
                 ((*video&&tr.starts_with('V'))||(*audio&&tr.starts_with('A'))),
             VideoTrim{clip_id,edge,delta_frames,..}=>*editor==Editor::Video&&positive(*clip_id)&&
-                matches!(edge.as_str(),"in"|"out")&&(-100000..=100000).contains(delta_frames),
+                matches!(edge.as_str(),"in"|"out")&&*delta_frames!=0&&(-100000..=100000).contains(delta_frames),
             VideoMove{clip_id,track:tr,seconds,..}=>*editor==Editor::Video&&positive(*clip_id)&&track(tr)&&finite(*seconds),
             VideoDelete{clip_id,..}=>*editor==Editor::Video&&positive(*clip_id),
             MotionCreateComposition{name:n,width,height,fps,duration_seconds}=>*editor==Editor::Motion&&name(n)&&
@@ -74,10 +77,10 @@ impl Action {
                 (1.0..=120.0).contains(fps)&&duration_seconds.is_finite()&&
                 *duration_seconds>=1.0/fps&&*duration_seconds<=600.0,
             MotionAddText{comp_id,name:n,text,x,y,size}=>*editor==Editor::Motion&&positive(*comp_id)&&name(n)&&
-                !text.is_empty()&&text.len()<=2000&&finite_signed(*x)&&finite_signed(*y)&&
+                bounded_text(text,2000)&&finite_signed(*x)&&finite_signed(*y)&&
                 size.is_finite()&&(1.0..=1000.0).contains(size),
             MotionEditText{comp_id,layer_id,text}=>*editor==Editor::Motion&&positive(*comp_id)&&positive(*layer_id)&&
-                !text.is_empty()&&text.len()<=2000,
+                bounded_text(text,2000),
             MotionAddShape{comp_id,name:n,kind,x,y,width,height,fill}=>*editor==Editor::Motion&&positive(*comp_id)&&name(n)&&
                 matches!(kind.as_str(),"rect"|"ellipse"|"rounded"|"star"|"polygon")&&
                 finite_signed(*x)&&finite_signed(*y)&&finite_signed(*width)&&finite_signed(*height)&&
@@ -101,11 +104,12 @@ fn finite_signed(x:f64)->bool{x.is_finite()&&(-100000.0..=100000.0).contains(&x)
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct Scope {
-    pub task_id:String,pub plan_hash:String,pub snapshot:Snapshot,pub actions:Vec<Action>,
+    pub task_id:String,pub plan_hash:String,pub instruction:String,
+    pub snapshot:Snapshot,pub actions:Vec<Action>,
 }
 impl Scope {
     fn valid(&self)->bool {
-        token(&self.task_id)&&hex64(&self.plan_hash)&&self.snapshot.valid()&&
+        token(&self.task_id)&&hex64(&self.plan_hash)&&bounded_text(&self.instruction,2000)&&self.snapshot.valid()&&
         (1..=12).contains(&self.actions.len())&&
         self.actions.iter().all(|a|a.valid(&self.snapshot.editor))
     }
