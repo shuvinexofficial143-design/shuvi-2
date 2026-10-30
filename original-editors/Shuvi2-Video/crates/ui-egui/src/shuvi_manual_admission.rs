@@ -8,12 +8,23 @@ use serde_json::Value;
 use crate::FilmcraftApp;
 
 #[derive(Default)]
-struct OwnerState { thread: Option<ThreadId>, depth: usize, poisoned: bool }
+struct OwnerState {
+    thread: Option<ThreadId>,
+    depth: usize,
+    poisoned: bool,
+    /// Reserved ONLY for trusted native A07 Rust integration. Same-thread
+    /// nested manual menus are forbidden while an A07 mutation is active.
+    ai_transaction: bool,
+}
 
 #[derive(Clone,Default)]
 pub(crate) struct ManualCommandAdmission { shared: Arc<Mutex<OwnerState>> }
 
-pub(crate) struct ManualCommandLease { shared: Arc<Mutex<OwnerState>>, thread: ThreadId }
+pub(crate) struct ManualCommandLease {
+    shared: Arc<Mutex<OwnerState>>,
+    thread: ThreadId,
+    ai_transaction: bool,
+}
 
 impl ManualCommandAdmission {
     /// Stop all subsequent covered edits after a caught native panel panic.
@@ -29,6 +40,8 @@ impl ManualCommandAdmission {
         };
         if owner.poisoned {
             Some("SHUVI_NATIVE_OWNER_POISONED")
+        } else if owner.ai_transaction {
+            Some("SHUVI_NATIVE_AI_TRANSACTION_ACTIVE")
         } else if owner.thread.is_some_and(|id|id!=thread::current().id()) {
             Some("SHUVI_NATIVE_OWNER_BUSY")
         } else {None}
@@ -36,6 +49,11 @@ impl ManualCommandAdmission {
     pub(crate) fn try_claim(&self)->Result<ManualCommandLease,&'static str>{
         let mut owner=self.shared.lock().map_err(|_|"SHUVI_NATIVE_OWNER_POISONED")?;
         if owner.poisoned {return Err("SHUVI_NATIVE_OWNER_POISONED");}
+        // The same-thread recursion allowed for original manual UI passes
+        // must NEVER bypass an active native AI mutation/owner confirmation.
+        if owner.ai_transaction {
+            return Err("SHUVI_NATIVE_AI_TRANSACTION_ACTIVE");
+        }
         let current=thread::current().id();
         if owner.thread.is_some_and(|id|id!=current) {
             return Err("SHUVI_NATIVE_OWNER_BUSY");
@@ -44,22 +62,66 @@ impl ManualCommandAdmission {
             .ok_or("SHUVI_NATIVE_OWNER_DEPTH_EXCEEDED")?;
         owner.thread=Some(current);
         owner.depth=depth;
-        Ok(ManualCommandLease{shared:Arc::clone(&self.shared),thread:current})
+        Ok(ManualCommandLease{
+            shared:Arc::clone(&self.shared),thread:current,ai_transaction:false
+        })
+    }
+
+    /// Exclusive A07 transaction admission is NOT reentrant, even for
+    /// the UI thread. It cannot be upgraded from a live normal manual pass;
+    /// a trusted native host must dispatch after the UI pass releases.
+    /// No provider, IPC/JSON or model can access this method.
+    fn try_claim_ai(&self)->Result<ManualCommandLease,&'static str> {
+        let mut owner=self.shared.lock().map_err(|_|"SHUVI_NATIVE_OWNER_POISONED")?;
+        if owner.poisoned {return Err("SHUVI_NATIVE_OWNER_POISONED");}
+        if owner.thread.is_some() || owner.depth != 0 || owner.ai_transaction {
+            return Err("SHUVI_NATIVE_OWNER_BUSY");
+        }
+        let current=thread::current().id();
+        owner.thread=Some(current);
+        owner.depth=1;
+        owner.ai_transaction=true;
+        Ok(ManualCommandLease{
+            shared:Arc::clone(&self.shared),thread:current,ai_transaction:true
+        })
     }
 }
 impl Drop for ManualCommandLease {
     fn drop(&mut self){
         let Ok(mut owner)=self.shared.lock() else {return};
         if thread::panicking() || owner.thread!=Some(self.thread)
-            || thread::current().id()!=self.thread || owner.depth==0 {
+            || thread::current().id()!=self.thread || owner.depth==0
+            || owner.ai_transaction != self.ai_transaction {
             owner.poisoned=true;
         }
         if owner.depth>0 {owner.depth-=1;}
-        if owner.depth==0 {owner.thread=None;}
+        if owner.depth==0 {
+            owner.thread=None;
+            owner.ai_transaction=false;
+        }
     }
 }
 
 impl FilmcraftApp {
+    /// A real UI-side admission entry point for the isolated canonical A07
+    /// adapter. Claims an exclusive native owner and borrows this EXACT
+    /// original editor Session for the duration of the trusted Rust callback.
+    /// Unlike a normal UI lease, it REFUSES to nest into a manual pass,
+    /// and refuses ANY manual edit or raw input on the same/other thread.
+    ///
+    /// No model/JSON/remote control exposes this method. Production A07
+    /// GuardedHost, SQLite receipts and owner consent MUST still be checked
+    /// by the trusted callback; simply borrowing a Session never grants edit
+    /// approval. GUI AI editing remains disabled until full integration.
+    pub fn with_shuvi_trusted_ai_transaction<R>(
+        &mut self,
+        action:impl FnOnce(&mut filmcraft_engine::Session)->Result<R,String>,
+    )->Result<R,String> {
+        let _owner=self.shuvi_manual_admission.try_claim_ai()
+            .map_err(str::to_owned)?;
+        action(&mut self.session)
+    }
+
     /// Trusted native command-route seam used by original menu, its native
     /// menu inbox and the external-control engine command dispatcher.
     /// A model cannot call this through the AI sidebar (disabled). This
@@ -164,6 +226,75 @@ mod shuvi_manual_admission_tests {
             json!({"name":"must not be created"})).unwrap_err();
         assert!(error.contains("POISONED"));
         assert_eq!(app.session.revision,revision);
+    }
+
+
+    #[test]
+    fn exclusive_ai_owner_blocks_same_thread_manual_menu_and_control_input() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let ctx=egui::Context::default();
+        let before=app.session.revision;
+        let gate=app.shuvi_manual_admission.clone();
+        let claim=gate.try_claim_ai().unwrap();
+        assert_eq!(gate.blocked_reason(),Some("SHUVI_NATIVE_AI_TRANSACTION_ACTIVE"));
+        assert_eq!(gate.try_claim().err(),Some("SHUVI_NATIVE_AI_TRANSACTION_ACTIVE"));
+        assert_eq!(gate.try_claim_ai().err(),Some("SHUVI_NATIVE_OWNER_BUSY"));
+        let blocked=crate::menus::invoke(&mut app,&ctx,"file.newSequence",
+            json!({"name":"AI must block this manual edit"})).unwrap_err();
+        assert!(blocked.contains("SHUVI_NATIVE_AI_TRANSACTION_ACTIVE"));
+        for method in ["engine.execute","ui.key","ui.drag","ui.click","ui.type"] {
+            let (request,_reply)=crate::control::ControlRequest::new(method,json!({}));
+            let crate::control::Outcome::Done(result)=
+                crate::control::handle(&mut app,&ctx,&request) else {
+                panic!("exclusive AI owner must reject input immediately");
+            };
+            assert_eq!(result["error"],"SHUVI_NATIVE_AI_TRANSACTION_ACTIVE");
+        }
+        assert_eq!(app.session.revision,before);
+        assert!(app.synthetic.is_empty());
+        drop(claim);
+        assert_eq!(gate.blocked_reason(),None);
+        crate::menus::invoke(&mut app,&ctx,"file.newSequence",
+            json!({"name":"allowed after exclusive AI owner exits",
+                "width":320,"height":240})).unwrap();
+        assert!(app.session.revision>before);
+    }
+
+    #[test]
+    fn real_ai_session_borrow_is_blocked_inside_original_ui_manual_pass() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let gate=app.shuvi_manual_admission.clone();
+        let manual=gate.try_claim().unwrap();
+        let before=app.session.revision;
+        let error=app.with_shuvi_trusted_ai_transaction(|session|{
+            session.execute("file.openDemoProject",json!({}))
+                .map_err(|e|e.to_string())?;
+            Ok(())
+        }).unwrap_err();
+        assert_eq!(error,"SHUVI_NATIVE_OWNER_BUSY");
+        assert_eq!(app.session.revision,before);
+        drop(manual);
+        // A read-only trusted native A07 snapshot closure is permitted once
+        // the original UI pass fully releases its manual lease.
+        let session_revision=app.with_shuvi_trusted_ai_transaction(
+            |session| Ok(session.revision)
+        ).unwrap();
+        assert_eq!(session_revision,before);
+    }
+
+    #[test]
+    fn panic_during_trusted_ai_session_borrow_poison_blocks_manual_replay() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
+            let _=app.with_shuvi_trusted_ai_transaction(|_|->Result<(),String>{
+                panic!("test-only A07 native owner panic")
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(app.shuvi_manual_admission.blocked_reason(),
+            Some("SHUVI_NATIVE_OWNER_POISONED"));
+        assert!(app.shuvi_manual_execute("file.newSequence",
+            json!({"name":"must not replay"})).unwrap_err().contains("POISONED"));
     }
 
     #[test]
