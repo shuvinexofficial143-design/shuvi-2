@@ -179,6 +179,35 @@ async function test(){
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
     });
+    await step("cold restart real Windows app and reopen persisted EffectCraft project",async()=>{
+      await wd("DELETE",`/session/${session}`);
+      session=undefined;
+      await delay(1200);
+      const relaunched=await wd("POST","/session",{
+        capabilities:{alwaysMatch:{"browserName":"wry","tauri:options":{application:path.resolve(application)}}}
+      });
+      session=relaunched.sessionId;
+      assert.ok(session,"Windows driver failed to relaunch real application");
+      await waitFor("Motion Studio after fresh process",()=>find('button[data-studio="motion"]'));
+      await click('button[data-studio="motion"]');
+      await ready("Native Windows engine connected",60000);
+      await fill("#motion-workspace",root);
+      await fill("#motion-filename","webview_e2e.ecproj");
+      await click("#motion-open");
+      await ready("Opening native project · native verification complete",60000);
+      await waitFor("persisted shape after full process restart",async=>
+        (await text("#motion-layer-list")).includes("WebDriver Shape"));
+      await click("#motion-layer-list .motion-layer");
+      await ready("Selecting native layer · native verification complete",60000);
+      assert.match(await text("#motion-effect-list"),/Gaussian Blur/);
+      assert.match(await text("#motion-mask-list"),/Mask 1/);
+      const frame=await attr("#motion-native-frame","src");
+      assert.match(frame,/^data:image\/png;base64,/);
+      const decoded=Buffer.from(frame.split(",",2)[1],"base64");
+      assert.ok(decoded.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
+        "Relaunched application failed to return a real EffectCraft PNG preview");
+      result.coldRestartVerified=true;
+    });
     await step("native desktop screenshot",async()=>{
       await screenshot("motion-windows-webview2.png");
       result.nativeScreenshot="motion-windows-webview2.png";
