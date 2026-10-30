@@ -68,6 +68,7 @@ test("unavailable/uncertain native Stop cannot fabricate success",async()=>{
  assert.match(r.director.get(TASK).error,/STOP_REFUSED/);
  const result=await r.director.run(TASK);
  assert.equal(result.status,"complete");
+ assert.equal(result.error,null);
  assert.equal(r.executed,1);
 });
 test("failing native Stop cannot set cancelled state before durable acknowledgement",async()=>{
