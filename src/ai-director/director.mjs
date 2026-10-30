@@ -1,12 +1,11 @@
 // A01 task-scoped AI Director. Not connected to any engine until integration supplies
 // a trusted owner-scoped adapter, durable journal and actual UI approval gateway.
 import {validateDraft, validateSnapshot, sameSnapshot, advancedSnapshot, safeClone} from "./contracts.mjs";
+import {planDigest} from "./plan-digest.mjs";
 
-async function digest(value) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
-  const hash = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(hash), v => v.toString(16).padStart(2, "0")).join("");
-}
+// Deterministic canonical SHA-256 shared with the independently validating
+// native Rust reservation layer, including Unicode, array order and field order.
+const digest = planDigest;
 function checkPorts(adapter, approval, journal) {
   if (typeof adapter?.readSnapshot !== "function" || typeof adapter?.executeGuarded !== "function") {
     throw new Error("trusted native editor adapter required");
@@ -18,6 +17,7 @@ function view(task) {
   return safeClone({
     taskId: task.plan.taskId, status: task.status, planHash: task.hash,
     project: task.plan.snapshot, actions: task.plan.actions,
+    instruction:task.plan.instruction,
     receipts: task.receipts, error: task.error ?? null
   });
 }
@@ -47,7 +47,11 @@ export class AiDirector {
     const hash = await digest(plan);
     const task = {plan, hash, status:"prepared", receipts:[], error:null, cancel:false, inFlight:false, intentLogged:false};
     // reserve() must atomically persist this task ID; restart may not re-approve it.
-    const reserved = await this.#journal.reserve({taskId, planHash:hash, project:plan.snapshot});
+    // The native journal needs the ENTIRE validated draft to independently
+    // recompute the plan hash. Project-only reservation is not authorization.
+    const reserved = await this.#journal.reserve({
+      taskId, planHash:hash, project:plan.snapshot, plan:safeClone(plan)
+    });
     if (reserved !== true) throw new Error("task already reserved in durable journal");
     await this.#journal.append({event:"prepared", taskId, planHash:hash, project:plan.snapshot});
     this.#tasks.set(taskId, task);
