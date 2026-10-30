@@ -127,8 +127,11 @@ try{
     el.value="0.5";
     el.dispatchEvent(new Event("input",{bubbles:true}));
   });
-  await visibleStatus("00:00:00.500",180000);
-  note("scrub","Real FilmCraft frame seek 0.5s completed through UI");
+  await page.waitForFunction(()=>{
+    const msg=document.querySelector('.v-editor [data-v="status"]')?.textContent??"";
+    return msg.includes("Verified real FilmCraft frame") && msg.includes("00:00:00.500");
+  },null,{timeout:180000});
+  note("scrub","Real FilmCraft frame seek 0.5s completed through UI, not just queued");
 
   // Avoid an empty audio track forcing a codec mode; video stream is still real.
   await page.locator('[data-v="audio"]').uncheck();
