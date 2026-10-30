@@ -109,6 +109,7 @@ pub struct Scope {
     pub snapshot:Snapshot,pub actions:Vec<Action>,
 }
 impl Scope {
+    pub(crate) fn is_valid(&self)->bool {self.valid()}
     fn valid(&self)->bool {
         token(&self.task_id)&&hex64(&self.plan_hash)&&bounded_text(&self.instruction,2000)&&self.snapshot.valid()&&
         (1..=12).contains(&self.actions.len())&&
