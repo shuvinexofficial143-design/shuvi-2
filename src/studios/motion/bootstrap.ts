@@ -196,8 +196,11 @@ async function refreshSelectedNativeProperties():Promise<void>{
   }
 }
 async function afterEdit():Promise<void> {
+  if(!mounted)return;
   await listLayers();
+  if(!mounted)return;
   await refreshEffectMaskControls();
+  if(!mounted)return;
   await renderFrame();
 }
 function bindClick(selector:string,label:string,action:()=>Promise<void>):void {
@@ -477,6 +480,7 @@ async function mount():Promise<void> {
     if(!status.ready||status.engine!=="effectcraft"||!status.native)throw new Error("Native engine did not verify");
     health.textContent="Native EffectCraft linked";
     info("Native Windows engine connected");
+    if(activeComp)await afterEdit();
   } catch(error) {
     if(mounted){health.textContent="Motion engine unavailable";info(String(error),true);}
   }
