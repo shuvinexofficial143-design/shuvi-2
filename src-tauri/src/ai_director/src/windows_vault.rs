@@ -38,12 +38,12 @@ impl CredentialVault for WindowsCredentialVault {
             };
             // Credential Manager's generic bytes must be stored as UTF-8.
             // Short-lived cloned bytes are overwritten by Zeroizing on drop.
-            let value=String::from_utf8(secret.to_vec())
-                .map_err(|_|ProviderError{code:"CREDENTIAL_INVALID"})?;
+            let value=Zeroizing::new(String::from_utf8(secret.to_vec())
+                .map_err(|_|ProviderError{code:"CREDENTIAL_INVALID"})?);
             if !value.is_ascii() || value.chars().any(char::is_whitespace){
                 return Err(ProviderError{code:"CREDENTIAL_INVALID"});
             }
-            Ok(Zeroizing::new(value))
+            Ok(value)
         }
     }
 }
