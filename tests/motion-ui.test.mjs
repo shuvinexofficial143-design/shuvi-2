@@ -15,6 +15,9 @@ const motionCi=read(".github/workflows/motion-smoke.yml");
 const pkgConfig=JSON.parse(read("src-tauri/src/motion/tauri.release.conf.json"));
 const releaseRunner=read("scripts/motion/package-windows-release.ps1");
 const historySource=read("crates/shuvi-motion-bridge/src/history.rs");
+const nativeSequence=read("crates/shuvi-motion-bridge/src/sequence.rs");
+const nativeSequenceProof=read("crates/shuvi-motion-bridge/src/bin/motion-sequence-proof.rs");
+const nativeSequenceTests=read("crates/shuvi-motion-bridge/tests/png_sequence.rs");
 
 test("Motion lives in existing Shuvi single window without injecting a second editor",()=>{
   assert.match(html, /src\/main\.ts/);
@@ -247,4 +250,26 @@ test("M14 Windows WebView2 error evidence is captured as real per-step journal a
   assert.ok(motionCi.includes('group: motion-'));
   assert.ok(windowsRunner.includes('shuvi-motion-msedgedriver'));
   assert.ok(windowsRunner.includes('RUNNER_TEMP'));
+});
+
+test("M15 real native multi-frame PNG export is bounded, typed and disk verified",()=>{
+  assert.ok(ts.includes('id="motion-export-sequence"'));
+  assert.ok(ts.includes('id="motion-sequence-folder"'));
+  assert.ok(ts.includes('id="motion-sequence-frames"'));
+  assert.ok(ts.includes('action:"exportPngSequence"'));
+  assert.ok(ipc.includes('MotionRequest::ExportPngSequence'));
+  assert.ok(ipc.includes('e.export_png_sequence('));
+  assert.ok(nativeSequence.includes('const MAX_FRAMES:u32=120'));
+  assert.ok(nativeSequence.includes('const MAX_SIDE:u32=640'));
+  assert.ok(nativeSequence.includes('create_dir(&directory)'));
+  assert.ok(nativeSequence.includes('create_new(true)'));
+  assert.ok(nativeSequence.includes('if saved!=png'));
+  assert.ok(nativeSequence.includes('sequence.json'));
+  assert.ok(nativeSequence.includes('verified_from_disk:true'));
+  assert.ok(nativeSequenceTests.includes('native_disk_verified_manifest'));
+  assert.ok(nativeSequenceTests.includes('without_overwriting_owner_files'));
+  assert.ok(nativeSequenceProof.includes('first_checksum==exported.last_checksum'));
+  assert.ok(motionCi.includes('--bin motion-sequence-proof'));
+  assert.ok(desktopE2e.includes('click("#motion-export-sequence")'));
+  assert.ok(desktopE2e.includes('result.sequenceVerified=true'));
 });
