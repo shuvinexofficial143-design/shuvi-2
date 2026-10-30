@@ -77,6 +77,10 @@ jobs:
         run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-history-proof
         env:
           SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Prove actual animated EffectCraft 16-frame PNG image sequence and no-overwrite
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-sequence-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
       - name: Upload native project and preview frames
         uses: actions/upload-artifact@v4
         with:
