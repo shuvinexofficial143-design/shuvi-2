@@ -226,6 +226,8 @@ function paintUi():void {
        <input id="motion-workspace" placeholder="C:\\Users\\you\\Documents\\Shuvi" aria-label="Owner-selected workspace folder"/></label>
      <label>Project filename <input id="motion-filename" value="my_motion.ecproj"/></label>
      <button id="motion-save">Save .ecproj</button><button id="motion-open">Open .ecproj</button>
+     <label>PNG filename <input id="motion-png-filename" value="motion_frame.png"/></label>
+     <button id="motion-export-png">Export native PNG frame</button>
    </div>
   </section>`;
 }
@@ -341,6 +343,19 @@ function bind():void {
     node<HTMLElement>("#motion-time-label").textContent=currentTime.toFixed(2)+" s";
   });
   node<HTMLInputElement>("#motion-time").addEventListener("change",()=>void execute("Rendering playhead",renderFrame));
+  bindClick("#motion-export-png","Exporting native PNG",async()=>{
+    const c=ensureComp();
+    const root=value("#motion-workspace");
+    if(!root)throw new Error("Choose an existing owner workspace folder");
+    const exported=await request<{path:string;bytes:number;verifiedFromDisk:boolean;source:string}>({
+      action:"exportPng",workspace:root,filename:value("#motion-png-filename"),
+      compId:c.id,time:currentTime,maxSide:640,transparent:true
+    });
+    if(!exported.verifiedFromDisk||exported.source!=="native-effectcraft")
+      throw new Error("PNG export did not verify against native EffectCraft pixels");
+    node<HTMLElement>("#motion-frame-info").textContent=
+      "PNG saved ("+exported.bytes+" bytes): "+exported.path;
+  });
   bindClick("#motion-save","Saving native project",async()=>{
     const root=value("#motion-workspace");
     if(!root)throw new Error("Choose an existing owner workspace folder");
