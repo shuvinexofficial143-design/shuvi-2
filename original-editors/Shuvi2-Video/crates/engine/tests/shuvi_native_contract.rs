@@ -91,7 +91,10 @@ fn native_project_save_reopen_preserves_project_geometry() {
     let mut reloaded = Session::default();
     reloaded.execute("file.open", json!({"path": path.to_string_lossy()})).unwrap();
     let after = shuvi_ai_readonly::snapshot(&mut reloaded).unwrap();
-    assert_eq!(after.project["name"], before.project["name"]);
+    // Native FilmCraft Save As intentionally renames the document after the filename.
+    // The original in-memory name was "Untitled"; the saved document is not.
+    assert_eq!(before.project["name"], "Untitled");
+    assert_eq!(after.project["name"], path.file_stem().unwrap().to_string_lossy().as_ref());
     assert_eq!(reloaded.project.sequences().count(), 1);
     assert_eq!(reloaded.active_sequence().map(|s| s.settings.width), Some(320));
     assert_eq!(reloaded.active_sequence().map(|s| s.settings.height), Some(180));

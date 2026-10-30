@@ -17,6 +17,7 @@ pub mod clip_ops;
 pub mod color;
 pub mod commands;
 pub mod shuvi_ai_readonly;
+mod shuvi_ai_owner;
 pub mod demo;
 pub mod doc_path;
 pub mod essential_sound;
