@@ -320,6 +320,43 @@ impl TransactionalLedger {
         }
         Ok(result)
     }
+    /// A08 read-only recent task history for the currently selected *native*
+    /// project. Includes older native sessions only as historical read-only
+    /// records; never uses old snapshot to authorize a new edit or owner click.
+    /// Limit bounds UI and DB work; no model-supplied path/project identifiers.
+    pub fn recent_history(&self,current:&Snapshot)->Result<Vec<serde_json::Value>,GuardError>{
+        if !current.is_valid(){return Err(GuardError::Invalid);}
+        let mut query=self.conn.prepare(
+            "SELECT task_id FROM ai_tasks ORDER BY rowid DESC LIMIT 256"
+        ).map_err(sql_error)?;
+        let ids=query.query_map([],|r|r.get::<_,String>(0)).map_err(sql_error)?;
+        let mut found=Vec::new();
+        for id_row in ids{
+            let task_id=id_row.map_err(sql_error)?;
+            let (scope,approval,cancelled)=self.load(&task_id)?;
+            if scope.snapshot.editor!=current.editor ||
+                scope.snapshot.project_id!=current.project_id{
+                continue;
+            }
+            // Every displayed historical state must be independently checked;
+            // corruption blocks the history view rather than showing "verified".
+            let states=self.recovery(&task_id)?;
+            found.push(serde_json::json!({
+                "taskId":scope.task_id,
+                "planHash":scope.plan_hash,
+                "instruction":scope.instruction,
+                "projectId":scope.snapshot.project_id,
+                "sessionId":scope.snapshot.session_id,
+                "historicalSession":scope.snapshot.session_id!=current.session_id,
+                "approval":approval,
+                "cancelled":cancelled,
+                "actionsCount":scope.actions.len(),
+                "steps":states,
+            }));
+            if found.len()>=50{break;}
+        }
+        Ok(found)
+    }
     pub fn integrity_check(&self)->Result<(),GuardError>{
         let response:String=self.conn.query_row("PRAGMA quick_check",
             [],|row|row.get(0)).map_err(sql_error)?;
