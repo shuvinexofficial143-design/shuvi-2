@@ -23,7 +23,8 @@ REQUIRED={
 TEST_MOD=re.compile(r"(?m)^\s*#\[cfg\(test\)\]\s*(?:#\[[^\n]*\]\s*)*mod\s+\w*tests\b")
 METHOD=re.compile(r"\b(?:app|self)\.session\.(?:set_time|open_comp|activate_comp|activate_comp_none|replace_project|set_resolution|mark_saved|sanitize_after_replacement|save|restore_view)\s*\(")
 ASSIGN=re.compile(r"\b(?:app|self)\.session\.(?:project|saved_project|history(?:\.\w+)?|state(?:\.\w+)?|path|prefs(?:\.\w+)?)\s*=(?!=)")
-COW=re.compile(r"(?:Arc|std::sync::Arc)::make_mut\s*\(\s*&mut\s*(?:app|self)\.session\.project")
+COW=re.compile(r"(?:Arc|std::sync::Arc)::make_mut\\s*\\(\\s*&mut\\s*(?:app|self)\\.session\\.project")
+CONTAINER_MUTATION=re.compile(r"\\b(?:app|self)\\.session\\.(?:project|history|state|prefs)\\.(?:\\w+\\.)*(?:push|clear|retain|extend|insert|remove|append|sort|drain|swap|truncate)\\s*\\(")
 RAW_PROJECT=re.compile(r"\b(?:app|self)\.session\.project\s*=(?!=)")
 def runtime(text):
     m=TEST_MOD.search(text)
@@ -48,6 +49,8 @@ def main():
                 anchored[rel]+=1
     findings=[]
     raw=[]
+    inline_gated=[]
+    needs_review=[]
     for path in sorted(ROOT.rglob("*.rs")):
         rel=path.relative_to(ROOT).as_posix()
         if path.name=="tests.rs" or "tests" in path.relative_to(ROOT).parts:
@@ -56,8 +59,16 @@ def main():
             t=line.strip()
             if t.startswith("//") or t.startswith("///"):
                 continue
-            if METHOD.search(line) or ASSIGN.search(line) or COW.search(line):
-                findings.append({"file":rel,"line":ln,"source":t[:180]})
+            if METHOD.search(line) or ASSIGN.search(line) or COW.search(line) or CONTAINER_MUTATION.search(line):
+                finding={"file":rel,"line":ln,"source":t[:180],
+                    "containerMutation":bool(CONTAINER_MUTATION.search(line))}
+                findings.append(finding)
+                if "motion_owner_gate.manual_transaction(" in line:
+                    inline_gated.append(finding)
+                else:
+                    # Unreviewed here does not prove unsafe: a trusted
+                    # multiline owner transaction can surround this line.
+                    needs_review.append(finding)
             if RAW_PROJECT.search(line) or COW.search(line):
                 raw.append({"file":rel,"line":ln,"source":t[:180]})
     if raw:
@@ -70,6 +81,8 @@ def main():
         "schemaVersion":1,"sourceCommit":os.getenv("GITHUB_SHA","local"),
         "reviewedNativeStateGateAnchors":anchored,
         "trackedDirectSetterOrStateCandidates":findings,
+        "reviewedInlineOwnerTransactionCandidates":inline_gated,
+        "furtherStateMutationReviewCandidates":needs_review,
         "unguardedAppProjectReplacement":raw,
         "fullNativeOwnerLockVerified":False,
         "crossProcessExclusiveLock":False,
@@ -83,7 +96,9 @@ def main():
     dest=Path(args.out)
     dest.write_text(json.dumps(evidence,indent=2,sort_keys=True)+"\n")
     print("M-AI16 state gate anchors:",sum(anchored.values()))
-    print("Direct setter/state mutation candidates:",len(findings))
+    print("Direct setter/state/container mutation candidates:",len(findings))
+    print("Inline owner transaction candidates:",len(inline_gated))
+    print("Further state mutation review candidates:",len(needs_review))
     print("Raw unguarded app project swaps:",len(raw))
     print("Evidence SHA256:",hashlib.sha256(dest.read_bytes()).hexdigest())
     for e in errors:print("ERROR:",e)
