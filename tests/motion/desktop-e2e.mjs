@@ -1,6 +1,7 @@
 // Real Windows Tauri WebView2 E2E; requires running tauri-driver 2.x and EdgeDriver.
 // Uses W3C WebDriver HTTP, no test-side native IPC shortcuts and no mocks.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -91,6 +92,7 @@ async function test(){
   }
   session=created.sessionId;
   assert.ok(session,"tauri-driver did not create a real desktop session");
+  let exportedPng;
   const result={driver:"tauri-driver",window:"real-windows-webview2",
     projectDir:root,steps:[],nativeScreenshot:null};
   async function step(name,fn){lastStep=name;await fn();result.steps.push(name)}
@@ -150,7 +152,9 @@ async function test(){
       assert.ok(png.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
         "Exported frame was not an actual PNG");
       assert.ok(png.length>100,"PNG is empty");
+      exportedPng=png;
       result.pngBytes=png.length;
+      result.exportSha256=createHash("sha256").update(png).digest("hex");
       result.projectBytes=project.size;
       // Native owner-owned export must refuse overwriting a real existing file.
       await click("#motion-export-png");
@@ -208,6 +212,11 @@ async function test(){
       const decoded=Buffer.from(frame.split(",",2)[1],"base64");
       assert.ok(decoded.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
         "Relaunched application failed to return a real EffectCraft PNG preview");
+      assert.ok(exportedPng,"Missing previously verified owner PNG export");
+      assert.deepEqual(decoded,exportedPng,
+        "Cold-reopened native frame bytes differ from exported pre-restart PNG");
+      result.coldRestartSha256=createHash("sha256").update(decoded).digest("hex");
+      assert.equal(result.coldRestartSha256,result.exportSha256);
       result.coldRestartVerified=true;
       await screenshot("m11_03-cold-reopened-project.png");
     });
