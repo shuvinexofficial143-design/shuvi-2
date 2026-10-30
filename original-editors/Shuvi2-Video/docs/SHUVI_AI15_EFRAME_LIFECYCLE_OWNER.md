@@ -17,3 +17,6 @@ Original FilmcraftApp still owns a directly accessible `Session`. The eframe UI 
 
 ## Floating window owner admission
 Original DockArea::native_input_hook is separate from FilmcraftApp::raw_input_hook. It now clones the SAME production manual admission owner and calls raw_input::rewrite_native_window_input_admitted before queuing native floating OS window input. Busy/Poisoned rejects all keyboard and pointer events; test verifies no replay and same-thread nested pass retains normal input. This guards floating OS window input, not every possible direct floating panel draw/batch side effect or the unrelated canonical A07 bridge instance.
+
+## Windows CI test coverage
+The real Windows workflow now runs the new `lifecycle_owner` tests and also explicitly runs `shuvi_floating_window_admission`, because the previous `shuvi_manual_admission` name filter by itself did not select the new floating-window regression module. Both are Cargo tests against the actual original FilmCraft egui crate, not mocks or static descriptions. PASS must be verified on the new exact Git SHA.

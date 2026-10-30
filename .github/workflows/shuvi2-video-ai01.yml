@@ -61,6 +61,9 @@ jobs:
       - name: Verify original eframe lifecycle native owner and controlled shutdown
         shell: pwsh
         run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-ui-egui lifecycle_owner -- --nocapture
+      - name: Verify floating OS window native owner blocks stale mouse and keyboard input
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-ui-egui shuvi_floating_window_admission -- --nocapture
       - name: Check Original FilmCraft GUI is still compilable
         shell: pwsh
         run: cargo check --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft
