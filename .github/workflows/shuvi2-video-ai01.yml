@@ -1,0 +1,76 @@
+name: Shuvi 2 Video - AI01 Original Native Baseline
+on:
+  push:
+    branches:
+      - feature/shuvi2-original-video-ai
+    paths:
+      - 'original-editors/Shuvi2-Video/**'
+      - '.github/workflows/shuvi2-video-ai01.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shuvi2-video-ai01
+  cancel-in-progress: true
+
+jobs:
+  verify-and-build-native-video:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - name: Checkout OWN Shuvi2 Video source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - name: Setup Rust 1.95.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: original-editors/Shuvi2-Video
+          key: filmcraft-shuvi-ai01
+      - name: Verify preserved Original Editor, origin and notices
+        shell: pwsh
+        run: |
+          foreach ($f in @(
+            "original-editors/Shuvi2-Video/apps/filmcraft/src/main.rs",
+            "original-editors/Shuvi2-Video/crates/ui-egui/src/lib.rs",
+            "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_readonly.rs",
+            "original-editors/Shuvi2-Video/NOTICE",
+            "original-editors/Shuvi2-Video/SHUVI_SOURCE_ORIGIN.txt"
+          )) { if (!(Test-Path $f)) { throw "Source/attribution missing: $f" } }
+      - name: Real Session registry, readback, edit, undo and disk roundtrip tests
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-engine --test shuvi_native_contract -- --nocapture
+      - name: Check Original FilmCraft GUI is still compilable
+        shell: pwsh
+        run: cargo check --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft
+      - name: Build own Windows executable from this commit
+        shell: pwsh
+        run: cargo build --release --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft
+      - name: Package actual native executable and original notices
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "own-video" | Out-Null
+          $src = "original-editors/Shuvi2-Video/target/release/filmcraft.exe"
+          if (!(Test-Path $src)) { throw "Native Windows executable missing" }
+          Copy-Item $src own-video/Shuvi2-Video.exe
+          foreach ($f in @("LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "ATTRIBUTION.md", "SHUVI_SOURCE_ORIGIN.txt")) {
+            Copy-Item "original-editors/Shuvi2-Video/$f" own-video
+          }
+          Get-FileHash own-video/Shuvi2-Video.exe -Algorithm SHA256 | Format-List
+          Compress-Archive -Path own-video/* -DestinationPath "Shuvi2-Video-AI01-NativeBaseline-Win64.zip" -Force
+          if ((Get-Item "Shuvi2-Video-AI01-NativeBaseline-Win64.zip").Length -lt 5000000) {
+            throw "Native Windows ZIP unexpectedly small"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shuvi2-Video-AI01-NativeBaseline-Windows-x64
+          path: Shuvi2-Video-AI01-NativeBaseline-Win64.zip
+          retention-days: 14
+          if-no-files-found: error
