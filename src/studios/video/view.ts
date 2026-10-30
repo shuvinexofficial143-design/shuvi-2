@@ -1,5 +1,6 @@
 import "./view.css";
 import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
+import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import {requestVideoAiProposal} from "./ai";
 import { createPreviewCoordinator } from "./scrub.mjs";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -88,7 +89,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     <button data-action="recover">Recover Interrupted History</button></div>
     <div class="v-muted" data-v="history">Cross-session FilmCraft project history is being inspected.</div>
     <div class="v-chat-review" data-v="chatReview" hidden>
-      <strong>Local typed command (no AI model connected)</strong>
+      <strong>Video editing proposal · user approval required</strong>
       <p data-v="chatSummary">No pending command</p>
       <div class="v-actions"><button type="button" data-chat-approve="yes">Approve & Run on FilmCraft</button>
       <button type="button" data-chat-approve="no">Reject</button></div>
@@ -100,6 +101,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   let clips:EditorClip[]=[];
   let history:VideoHistoryStatus|null=null;
   let pending:VideoChatProposal|null=null;
+  const proposalEpoch=createVideoProposalEpoch();
   let busy=false,active=true;
   let disposeFrame:(()=>void)|null=null;
   let sampledPlayback=false;
@@ -166,6 +168,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     return {...p,expectedRevision:s.sessionRevision,expectedProjectSha256:s.projectSha256};
   }
   function clearProposal():void{
+    proposalEpoch.invalidate();
     pending=null;
     e<HTMLElement>("chatReview").hidden=true;
     e<HTMLElement>("chatSummary").textContent="No pending command";
@@ -290,6 +293,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   }
   async function proposeChatText(text:string):Promise<string> {
     if(!active||busy||!snapshot)return "Open a real FilmCraft Video project before proposing a chat command.";
+    clearProposal();
+    const ticket=proposalEpoch.begin();
     // Copy the active state before any asynchronous model call; no edit may
     // happen while a proposal is being planned, and switching studio cancels it.
     const modelMode=e<HTMLSelectElement>("chatMode").value==="openai";
@@ -315,7 +320,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
             selectedClipId:clipId,selectedMediaId:itemId
           }
         });
-        if(!active||!snapshot||snapshot.projectSha256!==currentProject||
+        if(!proposalEpoch.isCurrent(ticket)||!active||!snapshot||snapshot.projectSha256!==currentProject||
           value("root")!==selectedRoot||value("project")!==projectPath){
           clearProposal();
           return "Project/studio changed while AI was planning; proposal discarded without execution.";
@@ -327,6 +332,10 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         clearProposal();
         return "OpenAI model proposal failed; nothing executed: "+String(err);
       }finally{busy=false;draw();}
+    }
+    if(!proposalEpoch.isCurrent(ticket)||!active){
+      clearProposal();
+      return "Proposal invalidated by a newer command, studio change, or project change; nothing executed.";
     }
     const plan=parseVideoChat(instruction,ctx);
     if(!plan.ok){
@@ -553,6 +562,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       e<HTMLElement>("scrubLabel").textContent=formatTimecode(seconds);
     }
   });
+  e<HTMLSelectElement>("chatMode").addEventListener("change",()=>{
+    clearProposal();draw();
+  });
   for(const key of ["root","project"]){
     e<HTMLInputElement>(key).addEventListener("change",()=>{
       // Project changes invalidate every pending model or local proposal.
@@ -593,7 +605,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     oldTimeline.forEach(n=>{n.hidden=next});
     draw();
     if(initialChat)initialChat.textContent=next
-      ? "Shuvi AI chat is not connected yet. Manual Video editing runs through the real FilmCraft engine after an explicit button click."
+      ? "Video Chat: choose Local Commands or OpenAI model. Each edit requires separate review and approval; no automatic execution."
       : initialChatText;
   }};
 }
