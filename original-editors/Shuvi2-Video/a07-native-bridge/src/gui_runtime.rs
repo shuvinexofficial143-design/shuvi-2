@@ -112,6 +112,13 @@ impl NativeGuiA07Runtime {
         })
     }
 
+    /// Trusted host may inspect why model edits are still NOT integrated.
+    /// This is canonical A07's intentionally conservative capability contract.
+    /// Never infer readiness from a compiled adapter or test-only consent.
+    pub fn capabilities(&self)->shuvi_ai_provider::host::Capabilities {
+        shuvi_ai_provider::host::unintegrated_capabilities()
+    }
+
     /// Runtime state is always unavailable for real model mutations until
     /// the integrated UI/WinCred/modal/task flow passes live Windows E2E.
     pub const fn model_editing_enabled()->bool{false}

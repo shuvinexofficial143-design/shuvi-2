@@ -100,3 +100,45 @@ fn real_native_gui_adapter_denies_old_approval_scope_after_project_switch(){
             json!(["not_started"]));
     });
 }
+
+#[test]
+fn native_gui_sqlite_reservation_never_authorizes_execution_or_synthetic_approval(){
+    with_test_db(|folder|{
+        let mut original=app();
+        let (reservation,binding)=plan(&mut original,"native-a21-gui-03",2.0);
+        let before=shuvi_ai_readonly::snapshot(&mut original.session).unwrap();
+        let mut runtime=NativeGuiA07Runtime::open_native_private_ledger(
+            &folder.join("native.sqlite3")).unwrap();
+        assert_eq!(runtime.reserve(&mut original,&reservation).unwrap()["reserved"],true);
+        assert!(!runtime.capabilities().native_guarded);
+        assert!(!runtime.capabilities().owner_consent);
+        assert!(!NativeGuiA07Runtime::model_editing_enabled());
+        let wire:shuvi_ai_provider::ipc::GuardedWireRequest=serde_json::from_value(json!({
+            "taskId":reservation.task_id,
+            "stepIndex":0,
+            "idempotencyKey":"f".repeat(64),
+            "expectedSnapshot":reservation.project,
+            "action":reservation.plan["actions"][0]
+        })).unwrap();
+        let denied=runtime.execute_step(&mut original,wire).unwrap_err();
+        assert_eq!(denied,"NotApproved");
+        let after=shuvi_ai_readonly::snapshot(&mut original.session).unwrap();
+        assert_eq!(after.project_sha256,before.project_sha256);
+        assert_eq!(after.revision,before.revision);
+        assert_eq!(runtime.recover(&mut original,&binding).unwrap()["steps"],
+            json!(["not_started"]));
+        assert!(runtime.reserve(&mut original,&reservation).unwrap_err()
+            .contains("AlreadyExists"));
+        // A pre-edit consent rejection cannot poison actual manual FilmCraft.
+        menus::invoke(&mut original,&egui::Context::default(),"file.newSequence",
+            json!({"name":"normal manual editor after denied AI",
+                "width":320,"height":240})).unwrap();
+        assert!(original.session.revision>before.revision);
+    });
+}
+
+#[test]
+fn native_runtime_rejects_untrusted_relative_ledger_destination(){
+    assert!(NativeGuiA07Runtime::open_native_private_ledger(
+        std::path::Path::new("untrusted/model/selected.sqlite3")).is_err());
+}
