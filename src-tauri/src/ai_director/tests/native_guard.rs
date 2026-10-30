@@ -183,3 +183,48 @@ fn denial_or_crash_during_approval_cannot_request_again(){
     assert_eq!(l.approve(&p.task_id,&mut consent).unwrap_err(),GuardError::AlreadyExists);
     assert_eq!(consent.calls,1);
 }
+
+#[test]
+fn native_wire_contract_executes_only_approved_stored_action_once(){
+    use shuvi_ai_provider::ipc::{GuardedStep,GuardedWireRequest};
+    use serde_json::json;
+    let dir=TempDir::new();let l=Ledger::new(&dir.0).unwrap();let p=motion();
+    l.reserve(&p).unwrap();l.approve(&p.task_id,&mut Consent{accept:true,calls:0}).unwrap();
+    let wire=json!({
+        "taskId":p.task_id,"stepIndex":0,"idempotencyKey":"d".repeat(64),
+        "expectedSnapshot":{"engine":"motion","projectId":"workspace:scene.ecproj",
+            "sessionId":"effect-owner-1","version":4},
+        "action":{"type":"motion.addText","compId":2,"name":"Title",
+            "text":"नमस्ते","x":12.0,"y":20.0,"size":44.0}
+    });
+    let parsed=GuardedStep::parse(serde_json::from_value::<GuardedWireRequest>(wire).unwrap()).unwrap();
+    let mut engine=owner(&p);
+    let receipt=parsed.execute(&l,&mut engine).unwrap();
+    assert_eq!(receipt["guarded"],true);
+    assert_eq!(receipt["nativeVerified"],true);
+    assert_eq!(receipt["objectProofSha256"],"c".repeat(64));
+    assert_eq!(receipt["idempotencyKey"],"d".repeat(64));
+    assert_eq!(receipt["after"]["version"],5);
+    assert_eq!(engine.calls,1);
+    assert!(parsed.execute(&l,&mut engine).is_err());
+    assert_eq!(engine.calls,1);
+}
+#[test]
+fn native_wire_refuses_action_substitution_even_with_approved_task(){
+    use shuvi_ai_provider::ipc::{GuardedStep,GuardedWireRequest};
+    use serde_json::json;
+    let dir=TempDir::new();let l=Ledger::new(&dir.0).unwrap();let p=motion();
+    l.reserve(&p).unwrap();l.approve(&p.task_id,&mut Consent{accept:true,calls:0}).unwrap();
+    let wire=json!({
+        "taskId":p.task_id,"stepIndex":0,"idempotencyKey":"e".repeat(64),
+        "expectedSnapshot":{"engine":"motion","projectId":"workspace:scene.ecproj",
+            "sessionId":"effect-owner-1","version":4},
+        "action":{"type":"motion.addText","compId":2,"name":"Injected",
+            "text":"Bad content","x":12.0,"y":20.0,"size":44.0}
+    });
+    let parsed=GuardedStep::parse(serde_json::from_value::<GuardedWireRequest>(wire).unwrap()).unwrap();
+    let mut engine=owner(&p);
+    assert_eq!(parsed.execute(&l,&mut engine).unwrap_err(),GuardError::Invalid);
+    assert_eq!(engine.calls,0);
+    assert_eq!(l.recover(&p.task_id).unwrap()[0],"not_started");
+}
