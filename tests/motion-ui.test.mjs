@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 const read = (p) => readFileSync(new URL("../"+p, import.meta.url),"utf8");
 const html=read("index.html");
 const ts=read("src/studios/motion/bootstrap.ts");
@@ -133,4 +134,15 @@ test("M10 scrubbing and native worker backpressure have bounded queues",()=>{
   assert.ok(ipc.includes("Err(TrySendError::Full(_))"));
   assert.ok(ipc.includes("Instant::now()>=deadline"));
   assert.ok(ipc.includes("fn admitted_action("));
+});
+
+test("M11 real desktop E2E parses as executable JS and verifies cross-process pixels",()=>{
+  const syntax=spawnSync(process.execPath,["--check","tests/motion/desktop-e2e.mjs"],{encoding:"utf8"});
+  assert.equal(syntax.status,0,"real WebDriver E2E syntax invalid: "+syntax.stderr);
+  assert.ok(desktopE2e.includes('cold restart real Windows app'));
+  assert.ok(desktopE2e.includes('createHash("sha256")'));
+  assert.ok(desktopE2e.includes('assert.deepEqual(decoded,exportedPng'));
+  assert.ok(desktopE2e.includes('await wd("DELETE"'));
+  assert.ok(desktopE2e.includes('m11_03-cold-reopened-project.png'));
+  assert.ok(desktopE2e.includes('native no-overwrite error'));
 });
