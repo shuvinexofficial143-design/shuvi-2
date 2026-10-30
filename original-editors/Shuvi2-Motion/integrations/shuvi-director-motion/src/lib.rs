@@ -1167,6 +1167,63 @@ mod tests{
     }
 
     #[test]
+    fn native_mask_receipt_detects_external_edits_not_just_command_success(){
+        let mut native=Session::new();
+        let comp=from_comp(&mut native);
+        let layer=native.execute_checked("layer.newText",json!({
+            "name":"Proof target","text":"Mask safety"
+        })).unwrap()["layer"].as_u64().unwrap();
+        let mask=native.execute_checked("mask.new",json!({
+            "layer":layer,
+            "vertices":[[5.0,5.0],[100.0,5.0],[100.0,100.0]],
+            "closed":true
+        })).unwrap()["mask"].as_u64().unwrap();
+        let mut owner=EffectcraftNativeOwner::new(&mut native,
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let action=Action::MotionSetMaskProperty{
+            comp_id:comp,layer_id:layer,uid:mask,
+            property:"opacity".into(),value:61.0
+        };
+        assert!(owner.preflight_action(&action).unwrap());
+        owner.apply(&action).unwrap();
+        assert!(owner.verify_action(&action).unwrap());
+        let original_hash=owner.object_proof_sha256(&action).unwrap();
+        assert_eq!(original_hash.len(),64);
+        // Mutate the exact native leaf through the original engine, not a
+        // fake JSON response. The old approval must now fail verification.
+        let leaf_uid=owner.mask_leaf(comp,layer,mask,"opacity").unwrap().uid;
+        owner.session.execute_checked("prop.set",json!({
+            "layer":layer,"prop":leaf_uid,"value":20.0
+        })).unwrap();
+        assert!(!owner.verify_action(&action).unwrap());
+        assert!(owner.object_proof_sha256(&action).is_err());
+    }
+
+    #[test]
+    fn mask_proofs_reject_unsupported_leaf_and_do_not_change_native_revision(){
+        let mut native=Session::new();
+        let comp=from_comp(&mut native);
+        let layer=native.execute_checked("layer.newText",json!({
+            "name":"Guarded layer","text":"No edit"
+        })).unwrap()["layer"].as_u64().unwrap();
+        let uid=native.execute_checked("mask.new",json!({
+            "layer":layer,
+            "vertices":[[0.0,0.0],[20.0,0.0],[20.0,20.0]]
+        })).unwrap()["mask"].as_u64().unwrap();
+        let revision=native.revision;
+        let mut owner=EffectcraftNativeOwner::new(&mut native,
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let requested=Action::MotionSetMaskProperty{
+            comp_id:comp,layer_id:layer,uid,
+            property:"path".into(),value:3.0
+        };
+        assert!(!owner.preflight_action(&requested).unwrap());
+        assert_eq!(owner.current_revision(),revision);
+        assert!(owner.object_proof_sha256(&requested).is_err(),
+            "no native edit means no legitimate proof");
+    }
+
+    #[test]
     fn real_ai_director_provider_accepts_only_native_bounded_inventory(){
         use shuvi_ai_provider::{NativeModelRequest,build_request};
         let mut s=Session::new();
