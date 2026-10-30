@@ -11,6 +11,7 @@ const cargo=read("src-tauri/Cargo.toml");
 const desktopE2e=read("tests/motion/desktop-e2e.mjs");
 const windowsRunner=read("scripts/motion/run-windows-e2e.ps1");
 const windowsProof=read("scripts/motion/verify-desktop-proof.ps1");
+const proofTamper=read("scripts/motion/test-desktop-proof-failclosed.ps1");
 const motionCi=read(".github/workflows/motion-smoke.yml");
 const pkgConfig=JSON.parse(read("src-tauri/src/motion/tauri.release.conf.json"));
 const releaseRunner=read("scripts/motion/package-windows-release.ps1");
@@ -294,4 +295,35 @@ test("M17 Windows 8.3 DOS path aliases cannot falsely fail native sequence publi
   assert.ok(!nativeSequenceTests.includes("assert_eq!(receipt.directory,dir.join("));
   assert.ok(desktopE2e.includes("SESSION_STARTUP_MS=180000"));
   assert.ok(desktopE2e.includes("sessionStartupElapsedMs"));
+});
+
+test("M18 reconstructed Windows evidence verifier has intact PowerShell SHA parser and real success contract",()=>{
+  assert.ok(windowsProof.includes("if (!$r.exportSha256 -or $r.exportSha256 -notmatch '^[0-9a-f]{64}$')"));
+  assert.ok(windowsProof.includes("if ($r.sequenceFirstSha256 -ne $r.exportSha256)"));
+  assert.ok(windowsProof.includes("if ($r.coldRestartSha256 -ne $r.exportSha256)"));
+  assert.ok(windowsProof.includes("if ($r.steps[$i] -ne $requiredSteps[$i])"));
+  assert.ok(windowsProof.includes("if ($r.nativeScreenshot -ne"));
+  assert.ok(windowsProof.includes("Native EffectCraft Gitlink"));
+  assert.ok(windowsProof.includes('Write-Host "PASS: 11 real WebView2 clicks'));
+  assert.equal((windowsProof.match(/Write-Host "PASS: 11 real WebView2 clicks/g)||[]).length,1);
+  assert.equal((windowsProof.match(/\$expected = @\(/g)||[]).length,1);
+  assert.ok(!windowsProof.includes(" -or\n    $r.coldRestartSha256"));
+  assert.ok(motionCi.includes("[System.Management.Automation.Language.Parser]::ParseFile("));
+});
+test("M18 unsigned installer is gated on genuine GUI success AND rejection of eight forged evidence copies",()=>{
+  const negative=[
+    "receipt-not-successful","forged-source-commit","forged-effectcraft-pin",
+    "forged-sequence-checksum","forged-cold-restart-checksum",
+    "omitted-native-edit-step","missing-actual-screenshot","non-png-screenshot"
+  ];
+  for(const name of negative)assert.ok(proofTamper.includes('"'+name+'"'),"missing forgery test "+name);
+  assert.ok(proofTamper.includes("Copy-Item -LiteralPath"));
+  assert.ok(proofTamper.includes("if ($LASTEXITCODE -eq 0)"));
+  assert.ok(proofTamper.includes("Remove-Item -LiteralPath $copy"));
+  assert.ok(motionCi.includes("./scripts/motion/test-desktop-proof-failclosed.ps1"));
+  const verify=motionCi.indexOf("Independently verify actual GUI screenshot");
+  const tamper=motionCi.indexOf("Prove receipt and screenshots cannot be tampered");
+  const upload=motionCi.indexOf("Upload real desktop screenshot and E2E receipt");
+  assert.ok(verify>=0&&tamper>verify&&upload>tamper);
+  assert.ok(motionCi.includes("needs: motion-desktop-e2e-windows"));
 });
