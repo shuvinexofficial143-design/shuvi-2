@@ -371,8 +371,8 @@ mod tests{
         let (tx,rx)=mpsc::sync_channel::<Work>(MAX_PENDING);
         for _ in 0..MAX_PENDING{
             let (answer,_)=mpsc::channel();
-            tx.try_send(Work{request:MotionRequest::Status,
-                respond:answer,deadline:Instant::now()+Duration::from_secs(20)}).unwrap();
+            assert!(tx.try_send(Work{request:MotionRequest::Status,
+                respond:answer,deadline:Instant::now()+Duration::from_secs(20)}).is_ok());
         }
         let (answer,_)=mpsc::channel();
         assert!(matches!(tx.try_send(Work{request:MotionRequest::Status,
