@@ -76,7 +76,7 @@ pub fn build_request(input: &NativeModelRequest) -> Result<Value, ProviderError>
     }
     let actions=allowed(&input.engine)?;
     if input.allowed_actions.len()!=actions.len() ||
-       input.allowed_actions.iter().map(String::as_str).collect::<Vec<_>>()!=actions {
+       input.allowed_actions.iter().map(String::as_str).collect::<Vec<_>>().as_slice()!=actions {
         return Err(error("ALLOWLIST_MISMATCH"));
     }
     inspect_inventory(input)?;
