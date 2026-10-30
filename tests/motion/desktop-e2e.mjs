@@ -183,7 +183,7 @@ async function test(){
     await step("open saved native project from disk and restore effects and masks",async()=>{
       await click("#motion-open");
       await ready("Opening native project · native verification complete",60000);
-      await waitFor("persisted shape layer",async=>
+      await waitFor("persisted shape layer",async()=>
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       await click("#motion-layer-list .motion-layer");
       await ready("Selecting native layer · native verification complete",60000);
@@ -196,7 +196,7 @@ async function test(){
       await waitFor("Video Studio",async()=>await text("#studio-title")==="Video Studio");
       await click('button[data-studio="motion"]');
       await ready("Native Windows engine connected",60000);
-      await waitFor("reopened native layer list",async=>
+      await waitFor("reopened native layer list",async()=>
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
     });
@@ -216,7 +216,7 @@ async function test(){
       await fill("#motion-filename","webview_e2e.ecproj");
       await click("#motion-open");
       await ready("Opening native project · native verification complete",60000);
-      await waitFor("persisted shape after full process restart",async=>
+      await waitFor("persisted shape after full process restart",async()=>
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       await click("#motion-layer-list .motion-layer");
       await ready("Selecting native layer · native verification complete",60000);
