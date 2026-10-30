@@ -12,6 +12,11 @@ $proof = Join-Path $project $Artifacts
 New-Item -ItemType Directory -Path $proof -Force | Out-Null
 $env:SHUVI_MOTION_EXE = $binary
 $env:SHUVI_MOTION_E2E_ARTIFACTS = $proof
+$pin = (git -C vendor/effectcraft rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $pin -ne "fa9cf47175834162806b6b03d83fb2f4bdaeeafa") {
+    throw "Real desktop E2E requires the exact pinned EffectCraft native engine; actual $pin"
+}
+$env:SHUVI_EFFECTCRAFT_PIN = $pin
 $env:SHUVI_MOTION_WEBDRIVER = "http://127.0.0.1:4444"
 $tauri = Join-Path $HOME ".cargo/bin/tauri-driver.exe"
 $edgetool = Join-Path $HOME ".cargo/bin/msedgedriver-tool.exe"
