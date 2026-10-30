@@ -4,6 +4,7 @@ import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import { clipDragDestination } from "./drag.mjs";
 import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
 import {shouldRefreshVideoProjectAfterActionError} from "./error-policy.mjs";
+import {videoTrackStates,videoActionPreflight} from "./track-state.mjs";
 import {requestVideoAiProposal} from "./ai";
 import {canSubmitVideoAiRequest} from "./privacy.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
@@ -211,6 +212,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     tracks.replaceChildren();
     const seq=snapshot?.sequence as {video?:Array<{name?:string}>,audio?:Array<{name?:string}>}|null|undefined;
     const seconds=Math.max(1,sequenceDuration(seq),...clips.map(c=>c.start+c.duration));
+    const nativeTracks=videoTrackStates(snapshot?.sequence);
     e<HTMLElement>("duration").textContent=formatTimecode(sequenceDuration(seq));
     const duration=sequenceDuration(seq);
     const fps=sequenceFps(seq);
@@ -232,11 +234,19 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       for(let index=0;index<list.length;index++){
         const name=(kind==="video"?"V":"A")+(index+1);
         const display=String(list[index]?.name??"");
+        const laneState=nativeTracks.find(t=>t.track===name);
+        const locked=laneState?.locked===true;
 
         const row=document.createElement("div");row.className="v-track-row";
         const label=document.createElement("span");
-        label.textContent=name;
-        if(display&&display!==name)label.title=display;
+        label.textContent=name+(locked?" 🔒":"")+
+          (laneState?.muted?" M":"")+
+          (laneState?.enabled===false?" OFF":"")+
+          (laneState?.solo?" S":"");
+        label.title=[display||name,locked?"LOCKED":"editable",
+          laneState?.muted?"Muted":"",laneState?.enabled===false?"Disabled":"",
+          laneState?.solo?"Solo":""].filter(Boolean).join(" · ");
+        if(locked)row.classList.add("v-track-locked");
         const track=document.createElement("div");track.className="v-track-lane";
         for(const clip of clips.filter(c=>c.kind===kind&&c.track===name)){
           const btn=document.createElement("button");btn.type="button";btn.className="v-clip"+(clip.clipId===clipId?" v-selected":"");
@@ -244,12 +254,13 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
           btn.style.left=String(Math.min(99,Math.max(0,clip.start/seconds*100)))+"%";
           btn.style.width=String(Math.max(3,Math.min(100-clip.start/seconds*100,clip.duration/seconds*100)))+"%";
           btn.title="#"+clip.clipId+" · "+formatTimecode(clip.start)+" · "+formatTimecode(clip.duration)+
-            " · Drag horizontally on same track to request a real FilmCraft move";
+            (locked?" · FilmCraft track LOCKED; move/trim disabled":
+              " · Drag horizontally on same track to request a real FilmCraft move");
           let suppressClick=false;
           let pointerStartX:number|null=null;
           let activePointer:number|null=null;
           btn.addEventListener("pointerdown",event=>{
-            if(event.button!==0||busy||!active)return;
+            if(event.button!==0||busy||!active||locked)return;
             pointerStartX=event.clientX;
             activePointer=event.pointerId;
             btn.setPointerCapture(event.pointerId);
@@ -336,9 +347,10 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       const current=clips.find(c=>c.clipId===clip.clipId&&c.track===clip.track);
       if(!current||current.start!==clip.start)
         throw Error("Timeline changed since pointer drag began");
-      const receipt=await editVideoTimeline({...request(),actions:[{
-        type:"move",clipId:clip.clipId,track:clip.track,seconds,insert:false
-      }]});
+      const action={type:"move" as const,clipId:clip.clipId,track:clip.track,seconds,insert:false};
+      const preflight=videoActionPreflight(action,snapshot?.sequence);
+      if(!preflight.ok)throw Error(preflight.reason);
+      const receipt=await editVideoTimeline({...request(),actions:[action]});
       const state=await load();
       if(state.projectSha256!==receipt.projectSha256)
         throw Error("FilmCraft clip move readback mismatch");
@@ -354,6 +366,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     }finally{scrubber.resume();busy=false;draw();}
   }
   async function edit(action:TimelineAction):Promise<void>{
+    const preflight=videoActionPreflight(action,snapshot?.sequence);
+    if(!preflight.ok)throw Error(preflight.reason);
     const response=await editVideoTimeline({...request(),actions:[action]});
     const after=await load();
     if(after.projectSha256!==response.projectSha256)throw Error("Post-edit state changed unexpectedly; refresh/replan");
@@ -448,6 +462,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         const verified=await load();
         if(verified.projectSha256!==result.projectSha256)throw Error("History readback mismatch");
       }else{
+        const preflight=videoActionPreflight(plan.action,snapshot?.sequence);
+        if(!preflight.ok)throw Error(preflight.reason);
         const result=await editVideoTimeline({...req,actions:[plan.action]});
         clearProposal();
         const verified=await load();

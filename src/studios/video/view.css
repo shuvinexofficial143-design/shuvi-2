@@ -14,3 +14,5 @@
 .v-ai-consent{align-items:flex-start!important;line-height:1.4;color:#d9c6ad!important}.v-ai-consent input{margin-top:1px;min-width:14px;flex-shrink:0}
 
 .v-clip{cursor:grab;touch-action:pan-y;user-select:none}.v-clip:active{cursor:grabbing}
+
+.v-track-locked{opacity:.76;background:repeating-linear-gradient(135deg,transparent 0,transparent 12px,rgba(210,155,100,.08) 12px,rgba(210,155,100,.08) 22px)}.v-track-locked .v-clip{cursor:not-allowed;border-style:dashed}
