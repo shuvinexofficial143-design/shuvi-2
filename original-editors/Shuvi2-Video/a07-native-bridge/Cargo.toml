@@ -22,3 +22,8 @@ sha2 = "0.10"
 # No WebView, model response, JSON flag or in-app fake approval.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+# Native egui application is a DEV dependency only: the tested bridge
+# remains separate and is not linked into the production application.
+[dev-dependencies]
+filmcraft-ui-egui = { path = "../crates/ui-egui" }
