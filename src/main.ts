@@ -48,15 +48,28 @@ function appendMessage(role: "user" | "assistant", message: string): void {
   thread.scrollTop = thread.scrollHeight;
 }
 
-document.querySelector<HTMLFormElement>("#chat-form")!.addEventListener("submit", (event) => {
+document.querySelector<HTMLFormElement>("#chat-form")!.addEventListener("submit", async (event) => {
   event.preventDefault();
   const value = prompt.value.trim();
   if (!value) return;
-  appendMessage("user", value);
-  appendMessage("assistant", selectedStudio === "video"
-    ? videoStudio.proposeChatText(value)
-    : "Draft saved only in this window. No AI provider or motion editing engine is connected; no edit executed.");
   prompt.value = "";
+  appendMessage("user", value);
+  if(selectedStudio!=="video"){
+    appendMessage("assistant","Motion Studio chat not connected; no motion edit executed.");
+    return;
+  }
+  const reply=document.createElement("div");
+  reply.className="message assistant";
+  reply.textContent="Checking proposed FilmCraft command…";
+  thread.appendChild(reply);
+  thread.scrollTop=thread.scrollHeight;
+  try {
+    const text=await videoStudio.proposeChatText(value);
+    reply.textContent=text;
+  }catch(error){
+    reply.textContent="No Video edit executed: "+String(error);
+  }
+  thread.scrollTop=thread.scrollHeight;
 });
 
 document.querySelector<HTMLButtonElement>("#srt-test")!.addEventListener("click", async () => {
