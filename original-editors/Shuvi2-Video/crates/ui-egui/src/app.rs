@@ -34,6 +34,7 @@ impl FilmcraftApp {
         Self {
             session,
             shuvi_manual_admission: Default::default(),
+            shuvi_a07_native_identity: Default::default(),
             ui: UiState { language, ..UiState::default() },
             tokens: Tokens::for_kind(ThemeKind::Dark),
             frames,

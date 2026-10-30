@@ -7,6 +7,42 @@ use std::thread::{self,ThreadId};
 use serde_json::Value;
 use crate::FilmcraftApp;
 
+/// Per-running-native-app trusted A07 task identity. This is a native
+/// document/session identity fence, never an approval token or provider key.
+/// The random state is created exclusively by FilmcraftApp::new and is not
+/// supplied by any model, script, JSON request or external renderer.
+#[derive(Debug)]
+pub(crate) struct NativeA07Identity {
+    seed: std::collections::hash_map::RandomState,
+    instance: u64,
+}
+
+impl Default for NativeA07Identity {
+    fn default()->Self {
+        static NEXT:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1);
+        Self {
+            seed:std::collections::hash_map::RandomState::new(),
+            instance:NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+}
+
+impl NativeA07Identity {
+    fn current(&self,session:&filmcraft_engine::Session)->(String,String) {
+        use std::hash::BuildHasher;
+        // The project ID is local to this editor lifetime and rotates on
+        // native document open/reopen and SaveAs. No original file path leaks.
+        let project=self.seed.hash_one((
+            self.instance,session.document_epoch,session.path.as_deref()
+        ));
+        let bound_session=self.seed.hash_one((
+            self.instance,session.document_epoch,session.path.as_deref(),
+            session.state.active_sequence.map(|id|id.0)
+        ));
+        (format!("p-{project:016x}"),format!("s-{:016x}-{bound_session:016x}",self.instance))
+    }
+}
+
 #[derive(Default)]
 struct OwnerState {
     thread: Option<ThreadId>,
@@ -103,6 +139,14 @@ impl Drop for ManualCommandLease {
 }
 
 impl FilmcraftApp {
+    /// Trusted host-derived A07 project/session identity from the ORIGINAL
+    /// editor's current document, never from model or front-end input.
+    /// Only valid while the same native owner is held; the canonical ledger
+    /// separately checks native project SHA and durable task plan binding.
+    pub fn shuvi_trusted_a07_identity(&self)->(String,String) {
+        self.shuvi_a07_native_identity.current(&self.session)
+    }
+
     /// A real UI-side admission entry point for the isolated canonical A07
     /// adapter. Claims an exclusive native owner and borrows this EXACT
     /// original editor Session for the duration of the trusted Rust callback.
@@ -387,6 +431,48 @@ mod shuvi_manual_admission_tests {
         assert!(app.session.revision>before);
         assert!(app.shuvi_ai.readback.is_none());
         assert_eq!(app.shuvi_manual_admission.blocked_reason(),None);
+    }
+
+    #[test]
+    fn original_gui_native_identity_stays_stable_for_edits_but_not_document_switch() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let original=app.shuvi_trusted_a07_identity();
+        let snapshot=filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session);
+        // Normal edit alters project bytes, NOT per-document A07 session ID.
+        app.session.execute("file.newSequence",json!({"name":"one edit",
+            "width":320,"height":240})).unwrap();
+        assert_eq!(app.shuvi_trusted_a07_identity(),original);
+        assert_ne!(filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session),snapshot);
+        let epoch=app.session.document_epoch;
+        app.session.execute("file.openDemoProject",json!({})).unwrap();
+        assert!(app.session.document_epoch>epoch);
+        assert_ne!(app.shuvi_trusted_a07_identity(),original);
+    }
+
+    #[test]
+    fn reopened_original_gui_app_never_inherits_previous_a07_owner_identity() {
+        let original=FilmcraftApp::new(Session::default());
+        let other=FilmcraftApp::new(Session::default());
+        assert_ne!(original.shuvi_trusted_a07_identity(),
+            other.shuvi_trusted_a07_identity());
+        let (proj,session)=original.shuvi_trusted_a07_identity();
+        assert!(proj.starts_with("p-")&&session.starts_with("s-"));
+        assert!(proj.len()<=1024&&session.len()<=128);
+        assert!(!proj.contains('\\'));
+    }
+
+    #[test]
+    fn a07_identity_is_derived_from_original_gui_and_not_from_ai_json() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let trusted=app.shuvi_trusted_a07_identity();
+        let bogus=json!({"projectId":"model-controlled-project",
+            "sessionId":"model-controlled-session"});
+        let _=bogus; // No caller-supplied identity argument exists.
+        assert_eq!(app.shuvi_trusted_a07_identity(),trusted);
+        app.shuvi_manual_execute("file.newSequence",
+            json!({"name":"model cannot select identity",
+                "width":320,"height":240})).unwrap();
+        assert_eq!(app.shuvi_trusted_a07_identity(),trusted);
     }
 
     #[test]

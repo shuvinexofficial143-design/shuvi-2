@@ -172,6 +172,8 @@ pub struct FilmcraftApp {
     /// V-AI13 partial production command lane. Only covered command entry
     /// paths are admitted; direct original GUI panel edits still need migration.
     shuvi_manual_admission: shuvi_manual_admission::ManualCommandAdmission,
+    /// Host-created identity seed; models cannot choose project/session IDs.
+    shuvi_a07_native_identity: shuvi_manual_admission::NativeA07Identity,
     pub ui: UiState,
     pub tokens: Tokens,
     pub frames: Arc<FrameServer>,
