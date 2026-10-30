@@ -65,11 +65,19 @@ impl<'a> VideoOwner<'a> {
     }
 
     fn inspect_split(&mut self, action: &Action) -> Result<(u64, Value), String> {
-        let Some((clip_id, tick)) = self.checked_target(action) else {
-            return Err("NATIVE_SPLIT_TARGET_MISSING_OR_LOCKED".into());
+        // Post-split the original left clip ends AT tick, so checking whether
+        // it still strictly contains tick would wrongly reject a successful edit.
+        // Compare the canonical action to the captured pre-edit intent instead.
+        let Action::VideoSplit { clip_id, seconds } = action else {
+            return Err("NATIVE_ACTION_MISMATCH".into());
         };
+        if !seconds.is_finite() {
+            return Err("NATIVE_ACTION_MISMATCH".into());
+        }
+        let tick = self.session.sequence_rate()
+            .snap_nearest(Tick((seconds * TICKS_PER_SECOND as f64).round() as i64)).0;
         let state = self.last.as_ref().ok_or("NATIVE_INTENT_NOT_EXECUTED")?;
-        if state.clip_id != clip_id || state.tick != tick {
+        if state.clip_id != *clip_id || state.tick != tick {
             return Err("NATIVE_ACTION_MISMATCH".into());
         }
         let before = state.before.clone();
@@ -179,7 +187,7 @@ impl NativeOwner for VideoOwner<'_> {
     }
     fn object_proof_sha256(&mut self, action: &Action) -> Result<String, String> {
         let (new_id,after)=self.inspect_split(action)?;
-        let Some((clip_id,_))=self.checked_target(action) else {
+        let Action::VideoSplit { clip_id, .. } = action else {
             return Err("A07_PROOF_TARGET_MISSING".into());
         };
         for kind in ["video","audio"] {
