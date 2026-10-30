@@ -1,0 +1,138 @@
+name: Copy complete original FilmCraft + EffectCraft code into Shuvi 2 and build OWN Windows apps
+
+on:
+  push:
+    branches:
+      - feature/shuvi2-original-sources
+    paths:
+      - .github/workflows/import-original-editors.yml
+      - scripts/original-editors/import-verified-source.sh
+  workflow_dispatch:
+
+concurrency:
+  group: shuvi2-original-source-import-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  import_real_source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.original.outputs.source_sha }}
+    steps:
+      - name: Checkout user's Shuvi 2 repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Import and COMMIT actual complete upstream source and desktop UI to user's repository
+        id: original
+        shell: bash
+        run: bash scripts/original-editors/import-verified-source.sh
+      - name: Verify real source directory trees, NOT Git submodules
+        shell: bash
+        run: |
+          test -f original-editors/Shuvi2-Video/apps/filmcraft/src/main.rs
+          test -f original-editors/Shuvi2-Video/crates/ui-egui/Cargo.toml
+          test -f original-editors/Shuvi2-Motion/apps/effectcraft/src/main.rs
+          test -f original-editors/Shuvi2-Motion/crates/ui-egui/Cargo.toml
+          test -f original-editors/Shuvi2-Video/NOTICE
+          test -f original-editors/Shuvi2-Motion/NOTICE
+          test "$(git ls-tree HEAD original-editors/Shuvi2-Video | awk '{print $1}')" = "040000"
+          test "$(git ls-tree HEAD original-editors/Shuvi2-Motion | awk '{print $1}')" = "040000"
+          git ls-tree HEAD original-editors/
+
+  build_video_from_own_source:
+    needs: import_real_source
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout OWN committed original FilmCraft source (not upstream download binary)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.import_real_source.outputs.source_sha }}
+          submodules: false
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: original-editors/Shuvi2-Video
+          key: original-filmcraft-v014
+      - name: Verify original UI source, legal notices, and renamed window
+        shell: pwsh
+        run: |
+          if (!(Test-Path original-editors/Shuvi2-Video/crates/ui-egui/Cargo.toml)) { throw "No real original UI" }
+          if (!(Test-Path original-editors/Shuvi2-Video/NOTICE)) { throw "Original copyright notice missing" }
+          if (!(Select-String -Path original-editors/Shuvi2-Video/apps/filmcraft/src/main.rs -SimpleMatch 'Shuvi 2 Video')) { throw "Display name absent" }
+      - name: Compile complete original FilmCraft Desktop UI from own GitHub repository
+        shell: pwsh
+        run: cargo build --release --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft
+      - name: Package genuinely compiled Windows executable with original attribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force own-video | Out-Null
+          $src = "original-editors/Shuvi2-Video/target/release/filmcraft.exe"
+          if (!(Test-Path $src)) { throw "Actual complete editor executable missing" }
+          Copy-Item $src own-video/Shuvi2-Video.exe
+          foreach ($f in @("LICENSE-MIT","LICENSE-APACHE","NOTICE","ATTRIBUTION.md","SHUVI_SOURCE_ORIGIN.txt")) { Copy-Item "original-editors/Shuvi2-Video/$f" own-video }
+          Get-FileHash own-video/Shuvi2-Video.exe -Algorithm SHA256 | Format-List
+          Compress-Archive -Path own-video/* -DestinationPath Shuvi2-Video-OriginalUI-Win64.zip -Force
+          if ((Get-Item Shuvi2-Video-OriginalUI-Win64.zip).Length -lt 5000000) { throw "Invalid Windows video ZIP" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shuvi2-Video-OriginalUI-Windows-x64
+          path: Shuvi2-Video-OriginalUI-Win64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  build_motion_from_own_source:
+    needs: import_real_source
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout OWN committed original EffectCraft source (not upstream download binary)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.import_real_source.outputs.source_sha }}
+          submodules: false
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: original-editors/Shuvi2-Motion
+          key: original-effectcraft-v018
+      - name: Verify original UI source, legal notices, and renamed window
+        shell: pwsh
+        run: |
+          if (!(Test-Path original-editors/Shuvi2-Motion/crates/ui-egui/Cargo.toml)) { throw "No real original UI" }
+          if (!(Test-Path original-editors/Shuvi2-Motion/NOTICE)) { throw "Original copyright notice missing" }
+          if (!(Select-String -Path original-editors/Shuvi2-Motion/apps/effectcraft/src/main.rs -SimpleMatch 'Shuvi 2 Motion')) { throw "Display name absent" }
+      - name: Compile complete original EffectCraft Desktop UI from own GitHub repository
+        shell: pwsh
+        run: cargo build --release --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft
+      - name: Package genuinely compiled Windows executable with original attribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force own-motion | Out-Null
+          $src = "original-editors/Shuvi2-Motion/target/release/effectcraft.exe"
+          if (!(Test-Path $src)) { throw "Actual complete editor executable missing" }
+          Copy-Item $src own-motion/Shuvi2-Motion.exe
+          foreach ($f in @("LICENSE-MIT","LICENSE-APACHE","NOTICE","ATTRIBUTION.md","SHUVI_SOURCE_ORIGIN.txt")) { Copy-Item "original-editors/Shuvi2-Motion/$f" own-motion }
+          Get-FileHash own-motion/Shuvi2-Motion.exe -Algorithm SHA256 | Format-List
+          Compress-Archive -Path own-motion/* -DestinationPath Shuvi2-Motion-OriginalUI-Win64.zip -Force
+          if ((Get-Item Shuvi2-Motion-OriginalUI-Win64.zip).Length -lt 5000000) { throw "Invalid Windows motion ZIP" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shuvi2-Motion-OriginalUI-Windows-x64
+          path: Shuvi2-Motion-OriginalUI-Win64.zip
+          if-no-files-found: error
+          retention-days: 14
