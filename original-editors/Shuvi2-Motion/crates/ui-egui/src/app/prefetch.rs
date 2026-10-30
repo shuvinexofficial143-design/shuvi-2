@@ -112,10 +112,10 @@ impl EffectcraftApp {
         }
         self.playback.waiting = !all;
         if all {
+            if !self.set_owner_playback_time(fr.tick_of(p.first)) { return true; }
             self.playback.caching = false;
             self.playback.start_wall = now;
             self.playback.start_frame = p.first;
-            self.session.set_time(fr.tick_of(p.first));
             self.start_audio(fr.tick_of(p.first));
         }
         ctx.request_repaint();
@@ -203,7 +203,7 @@ impl EffectcraftApp {
         let Some(a) = &self.audio else { return false };
         if a.finished() {
             if video {
-                self.session.set_time(fr.tick_of(wb));
+                if !self.set_owner_playback_time(fr.tick_of(wb)) { return true; }
             } else {
                 self.playback.audio_frame = Some(wb);
             }
@@ -217,7 +217,7 @@ impl EffectcraftApp {
         } else if self.frames.is_cached(&FrameKey { frame: target, ..series }) {
             self.playback.waiting = false;
             if target != cur {
-                self.session.set_time(fr.tick_of(target));
+                if !self.set_owner_playback_time(fr.tick_of(target)) { return true; }
                 self.playback.frame_shown(now);
             }
         } else {
@@ -261,7 +261,7 @@ impl EffectcraftApp {
         };
         let Some(target) = target else {
             if video {
-                self.session.set_time(fr.tick_of(wb));
+                if !self.set_owner_playback_time(fr.tick_of(wb)) { return; }
             } else {
                 self.playback.audio_frame = Some(wb);
             }
@@ -277,7 +277,7 @@ impl EffectcraftApp {
         if self.frames.is_cached(&FrameKey { frame: target, ..series }) {
             self.playback.waiting = false;
             if target != cur {
-                self.session.set_time(fr.tick_of(target));
+                if !self.set_owner_playback_time(fr.tick_of(target)) { return; }
                 self.playback.frame_shown(now);
             }
         } else {
@@ -285,7 +285,7 @@ impl EffectcraftApp {
             self.playback.waiting = true;
             let next = plan.and_then(|p| p.frame_after(cur, 1)).unwrap_or(if cur + 1 > wb { wa } else { cur + 1 });
             if self.frames.is_cached(&FrameKey { frame: next, ..series }) {
-                self.session.set_time(fr.tick_of(next));
+                if !self.set_owner_playback_time(fr.tick_of(next)) { return; }
             }
             self.playback.start_wall = now;
             self.playback.start_frame = fr.frame_at(self.session.time());

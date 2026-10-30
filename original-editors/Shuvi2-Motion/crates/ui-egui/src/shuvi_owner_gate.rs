@@ -9,7 +9,7 @@
 //! In particular, production code has NO constructor for an AI lease and this
 //! file never fabricates 2.0.3 SQLite approvals or an OwnerPermit.
 use std::cell::Cell;
-use effectcraft_engine::Session;
+use effectcraft_engine::{Session, time::Tick};
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +136,20 @@ pub(crate) struct MotionOwnerStatus {
 }
 
 impl crate::EffectcraftApp {
+    /// The real preview clock changes Session state outside the command
+    /// registry. Serialize it through the same app-owned native manual gate
+    /// used by menus and the engine.execute control channel.
+    /// This does not create a production AI edit permit.
+    pub(crate) fn set_owner_playback_time(&mut self, tick: Tick) -> bool {
+        match self.motion_owner_gate.manual_transaction(|| {
+            self.session.set_time(tick);
+            Ok(())
+        }) {
+            Ok(()) => true,
+            Err(error) => { self.ui.status = error; false }
+        }
+    }
+
     /// Settings-Cancel is a direct native preferences replacement (not an
     /// engine.execute command). Keep the original snapshot if owner busy.
     /// No provider access or production AI authorization is involved.
@@ -327,6 +341,17 @@ mod tests {
         assert_eq!(serde_json::to_value(&app.session.prefs).unwrap(),original);
         assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,1);
         assert!(!app.motion_owner_gate.status().busy);
+    }
+
+    #[test]
+    fn owner_playback_time_updates_real_session_when_idle() {
+        use crate::EffectcraftApp;
+        let mut app=EffectcraftApp::new(Session::new());
+        let tick=Tick::from_seconds_f64(1.25);
+        assert!(app.set_owner_playback_time(tick));
+        assert_eq!(app.session.time(),tick);
+        assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,1);
+        assert!(app.motion_owner_gate.ai_edit_not_integrated().is_err());
     }
 
     #[test]

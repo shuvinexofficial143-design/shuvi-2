@@ -16,7 +16,7 @@ impl EffectcraftApp {
         let plan = effectcraft_engine::preview::plan(&preset, &c, self.session.time());
         let fr = c.frame_rate;
         if plan.video {
-            self.session.set_time(fr.tick_of(plan.first));
+            if !self.set_owner_playback_time(fr.tick_of(plan.first)) { return; }
         }
         let restore_max = preset.full_screen.then_some(self.ui.maximized);
         let viewer = panels::viewers::active_panel(self);
@@ -113,12 +113,12 @@ impl EffectcraftApp {
         let Some(pl) = self.playback.plan else { return };
         let move_time = self.session.prefs.preview.get(self.playback.shortcut).move_time_to_preview_time;
         if !move_time {
-            self.session.set_time(pl.origin);
+            if !self.set_owner_playback_time(pl.origin) { return; }
         } else if let Some(f) = self.playback.audio_frame
             && let Some(c) = self.session.active_comp()
         {
             let t = c.frame_rate.tick_of(f);
-            self.session.set_time(t);
+            if !self.set_owner_playback_time(t) { return; }
         }
     }
 

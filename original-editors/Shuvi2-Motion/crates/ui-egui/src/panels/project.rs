@@ -965,7 +965,10 @@ fn marquee_select(app: &mut EffectcraftApp, ctx: &egui::Context, lp: &egui::Pain
     let t = app.tokens;
     let adding = ctx.input(|i| i.modifiers.shift || i.modifiers.command);
     if empty.clicked() && !adding {
-        app.session.state.project_selection.clear();
+        if let Err(error) = app.motion_owner_gate.manual_transaction(|| {
+            app.session.state.project_selection.clear();
+            Ok(())
+        }) { app.ui.status = error; }
     }
     let box_id = egui::Id::unique("proj-marquee");
     if let (Some(start), Some(end)) = (ctx.input(|i| i.pointer.press_origin()), empty.interact_pointer_pos())
