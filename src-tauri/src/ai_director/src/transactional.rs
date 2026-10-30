@@ -168,6 +168,13 @@ impl TransactionalLedger {
         if scope.actions.get(index)!=Some(action){return Err(GuardError::Invalid);}
         let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql_error)?;
+        // Cancellation and admission MUST be compared inside the same IMMEDIATE
+        // transaction. A read before the transaction is not sufficient.
+        let gates:(String,i64)=tx.query_row(
+            "SELECT approval,cancelled FROM ai_tasks WHERE task_id=?1",
+            params![id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(sql_error)?;
+        if gates.1!=0{return Err(GuardError::DuplicateOrUncertain);}
+        if gates.0!="approved"{return Err(GuardError::NotApproved);}
         let existing:i64=tx.query_row("SELECT COUNT(*) FROM ai_steps WHERE task_id=?1",
             params![id],|r|r.get(0)).map_err(sql_error)?;
         let verified:i64=tx.query_row(
