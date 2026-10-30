@@ -20,6 +20,9 @@ pub struct ExclusiveMotionSession {
     session: std::cell::RefCell<Session>,
     project_id: String,
     session_id: String,
+    // Per-owner document incarnation. Native revision alone can repeat after
+    // file.newProject or file.open; old SQLite task bindings must not survive.
+    document_epoch: std::cell::Cell<u64>,
 }
 impl ExclusiveMotionSession {
     pub fn new(session: Session, project_id: String, session_id: String) -> Result<Self,String> {
@@ -31,19 +34,38 @@ impl ExclusiveMotionSession {
             session_id.chars().any(char::is_control) {
             return Err("invalid owned project or native session identity".into());
         }
-        Ok(Self{session:std::cell::RefCell::new(session),project_id,session_id})
+        // Leave room for a monotonic -doc-epoch suffix on document swaps.
+        if session_id.len()>96{return Err("native session identity exceeds safe epoch budget".into());}
+        Ok(Self{session:std::cell::RefCell::new(session),project_id,
+            session_id,document_epoch:std::cell::Cell::new(0)})
+    }
+    fn effective_session_id(&self)->String{
+        let epoch=self.document_epoch.get();
+        if epoch==0{self.session_id.clone()}
+        else{format!("{}-doc-{epoch}",self.session_id)}
+    }
+    fn is_document_identity_change(command:&str)->bool{
+        matches!(command,"file.newProject"|"file.open"|"file.openDemoProject"|
+            "file.revert"|"file.saveAs")
     }
     /// Original manual UI edits are admitted through the SAME exclusive owner.
     /// The AI side holds a mutable borrow from SQLite admission to receipt.
     pub fn manual_command(&self,cmd:&str,params:Value)->Result<Value,String>{
         let mut s=self.session.try_borrow_mut().map_err(|_|"native owner busy: guarded operation active".to_string())?;
+        // Conservative invalidation occurs BEFORE native file operations.
+        // Even a failed or partially applied document swap must NOT preserve
+        // an older approval. Saturation disables further risky transitions.
+        if Self::is_document_identity_change(cmd){
+            self.document_epoch.set(self.document_epoch.get().checked_add(1)
+                .ok_or("document incarnation exhausted")?);
+        }
         s.execute_checked(cmd,params).map_err(|e|e.to_string())
     }
     /// An entire trusted operation (reserve, consent, execute, recovery) must
     /// use one session lease; this closure is the scope of exclusive admission.
     pub fn with_native_owner<T>(&self,f:impl FnOnce(&mut EffectcraftNativeOwner<'_>)->T)->Result<T,String>{
         let mut s=self.session.try_borrow_mut().map_err(|_|"native owner busy: guarded operation active".to_string())?;
-        let mut owner=EffectcraftNativeOwner::new(&mut s,self.project_id.clone(),self.session_id.clone())?;
+        let mut owner=EffectcraftNativeOwner::new(&mut s,self.project_id.clone(),self.effective_session_id())?;
         Ok(f(&mut owner))
     }
     /// Inspector uses the same live native Session and cannot run concurrently
@@ -897,6 +919,63 @@ mod tests{
             comp_id:comp,layer_id:layer,kind:"opacity".into(),
             x:None,y:None,value:Some(100.0)
         }).unwrap());
+    }
+
+    #[test]
+    fn same_revision_after_manual_new_project_invalidates_previous_sqlite_plan(){
+        let t=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let (p,reserve,approval,bind)=plan(0,vec![json!({
+            "type":"motion.createComposition","name":"Old Plan Must Not Run",
+            "width":300,"height":200,"fps":30.0,"durationSeconds":3.0
+        })]);
+        let mut db=t.open();
+        gate.with_native_owner(|owner|{
+            assert_eq!(owner.snapshot().unwrap().session_id,"native-session-test-1234");
+            GuardedHost{ledger:&mut db,owner}.reserve(&reserve).unwrap();
+        }).unwrap();
+        // A new empty project may have exactly the same revision as before.
+        gate.manual_command("file.newProject",json!({})).unwrap();
+        let mut ui=TestOwnerConsent{count:0,yes:true};
+        gate.with_native_owner(|owner|{
+            let current=owner.snapshot().unwrap();
+            assert_ne!(current.session_id,"native-session-test-1234");
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            assert_eq!(host.request_consent(&approval,&mut ui).unwrap_err(),GuardError::StaleProject);
+            assert_eq!(ui.count,0);
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["not_started"]));
+            assert!(host.execute(wire(&p,0,0)).is_err());
+        }).unwrap();
+        assert!(gate.native_inventory().unwrap()["compIds"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn even_failed_document_switch_invalidates_consent_and_blocks_borrowed_owner(){
+        let t=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let (_,reserve,approval,_)=plan(0,vec![json!({
+            "type":"motion.createComposition","name":"Not Authorized",
+            "width":300,"height":200,"fps":30.0,"durationSeconds":3.0
+        })]);
+        let mut db=t.open();
+        gate.with_native_owner(|owner|{
+            GuardedHost{ledger:&mut db,owner}.reserve(&reserve).unwrap();
+            assert!(gate.manual_command("file.newProject",json!({}))
+                .unwrap_err().contains("native owner busy"));
+        }).unwrap();
+        assert_eq!(gate.revision().unwrap(),0);
+        // File.open fails because path is absent, but the old plan must
+        // still be invalidated in case a native engine failed after mutation.
+        assert!(gate.manual_command("file.open",json!({"path":"not-a-project"})).is_err());
+        let mut ui=TestOwnerConsent{count:0,yes:true};
+        gate.with_native_owner(|owner|{
+            assert_ne!(owner.snapshot().unwrap().session_id,"native-session-test-1234");
+            assert_eq!(GuardedHost{ledger:&mut db,owner}
+                .request_consent(&approval,&mut ui).unwrap_err(),GuardError::StaleProject);
+        }).unwrap();
+        assert_eq!(ui.count,0);
     }
 
     #[test]
