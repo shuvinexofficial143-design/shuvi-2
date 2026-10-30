@@ -15,3 +15,6 @@ A12 separate `a07-native-bridge` tests previously covered the stronger actual Fi
 
 ## Next production migration
 Audit and migrate direct native panel-edit, drag/key, Open/Save/autosave paths into one authoritative owner. Ensure the production UI event loop and A07 admitted commands share one non-bypassable mutation boundary, preserving rendering and playback. Connect the canonical ledger and true trusted local consent only after that. Trigger complete real Windows CI, GUI/reopen, and native media E2E before claiming readiness.
+
+## A13 command admission panic/concurrency hardening
+The original production UI command lane now uses two atomics: claimed and sticky poisoned. The RAII lease marks the gate poisoned BEFORE releasing a claim if the executing native command panics. All covered menu/control commands reject a poisoned lane, instead of accidentally retrying a potentially partly applied edit. A new deterministic two-thread Barrier test proves the real menu file.newSequence command cannot mutate the original native Session while a worker holds that gate. This is still NOT a process-wide owner lock: direct engine edits outside the production command dispatcher are not in this phase-one lane.

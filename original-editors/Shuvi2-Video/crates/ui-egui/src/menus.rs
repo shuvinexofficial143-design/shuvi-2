@@ -185,8 +185,8 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
     // V-AI13: menu and external-control entry may not run while the
     // native manual command lane is claimed. More direct panel editing
     // paths remain unaudited; therefore A07 AI execution is disabled.
-    if app.shuvi_manual_admission.is_claimed() {
-        return Err("SHUVI_NATIVE_OWNER_BUSY: command entry blocked".into());
+    if let Some(reason) = app.shuvi_manual_admission.blocked_reason() {
+        return Err(format!("{reason}: command entry blocked"));
     }
     if id == "edit.selectAll" && (crate::panels::graphics::select_all_edited_text(app) || crate::panels::effect_controls::select_all_keyframes(app)) {
         return Ok(Value::Null);

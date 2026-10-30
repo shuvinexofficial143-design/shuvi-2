@@ -13,26 +13,49 @@ use crate::FilmcraftApp;
 #[derive(Clone, Default)]
 pub(crate) struct ManualCommandAdmission {
     claimed: Arc<AtomicBool>,
+    poisoned: Arc<AtomicBool>,
 }
 
 pub(crate) struct ManualCommandLease {
     owner: Arc<AtomicBool>,
+    poisoned: Arc<AtomicBool>,
 }
 
 impl ManualCommandAdmission {
-    pub(crate) fn is_claimed(&self) -> bool {
-        self.claimed.load(Ordering::Acquire)
+    pub(crate) fn blocked_reason(&self) -> Option<&'static str> {
+        if self.poisoned.load(Ordering::Acquire) {
+            Some("SHUVI_NATIVE_OWNER_POISONED")
+        } else if self.claimed.load(Ordering::Acquire) {
+            Some("SHUVI_NATIVE_OWNER_BUSY")
+        } else {
+            None
+        }
     }
 
     pub(crate) fn try_claim(&self) -> Result<ManualCommandLease, &'static str> {
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err("SHUVI_NATIVE_OWNER_POISONED");
+        }
         self.claimed
             .compare_exchange(false,true,Ordering::Acquire,Ordering::Relaxed)
             .map_err(|_| "SHUVI_NATIVE_OWNER_BUSY")?;
-        Ok(ManualCommandLease {owner:Arc::clone(&self.claimed)})
+        if self.poisoned.load(Ordering::Acquire) {
+            self.claimed.store(false,Ordering::Release);
+            return Err("SHUVI_NATIVE_OWNER_POISONED");
+        }
+        Ok(ManualCommandLease {
+            owner:Arc::clone(&self.claimed),
+            poisoned:Arc::clone(&self.poisoned),
+        })
     }
 }
 impl Drop for ManualCommandLease {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            // A native command may have partially mutated the editor before
+            // unwinding. Never resume commands without an explicit recovery.
+            self.poisoned.store(true,Ordering::Release);
+        }
         self.owner.store(false,Ordering::Release);
     }
 }
@@ -63,7 +86,7 @@ mod shuvi_manual_admission_tests {
         let before=app.session.revision;
         let lane=app.shuvi_manual_admission.clone();
         let lease=lane.try_claim().unwrap();
-        assert!(lane.is_claimed());
+        assert!(lane.blocked_reason().is_some());
         assert!(lane.try_claim().is_err());
         let command=crate::menus::invoke(
             &mut app,&ctx,"file.newSequence",
@@ -73,7 +96,7 @@ mod shuvi_manual_admission_tests {
         assert_eq!(app.session.revision,before);
         assert!(app.shuvi_manual_execute("command.list",json!({})).is_err());
         drop(lease);
-        assert!(!lane.is_claimed());
+        assert!(lane.blocked_reason().is_none());
         crate::menus::invoke(
             &mut app,&ctx,"file.newSequence",
             json!({"name":"actual manual edit","width":320,"height":240})
@@ -82,7 +105,7 @@ mod shuvi_manual_admission_tests {
     }
 
     #[test]
-    fn admission_lease_releases_on_panics_without_overwriting_original_project() {
+    fn admission_poison_is_sticky_after_a_panicking_native_command() {
         let app=FilmcraftApp::new(Session::default());
         let lane=app.shuvi_manual_admission.clone();
         let _=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
@@ -90,11 +113,39 @@ mod shuvi_manual_admission_tests {
             assert!(lane.is_claimed());
             panic!("expected test-only simulated manual callback panic")
         }));
-        assert!(!lane.is_claimed());
-        let _lease=lane.try_claim().unwrap();
-        assert!(lane.is_claimed());
-        // Unlike a poisoned Session Mutex this atomic guard only fences
-        // command admission; it does not claim to recover unknown edits.
+        assert_eq!(lane.blocked_reason(),Some("SHUVI_NATIVE_OWNER_POISONED"));
+        assert_eq!(lane.try_claim().err(),Some("SHUVI_NATIVE_OWNER_POISONED"));
+        // The narrow command gate is stuck closed. The original GUI's direct
+        // panel edit paths are still not fully guarded (A13 phase one only).
+    }
+
+
+    #[test]
+    fn concurrent_native_command_claim_blocks_actual_menu_edit_until_release() {
+        use std::sync::{Arc,Barrier};
+        let mut app=FilmcraftApp::new(Session::default());
+        let lane=app.shuvi_manual_admission.clone();
+        let barrier=Arc::new(Barrier::new(2));
+        let worker_barrier=Arc::clone(&barrier);
+        let worker=std::thread::spawn(move || {
+            let _claim=lane.try_claim().unwrap();
+            worker_barrier.wait();
+            worker_barrier.wait();
+        });
+        barrier.wait();
+        let ctx=egui::Context::default();
+        let before=app.session.revision;
+        let blocked=crate::menus::invoke(
+            &mut app,&ctx,"file.newSequence",json!({"name":"must stay absent","width":320,"height":240})
+        );
+        assert!(blocked.unwrap_err().contains("SHUVI_NATIVE_OWNER_BUSY"));
+        assert_eq!(app.session.revision,before);
+        barrier.wait();
+        worker.join().unwrap();
+        crate::menus::invoke(
+            &mut app,&ctx,"file.newSequence",json!({"name":"can run now","width":320,"height":240})
+        ).unwrap();
+        assert!(app.session.revision>before);
     }
 
     #[test]
