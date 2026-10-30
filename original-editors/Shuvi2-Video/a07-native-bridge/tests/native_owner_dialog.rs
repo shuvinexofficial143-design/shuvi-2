@@ -22,8 +22,8 @@ fn scope()->Scope {
 fn actual_native_windows_approval_text_contains_every_persisted_scope_identity_and_action(){
     let v=scope_review_text(&scope()).unwrap();
     for literal in ["SHUVI 2","trusted-nonced-task-01","trusted-user-video-01",
-        "native-editor-session-01","Split clip 17 at 2.000000 seconds",
-        "Split clip 18 at 3.500000 seconds","Plan SHA-256","Native project SHA-256",
+        "native-editor-session-01","Split clip 17 at 2 seconds",
+        "Split clip 18 at 3.5 seconds","Plan SHA-256","Native project SHA-256",
         "YES = approve","NO / Close / Escape / Error = deny"] {
         assert!(v.contains(literal),"missing consent UI field: {literal}");
     }
@@ -44,6 +44,16 @@ fn native_owner_dialog_never_shows_partial_or_unimplemented_action_scopes(){
     let mut other=scope();
     other.snapshot.editor=Editor::Motion;
     assert_eq!(scope_review_text(&other).unwrap_err(),"A07_WRONG_EDITOR");
+}
+#[test]
+fn native_owner_review_never_rounds_distinct_split_times_to_same_visible_seconds(){
+    let mut p=scope();
+    p.actions[0]=Action::VideoSplit{clip_id:17,seconds:2.0000001};
+    p.actions[1]=Action::VideoSplit{clip_id:18,seconds:2.0000002};
+    let message=scope_review_text(&p).unwrap();
+    assert!(message.contains("Split clip 17 at 2.0000001 seconds"));
+    assert!(message.contains("Split clip 18 at 2.0000002 seconds"));
+    assert!(!message.contains("Split clip 17 at 2.000000 seconds"));
 }
 #[test]
 fn invisible_control_chars_and_oversized_scope_fail_closed_before_os_modal(){

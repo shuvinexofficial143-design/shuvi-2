@@ -65,7 +65,9 @@ EXACT EDIT ACTIONS ({}):
             !seconds.is_finite() || !(0.0..=21_600.0).contains(seconds){
             return Err("A07_ACTION_INVALID");
         }
-        message.push_str(&format!("{}. Split clip {} at {:.6} seconds\n",
+        // Show the shortest round-trip f64 decimal, never 6-place rounded
+        // seconds that could hide a different native frame-boundary time.
+        message.push_str(&format!("{}. Split clip {} at {} seconds\n",
             index+1,clip_id,seconds));
     }
     message.push_str("
