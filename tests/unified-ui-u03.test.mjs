@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
-import {nativeFps,moveDestination,verifyNativeMove,visibleTimelineSeconds} from "../src/unified-workspace/timeline.mjs";
+import {nativeFps,moveDestination,verifyNativeMove,visibleTimelineSeconds,nativeTrackGuard} from "../src/unified-workspace/timeline.mjs";
 import {workspaceKeyCommand} from "../src/unified-workspace/keyboard.mjs";
 import {createWorkspaceController} from "../src/unified-workspace/core.mjs";
 const SHA=n=>String(n).repeat(64),T=254016000000;
 function setup(){
-  let videoSha=SHA("1"),revision=1,motionRev=0;
+  let videoSha=SHA("1"),revision=1,motionRev=0,locked=false;
   let clips=[{clip:7,item:21,start:T,duration:2*T,name:"Verified Media"}];
   let layers=[{id:8,name:"Native Text",kind:"text",position:{x:20,y:30},opacity:100}];
   let effects=[],masks=[],runEdit=null,changedOnEdit=false;
@@ -14,7 +14,7 @@ function setup(){
   const bridge={
     calls,
     async videoSnapshot(root,path){calls.push(["snapshot",path]);return {projectPath:path,projectSha256:videoSha,sessionRevision:revision,
-      project:{root:{children:[]}},sequence:{settings:{frame_rate:{num:30000,den:1001}},duration:12*T,video:[{items:clips}]}};},
+      project:{root:{children:[]}},sequence:{settings:{frame_rate:{num:30000,den:1001}},duration:12*T,video:[{items:clips,locked}]}};},
     async videoTimeline(req){calls.push(["edit",req]);const move=req.actions.find(a=>a.type==="move");
       if(move&&!changedOnEdit){clips=[{...clips[0],start:Math.round(move.seconds*T)}];}
       if(runEdit)await runEdit();
@@ -38,7 +38,7 @@ function setup(){
       throw Error("Unexpected native request "+req.action);
     }
   };
-  return {ctrl:createWorkspaceController(bridge),bridge,setChangedOnEdit:v=>changedOnEdit=v,
+  return {ctrl:createWorkspaceController(bridge),bridge,setChangedOnEdit:v=>changedOnEdit=v,setLocked:v=>locked=v,
     interceptEdit:f=>runEdit=f,externalSha:()=>{videoSha=SHA("9")}};
 }
 test("native FPS is exact rational and no invented fallback permits drag",()=>{
@@ -112,4 +112,22 @@ test("U03 UI contains actual wired native handlers for advanced actions",()=>{
   }
   assert.match(src,/pointerdown/);assert.match(src,/pointerup/);
   assert.match(src,/workspaceKeyCommand/);
+});
+
+test("native FilmCraft locks reject drag, split and destination writes before IPC",async()=>{
+  const example={video:[{locked:true,items:[{clip:7}]}],audio:[{locked:false,items:[]}]};
+  assert.match(nativeTrackGuard(example,{type:"move",clipId:7,track:"V1"}),/source V1 is locked/);
+  assert.match(nativeTrackGuard(example,{type:"split",clipId:7}),/source V1 is locked/);
+  assert.equal(nativeTrackGuard(example,{type:"undo"}),null);
+  const {ctrl,bridge,setLocked}=setup();setLocked(true);
+  await ctrl.refreshVideo("C:\\work","C:\\work\\a.fcproj");
+  await assert.rejects(ctrl.moveVideoClip(7,"V1",3),{code:"NATIVE_TRACK_GUARD"});
+  await assert.rejects(ctrl.applyVideo([{type:"delete",clipId:7,ripple:false}]),{code:"NATIVE_TRACK_GUARD"});
+  assert.equal(bridge.calls.filter(x=>x[0]==="edit").length,0);
+});
+test("drag click reset and blank time must fail closed in UI code",()=>{
+  const src=readFileSync(new URL("../src/desktop-ui/workspace.ts",import.meta.url),"utf8");
+  assert.match(src,/setTimeout\(\(\)=>\{skipClipClick=false;\},0\)/);
+  assert.match(src,/if\(!s\("moveTime"\)/);
+  assert.match(src,/nativeLane\?\.locked===true/);
 });

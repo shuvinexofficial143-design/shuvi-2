@@ -28,3 +28,36 @@ export function verifyNativeMove(clips,clipId,track,seconds,fps){
   return !!clip&&clip.track===track&&Number.isFinite(seconds)&&
     Number.isFinite(fps)&&fps>0&&Math.abs(clip.start-seconds)<=0.51/fps;
 }
+
+/** Return a human-readable failure only for an explicitly native-locked lane.
+ * This is a UI preflight, never a substitute for FilmCraft server validation.
+ */
+export function nativeTrackGuard(sequence,action){
+  if(!action||typeof action!=="object")return "Missing native timeline action";
+  if(["createSequence","undo","redo"].includes(action.type))return null;
+  const tracks=[];
+  for(const kind of ["video","audio"]){
+    const list=sequence?.[kind];
+    if(!Array.isArray(list))continue;
+    list.forEach((lane,index)=>{
+      if(!lane||typeof lane!=="object")return;
+      tracks.push({name:(kind==="video"?"V":"A")+(index+1),locked:lane.locked===true,
+        items:Array.isArray(lane.items)?lane.items:[]});
+    });
+  }
+  if(action.type==="place"){
+    const lane=tracks.find(x=>x.name===action.track);
+    return lane?.locked?"Native destination "+lane.name+" is locked":null;
+  }
+  if(!["split","trim","move","delete"].includes(action.type))
+    return "Unsupported native clip action";
+  if(!Number.isSafeInteger(action.clipId)||action.clipId<=0)return "Invalid native clip id";
+  const source=tracks.find(x=>x.items.some(i=>i?.clip===action.clipId));
+  if(!source)return "Native clip is absent from latest FilmCraft sequence";
+  if(source.locked)return "Native source "+source.name+" is locked";
+  if(action.type==="move"){
+    const destination=tracks.find(x=>x.name===action.track);
+    if(destination?.locked)return "Native destination "+destination.name+" is locked";
+  }
+  return null;
+}

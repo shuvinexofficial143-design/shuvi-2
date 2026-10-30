@@ -2,7 +2,7 @@
  * Shuvi 2 unified controller: receipts and subsequent native readback are the
  * only source of completed edits. No fabricated preview, export or AI status.
  */
-import {nativeFps,verifyNativeMove} from "./timeline.mjs";
+import {nativeFps,verifyNativeMove,nativeTrackGuard} from "./timeline.mjs";
 export class WorkspaceError extends Error {
   constructor(code, message) { super(message); this.name = "WorkspaceError"; this.code = code; }
 }
@@ -115,6 +115,10 @@ export function createWorkspaceController(native) {
     const video=requireVideo();
     if(!Array.isArray(actions)||!actions.length
       || actions.some(a=>!a||!VIDEO_ACTIONS.has(a.type))) fail("UNSUPPORTED_ACTION","Unsupported FilmCraft edit");
+    for(const action of actions) {
+      const blocked=nativeTrackGuard(video.snapshot.sequence,action);
+      if(blocked)fail("NATIVE_TRACK_GUARD",blocked);
+    }
     return run("Applying FilmCraft timeline edit", async()=>{
       const receipt=await native.videoTimeline({
         selectedRoot:video.root,projectPath:video.projectPath,

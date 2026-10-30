@@ -32,3 +32,9 @@ The UI component is still isolated until 2.0.5 reconciles latest Video/Motion/AI
 
 ## Next U04
 Review native owner-guard design with Chat 2.0.3 and 2.0.5, split panel responsiveness, read-only inspector keyframe list, persistent project session state and real installed Windows acceptance. No non-native simulated editor.
+
+## U03 safety follow-up
+- Source/target track `locked===true` from native `sequence.inspect` now blocks FilmCraft place/move/split/trim/delete in the shared controller before IPC, in addition to the native engine's own guard.
+- Locked FilmCraft tracks are labeled and pointer drag disabled. The explicit move-time input cannot silently convert empty string to zero.
+- Pointer capture synthetic click suppression is reset to avoid dropping the next genuine user click.
+- Extra regression tests cover real native track-lock readback and the UI edge cases.

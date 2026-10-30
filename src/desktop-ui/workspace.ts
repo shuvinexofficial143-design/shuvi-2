@@ -198,7 +198,12 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const tracks=[...new Set(clips.map(c=>c.track))].sort((x,y)=>x.localeCompare(y,undefined,{numeric:true}));
       for(const track of tracks){
         const row=document.createElement("div");row.className="su-timeline-row";
-        const label=document.createElement("span");label.className="su-track-name";label.textContent=track;
+        const kind=track.startsWith("V")?"video":"audio";
+        const laneNumber=Number(track.slice(1))-1;
+        const nativeLane=state.video?.snapshot.sequence?.[kind]?.[laneNumber];
+        const locked=nativeLane?.locked===true;
+        const label=document.createElement("span");label.className="su-track-name";
+        label.textContent=track+(locked?" 🔒":"");
         const lane=document.createElement("div");lane.className="su-lane";lane.dataset.track=track;
         for(const clip of clips.filter(c=>c.track===track)){
           const button=document.createElement("button");button.type="button";
@@ -209,7 +214,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
           button.textContent=clip.name+" · "+clip.start.toFixed(2)+"s";
           button.draggable=false;
           button.classList.toggle("selected",clip.clipId===selectedClip);
-          if(fps===null)button.dataset.dragDisabled="true";
+          if(fps===null||locked)button.dataset.dragDisabled="true";
           lane.append(button);
         }
         row.append(label,lane);timeline.append(row);
@@ -308,7 +313,10 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         const a:VideoAction={type:"place",itemId,track,seconds:n("videoTime"),video:track.startsWith("V"),audio:track.startsWith("A")};
         return ctrl.applyVideo([a]);
       }
-      case "video-move":return ctrl.moveVideoClip(clip(),s("moveTrack").toUpperCase(),n("moveTime"));
+      case "video-move":{
+        if(!s("moveTime")||!Number.isFinite(n("moveTime")))throw Error("Enter a finite native move time");
+        return ctrl.moveVideoClip(clip(),s("moveTrack").toUpperCase(),n("moveTime"));
+      }
       case "video-split":return ctrl.applyVideo([{type:"split",clipId:clip(),seconds:n("videoTime")}]);
       case "video-trim":return ctrl.applyVideo([{type:"trim",clipId:clip(),edge:"out",deltaFrames:n("trimFrames"),ripple:false}]);
       case "video-delete":return ctrl.applyVideo([{type:"delete",clipId:clip(),ripple:false}]);
@@ -461,6 +469,9 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       root.releasePointerCapture(event.pointerId);
     if(Math.abs(event.clientX-gesture.startX)<5)return;
     skipClipClick=true;
+    // Native pointer capture can retarget the browser's synthetic click to the root.
+    // Never accidentally suppress the user's following deliberate clip selection.
+    setTimeout(()=>{skipClipClick=false;},0);
     const state=ctrl.getState(),v=state.video;
     if(state.studio!=="video"||!v||state.busy||state.needsReload&&state.recoveryStudio==="video")return;
     const actual=v.clips.find((c:{clipId:number})=>c.clipId===gesture.clipId);
