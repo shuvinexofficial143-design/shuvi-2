@@ -67,15 +67,17 @@ impl MotionHost{
 fn worker(rx:Receiver<Work>){
     let mut engine=MotionBridge::new();
     while let Ok(work)=rx.recv(){
-        // If a UI client timed out before its turn, never execute a stale queued edit.
-        // Once an engine operation begins, EffectCraft still owns its completion.
-        let response=if Instant::now()>=work.deadline{
-            Err("Motion command expired before native execution; no edit applied".into())
-        }else{
-            apply(&mut engine,work.request)
-        };
+        let response=admitted_action(&mut engine,work.request,work.deadline);
         let _=work.respond.send(response);
     }
+}
+fn admitted_action(engine:&mut MotionBridge,request:MotionRequest,deadline:Instant)->Result<Value,String>{
+    // A request that timed out while queued must NOT mutate the live project later.
+    // EffectCraft already running at deadline cannot yet be forcibly preempted.
+    if Instant::now()>=deadline {
+        return Err("Motion command expired before native execution; no edit applied".into());
+    }
+    apply(engine,request)
 }
 fn prop(name:&str)->Result<Property,String>{
     match name{
@@ -364,6 +366,18 @@ mod tests{
             parameter:"brightness".into()
         }).unwrap();
         assert_eq!(p["value"],0.0);
+    }
+    #[test]
+    fn expired_queued_command_never_executes_a_hidden_native_edit(){
+        let mut bridge=MotionBridge::new();
+        let prior=bridge.revision();
+        let expired=Instant::now()-Duration::from_millis(1);
+        let result=admitted_action(&mut bridge,MotionRequest::CreateComposition{
+            name:"Must Not Be Created".into(),width:640,height:360,fps:30.0,duration_seconds:3.0
+        },expired);
+        assert!(result.is_err());
+        assert_eq!(bridge.revision(),prior);
+        assert!(result.unwrap_err().contains("expired before native execution"));
     }
     #[test]
     fn bounded_worker_refuses_unlimited_backlog_without_admitting_hidden_edits(){
