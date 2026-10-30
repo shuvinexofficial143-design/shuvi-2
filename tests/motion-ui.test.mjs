@@ -40,11 +40,17 @@ test("all manual editing actions go through native Tauri command",()=>{
     "addEffect","listEffects","setEffectParameter","toggleEffect","removeEffect",
     "addPolygonMask","listMasks","setMaskVertex","removeMask","exportPng",
     "inspectEffectParameter","getMaskSettings","setMaskProperty",
-    "inspectHistory","undo","redo","inspectComposition"
+    "inspectHistory","inspectComposition"
   ];
   for(const action of actions){
     assert.ok(ts.includes('action:"'+action+'"'),"UI request not wired for "+action);
   }
+  // Native Undo/Redo are a typed union using a dynamic but guarded action field.
+  assert.ok(ts.includes('historyEdit("undo")'));
+  assert.ok(ts.includes('historyEdit("redo")'));
+  assert.ok(ts.includes('request<NativeHistoryReceipt>({action})'));
+  assert.ok(ipc.includes("MotionRequest::Undo"));
+  assert.ok(ipc.includes("MotionRequest::Redo"));
   assert.match(ts, /invoke<T>\("motion_command"/);
   assert.match(ipc, /\.render_preview\(/);
   assert.match(ipc, /\.save_project\(/);
