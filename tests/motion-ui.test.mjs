@@ -287,3 +287,11 @@ test("M16 release requires real 3-frame sequence and exact SHA256 equality befor
   assert.ok(desktopE2e.includes("result.sequenceFirstSha256="));
   assert.ok(desktopE2e.includes("assert.equal(result.sequenceFirstSha256,result.exportSha256)"));
 });
+
+test("M17 Windows 8.3 DOS path aliases cannot falsely fail native sequence publish verification",()=>{
+  assert.ok(nativeSequenceTests.includes("fs::canonicalize(&receipt.directory).unwrap()"));
+  assert.ok(nativeSequenceTests.includes('fs::canonicalize(dir.join("real_frames")).unwrap()'));
+  assert.ok(!nativeSequenceTests.includes("assert_eq!(receipt.directory,dir.join("));
+  assert.ok(desktopE2e.includes("SESSION_STARTUP_MS=180000"));
+  assert.ok(desktopE2e.includes("sessionStartupElapsedMs"));
+});
