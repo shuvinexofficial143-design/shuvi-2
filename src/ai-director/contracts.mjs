@@ -44,7 +44,7 @@ function bool(value, label) { if (typeof value !== "boolean") throw new Error(la
 function id(value, label) { number(value, label, 1, Number.MAX_SAFE_INTEGER, true); }
 function coord(value, label) { number(value, label, -100000, 100000); }
 function duration(value, label) { number(value, label, 0, 21600); }
-function validateAction(action, engine) {
+export function validateAction(action, engine) {
   record(action, "action");
   const type = action.type;
   if (!Object.hasOwn(ACTIONS, type)) throw new Error("unapproved editing action");
