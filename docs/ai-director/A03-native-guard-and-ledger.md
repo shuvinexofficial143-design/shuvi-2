@@ -9,7 +9,7 @@ Video Studio, Motion Studio or the old shuvi-agent repository.
 - src-tauri/src/ai_director/src/guard.rs implements a host-only Rust native owner
   guard, native project/version/session snapshots, strict enumerated editing actions,
   plan reservations, single-attempt owner consent, per-step durable intent,
-  duplicate/replay rejection, ordered native execution, independent owner readback,
+  duplicate/replay rejection, ordered native execution, independent owner readback and exact affected-object verification,
   verified step receipts and restart inspection.
 - src-tauri/src/ai_director/tests/native_guard.rs covers process-reopen/replay
   behavior and fail-closed cases with explicitly labelled TEST DOUBLE editors.
