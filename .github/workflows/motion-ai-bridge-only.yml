@@ -1,0 +1,68 @@
+name: Shuvi 2 Motion SQLite Native Bridge (M-AI10)
+on:
+  push:
+    branches:
+      - feature/shuvi2-original-motion-ai
+    paths:
+      - original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/**
+      - .github/workflows/motion-ai-bridge-only.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: motion-ai-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guarded-native-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout owned Motion branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin native Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+      - name: Cache isolated native dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: original-editors/Shuvi2-Motion/integrations/shuvi-director-motion
+          key: motion-guarded-bridge-ubuntu-v1
+      - name: Checkout authoritative 2.0.3 AI Director SHA temporarily
+        uses: actions/checkout@v4
+        with:
+          repository: shuvinexofficial143-design/shuvi-2
+          ref: 64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4
+          path: director-source
+          persist-credentials: false
+          sparse-checkout: src-tauri/src/ai_director
+      - name: Stage trusted SQLite GuardedHost without branch merge
+        run: |
+          set -euo pipefail
+          source=director-source/src-tauri/src/ai_director
+          target=original-editors/Shuvi2-Motion/integrations/ai-provider
+          test -f "$source/Cargo.toml"
+          test ! -e "$target"
+          cp -a "$source" "$target"
+          test -f "$target/src/host.rs"
+      - name: Verify original patched EffectCraft PDF parser
+        run: |
+          set -euo pipefail
+          manifest=original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml
+          cargo tree --manifest-path "$manifest" --package craft-pdf --edges normal > /tmp/native-dependencies.txt
+          grep -E 'hayro-syntax v0\.7\.2.*github.com/storytold/craft-libs' /tmp/native-dependencies.txt
+      - name: Run real EffectCraft SQLite approval native owner tests
+        run: |
+          set -euo pipefail
+          export RUST_BACKTRACE=1
+          cargo test --manifest-path original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml --all-targets -- --nocapture
+      - name: Confirm production Motion AI permit is not unlocked
+        run: |
+          set -euo pipefail
+          grep -F 'pub(crate) struct OwnerPermit' original-editors/Shuvi2-Motion/crates/ui-egui/src/shuvi_motion_owner.rs
+          grep -F 'not yet wired to the production UI' original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/src/lib.rs
