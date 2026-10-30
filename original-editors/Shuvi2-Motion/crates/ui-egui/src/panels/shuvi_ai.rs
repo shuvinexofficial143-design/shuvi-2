@@ -387,6 +387,23 @@ mod tests {
     }
 
     #[test]
+    fn silent_native_cow_mutation_cannot_keep_preview_by_reusing_revision() {
+        let mut session = Session::new();
+        let before_revision = session.revision;
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        // Direct project replacement without the command revision can occur
+        // through future host integrations. The weak Arc identity must detect
+        // it even when the old revision and visible path are unchanged.
+        let native = Arc::make_mut(&mut session.project);
+        native.next_id += 1;
+        assert_eq!(session.revision, before_revision);
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none());
+        assert!(state.preview_binding.is_none());
+    }
+
+    #[test]
     fn preview_binding_does_not_retain_or_copy_large_native_project() {
         let session = Session::new();
         let before = Arc::strong_count(&session.project);
