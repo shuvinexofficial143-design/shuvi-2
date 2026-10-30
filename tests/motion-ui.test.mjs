@@ -131,5 +131,6 @@ test("M10 scrubbing and native worker backpressure have bounded queues",()=>{
   assert.ok(ts.includes("pendingPreview=false;"));
   assert.ok(ipc.includes("mpsc::sync_channel(MAX_PENDING)"));
   assert.ok(ipc.includes("Err(TrySendError::Full(_))"));
-  assert.ok(ipc.includes("Instant::now()>=work.deadline"));
+  assert.ok(ipc.includes("Instant::now()>=deadline"));
+  assert.ok(ipc.includes("fn admitted_action("));
 });
