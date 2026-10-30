@@ -89,9 +89,9 @@ impl MotionBridge {
         let fx=l.effects().ok_or("effects missing")?.groups()
             .find(|g|g.uid==uid&&g.match_id==kind.id()).ok_or("effect UID/kind mismatch")?;
         let p=fx.get(parameter).ok_or("native effect parameter absent")?;
-        let NativeValue::Scalar(value)=p.value else{
+        let NativeValue::Scalar(value)=&p.value else{
             return Err("native effect parameter has unexpected type".into())
         };
-        Ok(EffectParameterState{uid,parameter:parameter.into(),value,minimum:min,maximum:max})
+        Ok(EffectParameterState{uid,parameter:parameter.into(),value:*value,minimum:min,maximum:max})
     }
 }
