@@ -119,7 +119,40 @@ impl FilmcraftApp {
     )->Result<R,String> {
         let _owner=self.shuvi_manual_admission.try_claim_ai()
             .map_err(str::to_owned)?;
-        action(&mut self.session)
+        // A provider failure, SQLite error, or refused approval must not
+        // silently leave a half-edited original FilmCraft project editable.
+        // Compare the ORIGINAL mutable native project, not a caller-provided
+        // revision/version; SHA catches edits that forget to bump revision.
+        let before_sha=filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(
+            &self.session);
+        let before_revision=self.session.revision;
+        let before_epoch=self.session.document_epoch;
+        let before_sequence=self.session.state.active_sequence;
+        let before_path=self.session.path.clone();
+        let result=action(&mut self.session);
+        let changed=before_sha != filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(
+                &self.session)
+            || before_revision != self.session.revision
+            || before_epoch != self.session.document_epoch
+            || before_sequence != self.session.state.active_sequence
+            || before_path != self.session.path;
+        if changed {
+            // Even a successful, verified native edit invalidates all
+            // original GUI read-only previews from the previous revision.
+            self.shuvi_ai.readback=None;
+            self.shuvi_ai.preview_plan=None;
+            self.shuvi_ai.preview_feedback=None;
+        }
+        if changed && result.is_err() {
+            // The owner callback must return success ONLY after the pinned
+            // A07 ledger has durably verified its object receipt. A native
+            // project changed before an error may have an uncertain outcome.
+            // Never re-open manual editing, save or replay automatically.
+            self.shuvi_manual_admission.poison();
+            self.ui.status="SHUVI_NATIVE_AI_OUTCOME_UNCERTAIN".into();
+            return Err("SHUVI_NATIVE_AI_OUTCOME_UNCERTAIN".into());
+        }
+        result
     }
 
     /// Trusted native command-route seam used by original menu, its native
@@ -295,6 +328,65 @@ mod shuvi_manual_admission_tests {
             Some("SHUVI_NATIVE_OWNER_POISONED"));
         assert!(app.shuvi_manual_execute("file.newSequence",
             json!({"name":"must not replay"})).unwrap_err().contains("POISONED"));
+    }
+
+    #[test]
+    fn trusted_ai_error_after_real_native_mutation_poison_blocks_manual_edit_and_clears_preview() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let mut preview=filmcraft_engine::shuvi_ai_readonly::snapshot(&mut app.session).unwrap();
+        preview.dirty=false;
+        app.shuvi_ai.readback=Some(preview);
+        app.shuvi_ai.preview_feedback=Some("stale prior preview".into());
+        let before=app.session.revision;
+        let failed=app.with_shuvi_trusted_ai_transaction(|native| -> Result<(),String> {
+            native.execute("file.newSequence",
+                json!({"name":"simulated partially completed native A07",
+                    "width":320,"height":240}))
+                .map_err(|e|e.to_string())?;
+            Err("injected SQLite receipt failure AFTER native mutation".into())
+        });
+        assert_eq!(failed.unwrap_err(),"SHUVI_NATIVE_AI_OUTCOME_UNCERTAIN");
+        assert!(app.session.revision>before);
+        assert_eq!(app.shuvi_manual_admission.blocked_reason(),
+            Some("SHUVI_NATIVE_OWNER_POISONED"));
+        assert_eq!(app.ui.status,"SHUVI_NATIVE_AI_OUTCOME_UNCERTAIN");
+        assert!(app.shuvi_ai.readback.is_none());
+        assert!(app.shuvi_ai.preview_feedback.is_none());
+        assert!(app.shuvi_manual_execute("file.newSequence",json!({"name":"blocked"}))
+            .unwrap_err().contains("POISONED"));
+    }
+
+    #[test]
+    fn trusted_ai_error_before_native_mutation_returns_original_error_and_keeps_manual_editor_usable() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let before=app.session.revision;
+        let result=app.with_shuvi_trusted_ai_transaction(|_|->Result<(),String>{
+            Err("A07_CONSENT_DENIED_BEFORE_EDIT".into())
+        });
+        assert_eq!(result.unwrap_err(),"A07_CONSENT_DENIED_BEFORE_EDIT");
+        assert_eq!(app.shuvi_manual_admission.blocked_reason(),None);
+        assert_eq!(app.session.revision,before);
+        assert!(app.shuvi_manual_execute("file.newSequence",
+            json!({"name":"normal manual edit after owner denial",
+                "width":320,"height":240})).is_ok());
+    }
+
+    #[test]
+    fn trusted_ai_success_after_native_edit_invalidates_old_sidebar_readback() {
+        let mut app=FilmcraftApp::new(Session::default());
+        app.shuvi_ai.refresh(&mut app.session);
+        assert!(app.shuvi_ai.readback.is_some());
+        let before=app.session.revision;
+        app.with_shuvi_trusted_ai_transaction(|native| {
+            native.execute("file.newSequence",
+                json!({"name":"trusted native edit test",
+                    "width":320,"height":240}))
+                .map_err(|e|e.to_string())?;
+            Ok(())
+        }).unwrap();
+        assert!(app.session.revision>before);
+        assert!(app.shuvi_ai.readback.is_none());
+        assert_eq!(app.shuvi_manual_admission.blocked_reason(),None);
     }
 
     #[test]
