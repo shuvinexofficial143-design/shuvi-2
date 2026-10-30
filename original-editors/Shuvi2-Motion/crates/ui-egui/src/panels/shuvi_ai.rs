@@ -4,7 +4,7 @@
 
 use egui::{Rect, UiBuilder};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use effectcraft_engine::{Session, project::{Project, ItemId}};
 
 use crate::EffectcraftApp;
@@ -16,12 +16,13 @@ const MAX_CHAT_TURNS: usize = 40;
 /// Snapshot of the ACTUAL original native editor document at local preview
 /// creation. A revision alone is insufficient: file.newProject, file.open and
 /// composition switches can produce the same revision on different projects.
-/// Keeping the Arc forces native copy-on-write to invalidate stale previews.
+/// A Weak native project identity invalidates on document replacement without
+/// retaining potentially large old project snapshots or forcing extra COW clones.
 /// This is NOT a model-provided identity or an authorization token.
 #[derive(Clone, Debug)]
 pub struct NativePreviewBinding {
     revision: u64,
-    project: Arc<Project>,
+    project: Weak<Project>,
     plan: PendingCommand,
     path: Option<String>,
     active_comp: Option<ItemId>,
@@ -31,7 +32,7 @@ impl NativePreviewBinding {
     pub fn capture(session: &Session, plan: &PendingCommand) -> Self {
         Self {
             revision: session.revision,
-            project: Arc::clone(&session.project),
+            project: Arc::downgrade(&session.project),
             plan: plan.clone(),
             path: session.path.clone(),
             active_comp: session.active_comp_id(),
@@ -42,7 +43,7 @@ impl NativePreviewBinding {
         self.plan == *pending
             && self.plan.requires_owner_approval
             && self.revision == session.revision
-            && Arc::ptr_eq(&self.project, &session.project)
+            && self.project.upgrade().is_some_and(|p|Arc::ptr_eq(&p,&session.project))
             && self.path == session.path
             && self.active_comp == session.active_comp_id()
     }
@@ -383,6 +384,20 @@ mod tests {
         state.pending.as_mut().unwrap().requires_owner_approval = false;
         state.invalidate_stale_preview(&session);
         assert!(state.pending.is_none(), "an owner approval flag may never be removed from a preview");
+    }
+
+    #[test]
+    fn preview_binding_does_not_retain_or_copy_large_native_project() {
+        let session = Session::new();
+        let before = Arc::strong_count(&session.project);
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        assert_eq!(Arc::strong_count(&session.project), before,
+            "native preview identity must never retain the full project snapshot");
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_some());
+        state.discard_preview();
+        assert_eq!(Arc::strong_count(&session.project), before);
     }
 
     #[test]
