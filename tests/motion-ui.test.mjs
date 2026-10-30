@@ -120,7 +120,11 @@ test("M10 WebView2 E2E actually launches Shuvi Tauri exe and performs mouse clic
   assert.ok(desktopE2e.includes("motion-windows-webview2.png"));
   assert.ok(desktopE2e.includes("webview_e2e.ecproj"));
   assert.ok(windowsRunner.includes("cargo install tauri-driver --locked"));
-  assert.ok(windowsRunner.includes("msedgedriver-tool"));
+  // The native WebView2 driver must match the installed Runtime, not full Edge.
+  assert.ok(windowsRunner.includes("msedgedriver.microsoft.com/$webviewVersion"));
+  assert.ok(windowsRunner.includes("Get-AuthenticodeSignature"));
+  assert.ok(windowsRunner.includes("$driverBuild -ne $runtimeBuild"));
+  assert.ok(windowsRunner.includes("edgeDriverBuildMatched"));
   assert.ok(motionCi.includes("motion-desktop-e2e-windows:"));
   assert.ok(motionCi.includes("cargo build --manifest-path src-tauri/Cargo.toml --bin shuvi2"));
   assert.ok(motionCi.includes("needs: motion-engine-windows"));
