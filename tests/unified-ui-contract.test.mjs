@@ -62,7 +62,7 @@ test("stale AI plans and unsupported operations are refused",async()=>{
   assert.throws(()=>control.stageAiVideoTask([{type:"undo"}],sha(9)),{code:"REVISION_CONFLICT"});
   await assert.rejects(control.applyVideo([{type:"shell",command:"delete files"}]),{code:"UNSUPPORTED_ACTION"});
   assert.equal(bridge.calls.filter(x=>x[0]==="timeline").length,0);
-  const pending=control.stageAiVideoTask([{type:"undo"}],sha(1));
+  const pending=control.stageAiVideoTask([{type:"split",clipId:3,seconds:0.5}],sha(1));
   control.dismissTask();
   await assert.rejects(control.approveTask(pending.id),{code:"APPROVAL_REQUIRED"});
 });

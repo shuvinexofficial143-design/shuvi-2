@@ -4,6 +4,9 @@ import {nativeWorkspaceBridge} from "../unified-workspace/native";
 import {projectMediaItems,selectedNativeMedia} from "../unified-workspace/media.mjs";
 import {nativeFps,moveDestination,visibleTimelineSeconds} from "../unified-workspace/timeline.mjs";
 import {workspaceKeyCommand} from "../unified-workspace/keyboard.mjs";
+import {createProjectSessionStore} from "../unified-workspace/session.mjs";
+import {describeApprovalState} from "../unified-workspace/approval.mjs";
+import {keyframeReadback} from "../unified-workspace/keyframes.mjs";
 import "./workspace.css";
 
 export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=nativeWorkspaceBridge){
@@ -35,7 +38,14 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<button data-act="motion-create">New composition</button>',
     '<label>Workspace folder<input data-field="motionRoot"></label>',
     '<label>Project .ecproj<input data-field="motionFile" value="shuvi.ecproj"></label>',
-    '<button data-act="motion-open">Open project</button><button data-act="motion-save">Save project</button></section></aside>',
+    '<button data-act="motion-open">Open project</button><button data-act="motion-save">Save project</button></section>',
+    '<section class="su-session"><h3>Recent native project (this device only)</h3>',
+    '<div data-ui="bookmark">No saved project reference</div>',
+    '<div class="su-buttons"><button data-act="bookmark-remember">Remember verified project</button>',
+    '<button data-act="bookmark-restore">Reopen saved project</button>',
+    '<button data-act="bookmark-forget">Forget saved paths</button></div>',
+    '<small>Only opt-in paths are saved, never edited content or AI approvals. Reopen always checks the real native file.</small>',
+    '</section></aside>',
     '<main class="su-editor"><div class="su-editorhead"><h2 data-ui="title">Video Studio</h2>',
     '<span data-ui="revision">No native project</span></div>',
     '<div class="su-monitor"><img data-ui="frame" alt="Native project preview" hidden>',
@@ -65,6 +75,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<h3>EffectCraft layers</h3><div data-ui="layers" class="su-track">No native composition</div>',
     '<section class="su-inspector" aria-label="Native Motion Properties"><h3>Native properties & keyframes</h3>',
     '<div data-ui="inspector-summary">Select a native layer to inspect</div>',
+    '<div data-ui="keyframe-readback" class="su-native-meta">Native keyframe count unavailable</div>',
     '<button data-act="motion-inspect">Refresh selected layer</button>',
     '<label>Transform<select data-field="transformKind"><option value="position">Position</option><option value="scale">Scale</option><option value="rotation">Rotation</option><option value="opacity">Opacity</option></select></label>',
     '<div class="su-pair"><label>X<input data-field="transformX" type="number" step="any" value="0"></label>',
@@ -103,17 +114,26 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<div class="su-progress" role="status"><span data-ui="progress">Idle</span>',
     '<button data-act="stop" disabled>Stop (request)</button></div>',
     '<div class="su-error" data-ui="error" role="alert" hidden></div></main>',
-    '<aside class="su-chat"><h2>Shuvi AI Chat</h2><small>AI Director not connected — drafts only</small>',
+    '<aside class="su-chat"><h2>Shuvi AI Chat</h2>',
+    '<label>Chat panel width<input data-field="chatWidth" type="range" min="240" max="420" step="10" value="310" aria-label="Adjust chat panel width"></label>',
+    '<small>AI Director not connected — drafts only</small>',
     '<div data-ui="chat" class="su-thread"></div><form data-ui="chatForm">',
     '<label>Message<textarea data-field="message" rows="3"></textarea></label>',
     '<button type="submit">Save draft</button></form>',
-    '<h3>Permission & approval</h3><p data-ui="approval">No AI action pending</p>',
+    '<h3>Permission & approval</h3><p data-ui="approval">AI Director not connected</p>',
+    '<small data-ui="approval-diagnostic">No native AI execution gateway is registered</small>',
     '<div class="su-buttons"><button data-act="approve" hidden>Approve once</button>',
     '<button data-act="reject" hidden>Reject</button></div>',
     '<small>Manual and approved AI edits use the same native project. No silent execution.</small>',
     '</aside></div></div>'
   ].join("");
   const ctrl=createWorkspaceController(bridge);
+  const projectBookmarks=(()=>{
+    try {return createProjectSessionStore(window.localStorage);}
+    catch{return null;}
+  })();
+  let verifiedMotionDisk:{workspace:string;basename:string}|null=null;
+  let bookmarkMessage="";
   const node=<T extends HTMLElement>(selector:string):T=>{
     const result=root.querySelector<T>(selector);
     if(!result)throw Error("Missing unified UI: "+selector);
@@ -167,6 +187,12 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     node('[data-ui="revision"]').textContent=state.studio==="video"?(state.video?"SHA "+state.video.snapshot.projectSha256.slice(0,12):"No native project"):
       state.motion.composition?"Composition "+state.motion.composition.id+" · revision "+state.motion.revision:"No native composition";
     node('[data-ui="progress"]').textContent=state.progress;
+    const remembered=projectBookmarks?.load();
+    node('[data-ui="bookmark"]').textContent=bookmarkMessage||
+      (remembered?
+        "Saved references: "+[remembered.video?"Video":"",remembered.motion?"Motion":""].filter(Boolean).join(" + ")+
+        " (reopen requires native inspection)":
+        projectBookmarks?"No saved project reference":"Local project storage unavailable");
     node('[data-ui="error"]').textContent=state.error??"";
     node('[data-ui="error"]').hidden=!state.error;
     root.querySelectorAll<HTMLButtonElement>("[data-act]").forEach(button=>{
@@ -247,6 +273,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         }
         if(Number.isFinite(layer.opacity))f("transformValue").value=String(layer.opacity);
       }
+      node('[data-ui="keyframe-readback"]').textContent=keyframeReadback(inspector?.layer).label;
       const effectSelect=node<HTMLSelectElement>('[data-field="effectUid"]');
       const oldEffect=effectSelect.value;effectSelect.replaceChildren();
       const noEffect=document.createElement("option");noEffect.value="";noEffect.textContent="Select native effect";effectSelect.append(noEffect);
@@ -285,8 +312,14 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       messages.scrollTop=messages.scrollHeight;
     }
     const task=state.pendingApproval;
-    node('[data-ui="approval"]').textContent=task?"Pending "+task.id+" · SHA "+task.expectedSha.slice(0,12):"No AI action pending";
+    const permission=describeApprovalState(state);
+    node('[data-ui="approval"]').textContent=task?
+      "Pending "+task.id+" · SHA "+task.expectedSha.slice(0,12)+" · "+
+      (task.actions?.length??0)+" proposed actions":"No AI action pending";
+    node('[data-ui="approval-diagnostic"]').textContent=permission.reason+
+      " · Native AI task guard not connected";
     node<HTMLButtonElement>('[data-act="approve"]').hidden=!task;
+    node<HTMLButtonElement>('[data-act="approve"]').disabled=state.busy||!permission.eligible;
     node<HTMLButtonElement>('[data-act="reject"]').hidden=!task;
   };
   const unsubscribe=ctrl.subscribe(render);
@@ -304,6 +337,43 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     switch(key){
       case "stop":return ctrl.stop();
       case "video-open":return ctrl.refreshVideo(s("root"),s("project"));
+      case "bookmark-remember":{
+        if(!projectBookmarks)throw Error("On-device project bookmarks are unavailable");
+        const state=ctrl.getState();
+        if(state.busy||state.needsReload&&state.recoveryStudio===state.studio)
+          throw Error("Native state must be verified before saving a bookmark");
+        if(state.studio==="video"){
+          if(!state.video)throw Error("Open a real FilmCraft project before remembering its path");
+          projectBookmarks.rememberVideo(state.video.root,state.video.projectPath);
+        }else{
+          if(!state.motion.ready||!verifiedMotionDisk)throw Error("Native Motion project must be saved or opened first");
+          projectBookmarks.rememberMotion(verifiedMotionDisk.workspace,verifiedMotionDisk.basename);
+        }
+        bookmarkMessage="Native project path bookmarked on this device — project not copied";
+        render(ctrl.getState());return true;
+      }
+      case "bookmark-restore":{
+        if(!projectBookmarks)throw Error("On-device project bookmarks are unavailable");
+        const saved=projectBookmarks.load(),studio=ctrl.getState().studio;
+        if(studio==="video"){
+          if(!saved?.video)throw Error("No saved Video project reference");
+          f("root").value=saved.video.root;f("project").value=saved.video.projectPath;
+          const receipt=await ctrl.refreshVideo(saved.video.root,saved.video.projectPath);
+          bookmarkMessage="FilmCraft project reopened and native readback verified";
+          render(ctrl.getState());return receipt;
+        }
+        if(!saved?.motion)throw Error("No saved Motion project reference");
+        f("motionRoot").value=saved.motion.workspace;f("motionFile").value=saved.motion.basename;
+        const receipt=await ctrl.openMotion(saved.motion.workspace,saved.motion.basename);
+        verifiedMotionDisk={workspace:saved.motion.workspace,basename:saved.motion.basename};
+        bookmarkMessage="EffectCraft project reopened from native disk";
+        render(ctrl.getState());return receipt;
+      }
+      case "bookmark-forget":{
+        if(!projectBookmarks)throw Error("On-device project bookmarks are unavailable");
+        projectBookmarks.forget();bookmarkMessage="Saved project references forgotten; native files unchanged";
+        render(ctrl.getState());return true;
+      }
       case "video-new":return ctrl.applyVideo([{type:"createSequence",name:"Shuvi Sequence",width:1280,height:720,fps:30}]);
       case "video-import":return ctrl.importVideo(s("source"));
       case "video-place":{
@@ -325,9 +395,18 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       case "video-preview":return ctrl.renderVideo(n("videoTime"));
       case "video-export":return ctrl.exportVideo(s("output"));
       case "motion-status":return ctrl.motionStatus();
-      case "motion-create":return ctrl.createComposition({name:s("compName"),width:n("width"),height:n("height"),fps:n("fps"),durationSeconds:n("duration")});
-      case "motion-open":return ctrl.openMotion(s("motionRoot"),s("motionFile"));
-      case "motion-save":return ctrl.saveMotion(s("motionRoot"),s("motionFile"));
+      case "motion-create":{
+        const r=await ctrl.createComposition({name:s("compName"),width:n("width"),height:n("height"),fps:n("fps"),durationSeconds:n("duration")});
+        verifiedMotionDisk=null;return r;
+      }
+      case "motion-open":{
+        const r=await ctrl.openMotion(s("motionRoot"),s("motionFile"));
+        verifiedMotionDisk={workspace:s("motionRoot"),basename:s("motionFile")};return r;
+      }
+      case "motion-save":{
+        const r=await ctrl.saveMotion(s("motionRoot"),s("motionFile"));
+        verifiedMotionDisk={workspace:s("motionRoot"),basename:s("motionFile")};return r;
+      }
       case "motion-text":return ctrl.editMotion({action:"addText",compId:comp(),name:"Shuvi Title",text:s("text"),x:120,y:120,size:48});
       case "motion-edit":{
         if(selectedLayer===null)throw Error("Select a real native text layer");return ctrl.editMotion({action:"editText",compId:comp(),layerId:selectedLayer,text:s("text")});
@@ -526,15 +605,25 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     f("videoTime").value=String(next);
     if(state.video)safe(()=>ctrl.renderVideo(next));
   };
+  const onInput=(event:Event)=>{
+    const target=event.target;
+    if(!(target instanceof HTMLInputElement)||target.dataset.field!=="chatWidth")return;
+    const width=Number(target.value);
+    if(!Number.isFinite(width))return;
+    root.style.setProperty("--chat-width",Math.max(240,Math.min(420,width))+"px");
+  };
   root.addEventListener("click",onClick);
+  root.addEventListener("input",onInput);
   root.addEventListener("submit",onSubmit);root.addEventListener("keydown",onKey);
   root.addEventListener("pointerdown",onPointerDown);root.addEventListener("pointerup",onPointerUp);
   root.addEventListener("pointercancel",onPointerCancel);
   return {controller:ctrl,dispose(){
     disposed=true;unsubscribe();clearFrame();root.removeEventListener("click",onClick);
+    root.removeEventListener("input",onInput);
     root.removeEventListener("submit",onSubmit);root.removeEventListener("keydown",onKey);
     root.removeEventListener("pointerdown",onPointerDown);root.removeEventListener("pointerup",onPointerUp);
     root.removeEventListener("pointercancel",onPointerCancel);
-    root.replaceChildren();root.classList.remove("su");delete root.dataset.shuviWorkspace;
+    root.replaceChildren();root.classList.remove("su");
+    root.style.removeProperty("--chat-width");delete root.dataset.shuviWorkspace;
   }};
 }
