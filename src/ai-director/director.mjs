@@ -42,7 +42,7 @@ export class AiDirector {
     const snapshot = validateSnapshot(await this.#adapter.readSnapshot());
     const plan = validateDraft({taskId, instruction, snapshot, actions});
     const hash = await digest(plan);
-    const task = {plan, hash, status:"prepared", receipts:[], error:null, cancel:false, inFlight:false};
+    const task = {plan, hash, status:"prepared", receipts:[], error:null, cancel:false, inFlight:false, intentLogged:false};
     // Persist record before exposing an approvable plan. Crash must not allow replay.
     await this.#journal.append({event:"prepared", taskId, planHash:hash, project:plan.snapshot});
     this.#tasks.set(taskId, task);
@@ -98,6 +98,7 @@ export class AiDirector {
         // An intent write precedes any native mutation. Crash/retry remains uncertain,
         // never silently reruns the same key.
         await this.#journal.append({event:"step_intent",taskId,index:i,key,expected});
+        task.intentLogged = true;
         task.status = "running";
         task.inFlight = true;
         let nativeReceipt;
@@ -136,15 +137,16 @@ export class AiDirector {
         // Durable step receipt before progressing to another edit.
         await this.#journal.append({event:"step_verified",taskId,...receipt});
         task.receipts.push(receipt);
+        task.intentLogged = false;
         expected = observed;
       }
       task.status = "complete";
       await this.#journal.append({event:"complete",taskId,steps:task.receipts.length});
       return view(task);
     } catch (error) {
-      if (!["uncertain","blocked"].includes(task.status)) {
-        // No native intent => safe blocked; after intent => unsafe/unknown outcome.
-        task.status = task.inFlight || task.status === "running" ? "uncertain" : "blocked";
+      if (!["uncertain","blocked","complete"].includes(task.status)) {
+        // After a logged native intent, even audit/readback failures are uncertain.
+        task.status = task.intentLogged ? "uncertain" : "blocked";
         task.error = String(error?.message ?? error);
       }
       return view(task);
