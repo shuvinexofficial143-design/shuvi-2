@@ -6,6 +6,7 @@
 //! It cannot be a WebView/model endpoint. Only one closed action is supported.
 pub mod shared_owner;
 pub mod native_consent;
+pub mod gui_runtime;
 
 use filmcraft_edit::razor_items;
 use filmcraft_engine::{Session, shuvi_ai_readonly};

@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 filmcraft-engine = { path = "../crates/engine" }
+filmcraft-ui-egui = { path = "../crates/ui-egui" }
 filmcraft-project = { path = "../crates/project" }
 filmcraft-time = { path = "../crates/time" }
 filmcraft-edit = { path = "../crates/edit" }
@@ -27,7 +28,10 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Wind
 # Native egui application is a DEV dependency only: the tested bridge
 # remains separate and is not linked into the production application.
 [dev-dependencies]
-filmcraft-ui-egui = { path = "../crates/ui-egui" }
+# Test-only window/layout assertions may use the same exact upstream egui.
+# Native GUI bridge is intentionally a regular dependency, so this library
+# compiles as an actual native host adapter rather than test-only glue.
+
 egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }
 
 # This isolated integration-test crate is the Cargo root, so Cargo will NOT
