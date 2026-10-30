@@ -4,12 +4,45 @@
 
 use egui::{Rect, UiBuilder};
 use serde_json::Value;
+use std::sync::Arc;
+use effectcraft_engine::{Session, project::{Project, ItemId}};
 
 use crate::EffectcraftApp;
 use crate::shuvi_ai::{CompositionDraft, InspectRequest, NativeMotionProbe, PendingCommand};
 
 const MAX_MESSAGE_CHARS: usize = 4000;
 const MAX_CHAT_TURNS: usize = 40;
+
+/// Snapshot of the ACTUAL original native editor document at local preview
+/// creation. A revision alone is insufficient: file.newProject, file.open and
+/// composition switches can produce the same revision on different projects.
+/// Keeping the Arc forces native copy-on-write to invalidate stale previews.
+/// This is NOT a model-provided identity or an authorization token.
+#[derive(Clone, Debug)]
+pub struct NativePreviewBinding {
+    revision: u64,
+    project: Arc<Project>,
+    path: Option<String>,
+    active_comp: Option<ItemId>,
+}
+
+impl NativePreviewBinding {
+    pub fn capture(session: &Session) -> Self {
+        Self {
+            revision: session.revision,
+            project: Arc::clone(&session.project),
+            path: session.path.clone(),
+            active_comp: session.active_comp_id(),
+        }
+    }
+
+    pub fn matches(&self, session: &Session) -> bool {
+        self.revision == session.revision
+            && Arc::ptr_eq(&self.project, &session.project)
+            && self.path == session.path
+            && self.active_comp == session.active_comp_id()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ChatTurn {
@@ -25,6 +58,7 @@ pub struct ShuviAiState {
     pub status: String,
     pub draft: CompositionDraft,
     pub pending: Option<PendingCommand>,
+    pub preview_binding: Option<NativePreviewBinding>,
     pub last_read_revision: Option<u64>,
 }
 
@@ -42,6 +76,7 @@ impl Default for ShuviAiState {
                 duration_seconds: 5.0,
             },
             pending: None,
+            preview_binding: None,
             last_read_revision: None,
         }
     }
@@ -77,15 +112,22 @@ impl ShuviAiState {
         true
     }
 
-    pub fn invalidate_stale_preview(&mut self, revision: u64) {
-        if self.pending.as_ref().is_some_and(|p| p.expected_revision != revision) {
+    /// Fail closed if a preview lost its native project owner. Called each UI
+    /// pass before the preview is shown. Never grants permission to execute.
+    pub fn invalidate_stale_preview(&mut self, session: &Session) {
+        if self.pending.is_some() &&
+            !self.preview_binding.as_ref().is_some_and(|binding|
+                self.pending.as_ref().is_some_and(|p| p.expected_revision == session.revision)
+                    && binding.matches(session)) {
             self.pending = None;
-            self.status = "Project changed manually: previous preview invalidated.".into();
+            self.preview_binding = None;
+            self.status = "Native project, composition or revision changed: previous preview invalidated.".into();
         }
     }
 
     pub fn discard_preview(&mut self) {
         self.pending = None;
+        self.preview_binding = None;
         self.status = "Local preview discarded. No native action was cancelled or executed.".into();
     }
 }
@@ -98,10 +140,12 @@ fn prepare_preview(app: &mut EffectcraftApp) {
     match result {
         Ok(plan) => {
             app.shuvi_ai.pending = Some(plan);
-            app.shuvi_ai.status = "Native plan checked. Owner-approved editing is not connected.".into();
+            app.shuvi_ai.preview_binding = Some(NativePreviewBinding::capture(&app.session));
+            app.shuvi_ai.status = "Native plan checked and bound to this project; owner-approved editing is not connected.".into();
         }
         Err(error) => {
             app.shuvi_ai.pending = None;
+            app.shuvi_ai.preview_binding = None;
             app.shuvi_ai.status = format!("Preview rejected: {error}");
         }
     }
@@ -121,7 +165,7 @@ fn inspect(app: &mut EffectcraftApp) -> (Result<Value, String>, Option<Result<Va
 /// Real docked egui control surface. The original EffectcraftApp owns its Session.
 pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let revision = app.session.revision;
-    app.shuvi_ai.invalidate_stale_preview(revision);
+    app.shuvi_ai.invalidate_stale_preview(&app.session);
     let (summary, composition, layer) = inspect(app);
     app.shuvi_ai.last_read_revision = summary.as_ref().ok().map(|_| revision);
 
@@ -212,6 +256,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
             if let Some(pending) = &app.shuvi_ai.pending {
                 ui.label(format!("Command: {} | Revision: {}", pending.native_command, pending.expected_revision));
                 ui.small(pending.params.to_string());
+                ui.small("Native project binding: revision + object identity + file path + active composition");
                 ui.small("Task stages: preview ready → approval unavailable → native edit blocked");
                 ui.add_enabled(false, egui::Button::new("Approve & execute — not integrated"));
                 let discard = ui.button("Discard preview");
@@ -263,20 +308,64 @@ mod tests {
         assert_eq!(state.chat.len(), MAX_CHAT_TURNS);
     }
 
-    #[test]
-    fn manual_edit_invalidates_unapproved_plan() {
-        let mut state = ShuviAiState::default();
+    fn install_bound_preview(session: &Session, state: &mut ShuviAiState) {
         state.pending = Some(PendingCommand {
             native_command: "comp.new",
-            expected_revision: 7,
+            expected_revision: session.revision,
             params: serde_json::json!({"name": "Plan"}),
             requires_owner_approval: true,
         });
-        state.invalidate_stale_preview(7);
+        state.preview_binding = Some(NativePreviewBinding::capture(session));
+    }
+
+    #[test]
+    fn manual_edit_invalidates_unapproved_plan() {
+        let mut state = ShuviAiState::default();
+        let mut session = Session::new();
+        install_bound_preview(&session, &mut state);
+        state.invalidate_stale_preview(&session);
         assert!(state.pending.is_some());
-        state.invalidate_stale_preview(8);
+        session.execute_checked("comp.new", serde_json::json!({"name":"Other"})).unwrap();
+        state.invalidate_stale_preview(&session);
         assert!(state.pending.is_none());
+        assert!(state.preview_binding.is_none());
         assert!(state.status.contains("invalidated"));
+    }
+
+    #[test]
+    fn new_project_with_same_revision_invalidates_preview() {
+        let mut session = Session::new();
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        let original_revision = session.revision;
+        session.execute_checked("file.newProject", serde_json::json!({})).unwrap();
+        assert_eq!(session.revision, original_revision);
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none(), "old project preview must never survive a same-revision new project");
+    }
+
+    #[test]
+    fn active_composition_switch_invalidates_even_without_revision_change() {
+        let mut session = Session::new();
+        let first = session.execute_checked("comp.new",serde_json::json!({"name":"First"})).unwrap()["comp"].as_u64().unwrap();
+        let second = session.execute_checked("comp.new",serde_json::json!({"name":"Second"})).unwrap()["comp"].as_u64().unwrap();
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        // A UI-only composition selection may not advance native revision.
+        assert_eq!(session.active_comp_id(),Some(ItemId(second)));
+        session.execute_checked("comp.open", serde_json::json!({"comp":first})).unwrap();
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none());
+    }
+
+    #[test]
+    fn unbound_preview_fails_closed() {
+        let session = Session::new();
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&session, &mut state);
+        state.preview_binding = None;
+        state.invalidate_stale_preview(&session);
+        assert!(state.pending.is_none());
     }
 
     #[test]
