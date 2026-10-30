@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion Native AI Integration (M-AI11)
+name: Shuvi 2 Motion Native AI Integration (M-AI13)
 on:
   push:
     branches:
@@ -74,6 +74,9 @@ jobs:
       - name: Run native same-session adapter regression tests
         shell: pwsh
         run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_ai::tests -- --nocapture
+      - name: Test native egui app-owned manual owner gate and actual command routes
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_owner_gate::tests -- --nocapture
       - name: Test native egui Shuvi AI panel states
         shell: pwsh
         run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib panels::shuvi_ai::tests -- --nocapture
