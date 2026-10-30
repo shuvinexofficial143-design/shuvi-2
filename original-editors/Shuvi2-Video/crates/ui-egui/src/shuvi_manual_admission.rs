@@ -506,6 +506,40 @@ mod shuvi_manual_admission_tests {
     }
 
     #[test]
+    fn exclusive_ai_owner_drops_real_keyboard_and_pointer_input_before_native_ui_pass(){
+        let mut app=FilmcraftApp::new(Session::default());
+        let ctx=egui::Context::default();
+        let lease=app.shuvi_manual_admission.try_claim_ai().unwrap();
+        let before=app.session.revision;
+        let mut input=egui::RawInput{
+            events:vec![egui::Event::Text("unsafe keyboard shortcut".into()),
+                egui::Event::PointerMoved(egui::pos2(15.0,25.0))],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app,&ctx,&mut input);
+        assert!(input.events.is_empty());
+        assert!(app.synthetic.is_empty());
+        app.logic_inner(&ctx);
+        assert_eq!(app.ui.status,"SHUVI_NATIVE_AI_TRANSACTION_ACTIVE");
+        assert_eq!(app.session.revision,before);
+        drop(lease);
+        let mut next=egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut app,&ctx,&mut next);
+        assert!(next.events.is_empty());
+        assert_eq!(app.shuvi_manual_admission.blocked_reason(),None);
+    }
+
+    #[test]
+    fn app_exit_cannot_shutdown_original_session_during_exclusive_a07_owner(){
+        let mut app=FilmcraftApp::new(Session::default());
+        let owner=app.shuvi_manual_admission.clone();
+        let _guard=owner.try_claim_ai().unwrap();
+        eframe::App::on_exit(&mut app);
+        assert_eq!(app.ui.status,"SHUVI_NATIVE_AI_TRANSACTION_ACTIVE");
+        assert_eq!(owner.blocked_reason(),Some("SHUVI_NATIVE_AI_TRANSACTION_ACTIVE"));
+    }
+
+    #[test]
     fn real_remote_engine_registry_reenters_on_same_ui_thread() {
         let mut app=FilmcraftApp::new(Session::default());
         let _owner=app.shuvi_manual_admission.try_claim().unwrap();
