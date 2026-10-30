@@ -166,8 +166,12 @@ export class AiDirector {
         }
         // Never trust a success flag alone: adapter must atomically guard project
         // identity, check actual native changes, then read back the project.
+        const nativeProofOK=!this.#nativeStop || (
+          nativeReceipt?.taskId===taskId && nativeReceipt?.stepIndex===i &&
+          typeof nativeReceipt?.objectProofSha256==="string" &&
+          /^[0-9a-f]{64}$/.test(nativeReceipt.objectProofSha256));
         if (nativeReceipt?.guarded !== true || nativeReceipt?.nativeVerified !== true ||
-          nativeReceipt.idempotencyKey !== key) {
+          nativeReceipt.idempotencyKey !== key || !nativeProofOK) {
           task.status = "uncertain";
           task.error = "NATIVE_PROOF_MISSING";
           await this.#journal.append({event:"verification_missing",taskId,index:i,key});
@@ -182,7 +186,8 @@ export class AiDirector {
           return view(task);
         }
         const receipt = {index:i, type:task.plan.actions[i].type, idempotencyKey:key,
-          before:expected, after:observed, nativeVerified:true};
+          before:expected, after:observed, nativeVerified:true,
+          ...(this.#nativeStop ? {objectProofSha256:nativeReceipt.objectProofSha256} : {})};
         // Durable step receipt before progressing to another edit.
         await this.#journal.append({event:"step_verified",taskId,...receipt});
         task.receipts.push(receipt);
