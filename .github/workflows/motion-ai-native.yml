@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Same target cache for original native tests and separate SQLite harness.
+  CARGO_TARGET_DIR: original-editors/Shuvi2-Motion/target
+
 # Old commits launch overlapping cold Windows builds. Only latest branch HEAD matters.
 concurrency:
   group: motion-ai-native-${{ github.ref }}
@@ -71,6 +75,14 @@ jobs:
           $to = "original-editors/Shuvi2-Motion/integrations/ai-provider"
           if (!(Test-Path "$from/Cargo.toml")) { throw "Pinned native ledger missing" }
           Copy-Item $from $to -Recurse -Force
+      - name: Verify the isolated harness resolves the original patched PDF parser
+        shell: pwsh
+        run: |
+          $manifest = "original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml"
+          $tree = cargo tree --manifest-path $manifest --package craft-pdf --edges normal
+          if ($LASTEXITCODE -ne 0) { throw "Cannot resolve isolated native PDF dependencies" }
+          $match = $tree | Select-String 'hayro-syntax v0.7.2.*github.com/storytold/craft-libs'
+          if (!$match) { throw "The original EffectCraft patched hayro-syntax dependency was NOT selected" }
       - name: Test real EffectCraft Session through 2.0.3 SQLite guarded native host
         shell: pwsh
         run: cargo test --manifest-path original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml -- --nocapture
