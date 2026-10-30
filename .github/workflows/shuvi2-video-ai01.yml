@@ -42,6 +42,7 @@ jobs:
             "original-editors/Shuvi2-Video/crates/ui-egui/src/lib.rs",
             "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_readonly.rs",
             "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_owner.rs",
+            "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_readonly.rs",
             "original-editors/Shuvi2-Video/crates/ui-egui/src/panels/shuvi_ai.rs",
             "original-editors/Shuvi2-Video/NOTICE",
             "original-editors/Shuvi2-Video/SHUVI_SOURCE_ORIGIN.txt"
@@ -82,3 +83,30 @@ jobs:
           path: Shuvi2-Video-AI01-NativeBaseline-Win64.zip
           retention-days: 14
           if-no-files-found: error
+
+  verify-canonical-a07-provider-source:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout pinned, separate canonical A07 AI Director commit (read only)
+        uses: actions/checkout@v4
+        with:
+          ref: 64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4
+          path: a07-canonical
+          persist-credentials: false
+          submodules: false
+      - name: Check canonical A07 vault, HTTPS provider, guarded host and SQLite receipts exist
+        shell: pwsh
+        run: |
+          foreach ($f in @(
+            "a07-canonical/src-tauri/src/ai_director/src/lib.rs",
+            "a07-canonical/src-tauri/src/ai_director/src/windows_vault.rs",
+            "a07-canonical/src-tauri/src/ai_director/src/host.rs",
+            "a07-canonical/src-tauri/src/ai_director/src/transactional.rs"
+          )) { if (!(Test-Path $f)) { throw "Canonical A07 source missing: $f" } }
+          if (!(Select-String -Path a07-canonical/src-tauri/src/ai_director/src/windows_vault.rs -SimpleMatch "Shuvi2/OpenAI")) { throw "Vault target contract drift" }
+          if (!(Select-String -Path a07-canonical/src-tauri/src/ai_director/src/lib.rs -SimpleMatch "https://api.openai.com/v1/chat/completions")) { throw "Canonical HTTPS provider contract drift" }
+          if (!(Select-String -Path a07-canonical/src-tauri/src/ai_director/src/host.rs -SimpleMatch "unintegrated_capabilities")) { throw "A07 fail-closed capability contract absent" }
+      - name: Test canonical provider, vault and SQLite native ledger as separate source crate
+        shell: pwsh
+        run: cargo test --manifest-path a07-canonical/src-tauri/src/ai_director/Cargo.toml -- --nocapture

@@ -5,6 +5,7 @@
 //! owner consent, durable action receipts and shared manual/AI admission MUST be
 //! installed before adding any AI mutation capability.
 
+use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use crate::{EngineError, Result, Session};
@@ -114,4 +115,56 @@ pub fn command_registry(session: &mut Session) -> Result<Value> {
         return Err(EngineError::Other("FilmCraft command registry was not an array".into()));
     }
     Ok(registry)
+}
+
+
+/// A07 NativeModelRequest requires exactly {"clipIds":[],"mediaIds":[]};
+/// build the inventory from the real FilmCraft Session, never from untrusted
+/// browser/model JSON, and never include any absolute path or source metadata.
+const MODEL_ID_LIMIT: u64 = 9_007_199_254_740_991;
+const MODEL_INVENTORY_LIMIT: usize = 128;
+
+fn native_ids_for_provider(ids: impl IntoIterator<Item = u64>) -> Result<Vec<u64>> {
+    let mut unique = BTreeSet::new();
+    for id in ids {
+        if id == 0 || id > MODEL_ID_LIMIT || !unique.insert(id) || unique.len() > MODEL_INVENTORY_LIMIT {
+            return Err(EngineError::Other("A07_NATIVE_INVENTORY_INVALID: duplicate, invalid or too many IDs".into()));
+        }
+    }
+    Ok(unique.into_iter().collect())
+}
+
+/// Sanitize the exact current editor's IDs for canonical A07 proposal planning.
+/// This is information for planning ONLY; it grants no edit authority.
+pub fn a07_video_inventory(session: &mut Session) -> Result<Value> {
+    let before = snapshot(session)?;
+    let sequence = session.active_sequence();
+    let mut native_clips = Vec::new();
+    if let Some(sequence) = sequence {
+        for track in sequence.video_tracks.iter().chain(sequence.audio_tracks.iter()) {
+            native_clips.extend(track.items.iter().map(|item| item.id.0));
+        }
+    }
+    let clip_ids = native_ids_for_provider(native_clips)?;
+    let media_ids = native_ids_for_provider(session.project.items.iter()
+        .filter(|(_, item)| item.as_media().is_some())
+        .map(|(id, _)| id.0))?;
+    if session.revision != before.revision || session.document_epoch != before.document_epoch
+        || session.state.active_sequence.map(|id| id.0) != before.active_sequence
+    {
+        return Err(EngineError::Other("A07_NATIVE_INVENTORY_STALE: editor changed during readback".into()));
+    }
+    Ok(json!({"clipIds": clip_ids, "mediaIds": media_ids}))
+}
+
+#[cfg(test)]
+mod a07_inventory_bounds_tests {
+    use super::*;
+    #[test]
+    fn refuses_invalid_duplicates_out_of_range_and_over_128() {
+        for ids in [vec![0], vec![8,8], vec![MODEL_ID_LIMIT+1], (1..=129).collect::<Vec<_>>()] {
+            assert!(native_ids_for_provider(ids).is_err());
+        }
+        assert_eq!(native_ids_for_provider(vec![7, 2, 4]).unwrap(), vec![2, 4, 7]);
+    }
 }

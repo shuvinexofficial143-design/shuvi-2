@@ -23,3 +23,8 @@ A07 implements `Action::VideoSplit {clip_id:u64,seconds:f64}` and maps proposal 
 
 ## Next V-AI05
 After Windows CI is green, pursue reviewed A07 owner integration or cross-branch handoff to 2.0.5. Test real Windows owner click and native clip split, save/reopen, export with media, recover-from-uncertain and duplicate suppression. Do not install silently or fabricate video output.
+
+## Verified A07 provider inventory preparation (additional V-AI04 increment)
+`shuvi_ai_readonly::a07_video_inventory` now derives exactly `{"clipIds":[...],"mediaIds":[...]}` from real in-memory FilmCraft Project and active Timeline. IDs are sorted, unique, nonzero and <= JS safe integer, with <=128 per list. The result exposes no project file path or media URL and cannot execute anything. Tests check the stable read-only contract and inventory bounds.
+
+This workflow now runs an independent native Rust test of **pinned canonical A07** source via a second read-only checkout at `64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4`, in a separate Windows job. A separate successful provider/ledger crate test is not proof it is registered inside the real FilmCraft GUI.

@@ -111,3 +111,22 @@ fn invalid_or_disabled_native_commands_do_not_mutate_project() {
     assert!(session.execute("sequence.addEditAllTracks", json!({"time": 5})).is_err());
     assert_eq!((session.revision, session.document_epoch, session.journal.len()), before);
 }
+
+#[test]
+fn native_a07_model_inventory_is_exact_and_has_no_paths_or_credentials() {
+    let mut session = Session::default();
+    session.execute("file.openDemoProject", json!({})).unwrap();
+    let revision = session.revision;
+    let inventory = shuvi_ai_readonly::a07_video_inventory(&mut session).unwrap();
+    let keys = inventory.as_object().unwrap();
+    assert_eq!(keys.len(), 2);
+    assert!(keys.contains_key("clipIds"));
+    assert!(keys.contains_key("mediaIds"));
+    let all = inventory.to_string();
+    for key in ["projectPath", "path", "apiKey", "token", "content", "authorization"] {
+        assert!(!all.contains(key), "native inventory leaked forbidden data: {key}");
+    }
+    assert!(inventory["clipIds"].as_array().unwrap().len() <= 128);
+    assert!(inventory["mediaIds"].as_array().unwrap().len() <= 128);
+    assert_eq!(session.revision, revision, "inventory is read-only");
+}
