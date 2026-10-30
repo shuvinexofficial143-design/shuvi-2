@@ -224,7 +224,7 @@ impl EffectcraftApp {
         for &p in closed {
             if let PanelKind::ScriptPanel(id) = p
                 && self.session.script_ui.window(id).is_some()
-                && let Err(e) = self.session.execute("scriptui.close", json!({"window": id}))
+                && let Err(e) = self.motion_owner_gate.manual_menu_command(&mut self.session, "scriptui.close", json!({"window": id}))
             {
                 self.ui.status = e.to_string();
             }
