@@ -11,7 +11,7 @@ use crate::FilmcraftApp;
 /// document/session identity fence, never an approval token or provider key.
 /// The random state is created exclusively by FilmcraftApp::new and is not
 /// supplied by any model, script, JSON request or external renderer.
-#[derive(Debug)]
+#[derive(Clone)]
 pub(crate) struct NativeA07Identity {
     seed: std::collections::hash_map::RandomState,
     instance: u64,
@@ -145,6 +145,21 @@ impl FilmcraftApp {
     /// separately checks native project SHA and durable task plan binding.
     pub fn shuvi_trusted_a07_identity(&self)->(String,String) {
         self.shuvi_a07_native_identity.current(&self.session)
+    }
+
+    /// Canonical A07 integration entry: host-selected identity is computed
+    /// INSIDE the already exclusive owner transaction from the current
+    /// original FilmCraft Session. Unlike caller-provided identity strings,
+    /// this pair cannot be substituted by an AI plan or renderer JSON.
+    pub fn with_shuvi_trusted_a07_context<R>(
+        &mut self,
+        action:impl FnOnce(&mut filmcraft_engine::Session,String,String)->Result<R,String>,
+    )->Result<R,String> {
+        let identity=self.shuvi_a07_native_identity.clone();
+        self.with_shuvi_trusted_ai_transaction(move |session|{
+            let (project_id,session_id)=identity.current(session);
+            action(session,project_id,session_id)
+        })
     }
 
     /// A real UI-side admission entry point for the isolated canonical A07
@@ -434,45 +449,60 @@ mod shuvi_manual_admission_tests {
     }
 
     #[test]
-    fn original_gui_native_identity_stays_stable_for_edits_but_not_document_switch() {
+    fn original_gui_native_identity_stable_for_real_timeline_split_not_for_sequence_switch(){
+        use filmcraft_time::{Tick,TICKS_PER_SECOND};
         let mut app=FilmcraftApp::new(Session::default());
-        let original=app.shuvi_trusted_a07_identity();
-        let snapshot=filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session);
-        // Normal edit alters project bytes, NOT per-document A07 session ID.
-        app.session.execute("file.newSequence",json!({"name":"one edit",
-            "width":320,"height":240})).unwrap();
-        assert_eq!(app.shuvi_trusted_a07_identity(),original);
-        assert_ne!(filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session),snapshot);
-        let epoch=app.session.document_epoch;
         app.session.execute("file.openDemoProject",json!({})).unwrap();
-        assert!(app.session.document_epoch>epoch);
-        assert_ne!(app.shuvi_trusted_a07_identity(),original);
+        let identity=app.shuvi_trusted_a07_identity();
+        let before_sha=filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session);
+        let active=app.session.active_sequence().unwrap();
+        let tick=app.session.sequence_rate().snap_nearest(Tick(2*TICKS_PER_SECOND));
+        let clip=active.video_tracks[0].items.iter()
+            .find(|c|c.start.0<tick.0&&tick.0<c.end().0).unwrap().id;
+        let created=app.session.edit_sequence("A20 native timeline split",|seq,ctx,_|{
+            Ok(filmcraft_edit::razor_items(seq,&[clip],tick,ctx))
+        }).unwrap();
+        assert_eq!(created.len(),1);
+        // Native project bytes differ but document+session identity persists.
+        assert_ne!(filmcraft_engine::shuvi_ai_readonly::a07_native_project_sha256(&app.session),before_sha);
+        assert_eq!(app.shuvi_trusted_a07_identity(),identity);
+        // A real original GUI context change must invalidate older A07 scope.
+        app.session.execute("file.newSequence",json!({"name":"another sequence",
+            "width":320,"height":240})).unwrap();
+        assert_ne!(app.shuvi_trusted_a07_identity(),identity);
     }
 
     #[test]
-    fn reopened_original_gui_app_never_inherits_previous_a07_owner_identity() {
-        let original=FilmcraftApp::new(Session::default());
-        let other=FilmcraftApp::new(Session::default());
-        assert_ne!(original.shuvi_trusted_a07_identity(),
-            other.shuvi_trusted_a07_identity());
-        let (proj,session)=original.shuvi_trusted_a07_identity();
-        assert!(proj.starts_with("p-")&&session.starts_with("s-"));
-        assert!(proj.len()<=1024&&session.len()<=128);
-        assert!(!proj.contains('\\'));
+    fn reopened_original_gui_app_never_inherits_previous_a07_owner_identity(){
+        let first=FilmcraftApp::new(Session::default());
+        let second=FilmcraftApp::new(Session::default());
+        assert_ne!(first.shuvi_trusted_a07_identity(),
+            second.shuvi_trusted_a07_identity());
+        let (project,session)=first.shuvi_trusted_a07_identity();
+        assert!(project.starts_with("p-")&&session.starts_with("s-"));
+        assert!(project.len()<=1024&&session.len()<=128);
+        assert!(!project.contains('\\'));
     }
 
     #[test]
-    fn a07_identity_is_derived_from_original_gui_and_not_from_ai_json() {
+    fn native_a07_context_is_computed_inside_exclusive_owner_not_from_json(){
         let mut app=FilmcraftApp::new(Session::default());
-        let trusted=app.shuvi_trusted_a07_identity();
-        let bogus=json!({"projectId":"model-controlled-project",
-            "sessionId":"model-controlled-session"});
-        let _=bogus; // No caller-supplied identity argument exists.
-        assert_eq!(app.shuvi_trusted_a07_identity(),trusted);
-        app.shuvi_manual_execute("file.newSequence",
-            json!({"name":"model cannot select identity",
-                "width":320,"height":240})).unwrap();
-        assert_eq!(app.shuvi_trusted_a07_identity(),trusted);
+        app.session.execute("file.openDemoProject",json!({})).unwrap();
+        let expected=app.shuvi_trusted_a07_identity();
+        let bogus=json!({"projectId":"provider-chosen-project",
+            "sessionId":"provider-chosen-session"});
+        let seen=app.with_shuvi_trusted_a07_context(|session,project,session_id|{
+            assert!(session.state.active_sequence.is_some());
+            assert_ne!(project,bogus["projectId"]);
+            assert_ne!(session_id,bogus["sessionId"]);
+            Ok((project,session_id))
+        }).unwrap();
+        assert_eq!(seen,expected);
+        // The native owner cannot be upgraded from inside a manual UI pass.
+        let guard=app.shuvi_manual_admission.clone();
+        let _manual=guard.try_claim().unwrap();
+        let failed=app.with_shuvi_trusted_a07_context(|_,_,_|Ok(()));
+        assert_eq!(failed.unwrap_err(),"SHUVI_NATIVE_OWNER_BUSY");
     }
 
     #[test]

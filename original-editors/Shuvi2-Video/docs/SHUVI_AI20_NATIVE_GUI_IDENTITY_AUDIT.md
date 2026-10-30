@@ -12,3 +12,6 @@ Actual Original FilmCraft production `FilmcraftApp` now owns a unique local `Nat
 
 ## Testing
 Actual `filmcraft-ui-egui` Rust regression tests verify identity stability during native edits while SHA changes; invalidation on original document reopen; distinction across new app instances; and refusal to accept any renderer identity parameter. Windows CI runs those tests via existing `shuvi_manual_admission` filter. No live Windows modal, provider network request, or model-controlled edit is performed.
+
+## V-AI20 correction — actual timeline versus context switch
+The original identity test uses the real FilmCraft demo sequence plus `filmcraft_edit::razor_items` native timeline split to verify the owner identity stays unchanged across ordinary clip edits while native project SHA changes. A subsequent `file.newSequence` is correctly classified as an ACTIVE SEQUENCE CONTEXT SWITCH and must rotate owner session identity; the earlier test incorrectly expected the same identity even after this context change. New `FilmcraftApp::with_shuvi_trusted_a07_context` computes both host-origin IDs within the exclusive native owner lease and passes them only to a trusted Rust callback. Regression tests verify no model-controlled JSON may substitute IDs and an existing manual owner cannot be upgraded into AI owner. No production AI execution enabled.
