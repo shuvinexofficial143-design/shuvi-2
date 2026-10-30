@@ -38,3 +38,12 @@ cargo test --manifest-path src-tauri/src/ai_director/Cargo.toml
 ```
 
 **Important:** A03 uses a file-based task ledger whose Windows sudden-power-loss durability and cross-process write locking are not production proven. This remains a blocker even if all A04 tests pass; a transactional persistent native ledger with user-ACL protection should replace/harden it in integration. Do not assert 'working desktop AI' from these source tests.
+
+## Native typed wire handoff (added within A04)
+
+- `src-tauri/src/ai_director/src/ipc.rs` implements `GuardedWireRequest` matching the frontend's camelCase `ai_director_execute_guarded` payload. It explicitly maps only twelve dotted JS action names to the Rust `Action` enum and rejects unknown commands, extra fields, cross-editor commands, bad SHA/revisions and unapproved action substitutions.
+- `Ledger::execute_bound` checks the requested native action and expected project snapshot against the **persisted approved plan** before calling `Ledger::execute`. It never treats the frontend's idempotency key as proof of permission; it is a correlation token only. The durable ledger retains its own SHA-256 native step key.
+- `NativeOwner::object_proof_sha256` now requires the exclusive actual engine owner to supply a SHA-256 of an independently inspected affected native object. The verified native receipt includes this digest. Returning a successful revision number without proof is not accepted.
+- `tests/native_guard.rs` adds exact IPC→persisted-plan→owner receipt and forbidden action substitution test cases, using explicit test-double editors.
+
+These are source/test contracts; final 2.0.5 must bind them to the real editor worker. Real native node proof and a protected credential can only be asserted after actual Windows UI and engine verification.
