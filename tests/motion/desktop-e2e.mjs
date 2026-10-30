@@ -126,6 +126,15 @@ async function test(){
       result.pngBytes=png.length;
       result.projectBytes=project.size;
     });
+    await step("switch Video -> Motion and keep native state",async()=>{
+      await click('button[data-studio="video"]');
+      await waitFor("Video Studio",async()=>await text("#studio-title")==="Video Studio");
+      await click('button[data-studio="motion"]');
+      await ready("Native Windows engine connected",60000);
+      await waitFor("reopened native layer list",async=>
+        (await text("#motion-layer-list")).includes("WebDriver Shape"));
+      assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
+    });
     await step("native desktop screenshot",async()=>{
       await screenshot("motion-windows-webview2.png");
       result.nativeScreenshot="motion-windows-webview2.png";
