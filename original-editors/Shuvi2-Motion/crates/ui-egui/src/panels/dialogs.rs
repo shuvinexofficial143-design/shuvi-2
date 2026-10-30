@@ -448,7 +448,7 @@ fn comp_settings(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens, exis
 
 /// The Resolution chosen in Composition Settings, set as the Composition panel's popup sets it:
 /// saved with the project but no undo step, so it stays out of `comp.new` / `comp.settings`.
-fn set_resolution(app: &mut EffectcraftApp, cid: u64, r: effectcraft_engine::project::Resolution) -> effectcraft_engine::Result<Value> {
+fn set_resolution(app: &mut EffectcraftApp, cid: u64, r: effectcraft_engine::project::Resolution) -> Result<Value, String> {
     match r.factor() {
         None => app.motion_owner_gate.manual_menu_command(&mut app.session, "view.res.auto", json!({"comp": cid})),
         Some(n) => app.motion_owner_gate.manual_menu_command(&mut app.session, "view.res.custom", json!({"comp": cid, "factor": n})),
