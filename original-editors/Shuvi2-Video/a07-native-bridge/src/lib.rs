@@ -4,6 +4,8 @@
 //! SQLite intent/readback call. This crate is NOT linked into production egui:
 //! manual and AI edit paths in the running GUI are not yet under one owner lock.
 //! It cannot be a WebView/model endpoint. Only one closed action is supported.
+pub mod shared_owner;
+
 use filmcraft_edit::razor_items;
 use filmcraft_engine::{Session, shuvi_ai_readonly};
 use filmcraft_project::{ClipId, ItemId};
