@@ -2,6 +2,7 @@
 //! Credential retrieval belongs to the trusted Windows host vault, never JS.
 //! No arbitrary model-selected endpoints, shell commands or editor IPC.
 pub mod guard;
+pub mod windows_vault;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
