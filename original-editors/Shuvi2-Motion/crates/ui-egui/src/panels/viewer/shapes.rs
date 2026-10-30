@@ -30,14 +30,14 @@ pub(crate) fn layer_at<'a>(ectx: &EvalCtx<'a>, cpt: [f64; 2]) -> Option<&'a Laye
 pub(crate) fn pick(app: &mut EffectcraftApp, ectx: &EvalCtx, cpt: [f64; 2], toggle: bool) -> Option<LayerId> {
     if toggle {
         let hit = layer_at(ectx, cpt)?.id;
-        let _ = app.session.execute("layer.select", json!({"layers": [hit.0], "toggle": true}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"layers": [hit.0], "toggle": true}));
         return Some(hit);
     }
     let selected = &app.session.state.selected_layers;
     let hits: Vec<LayerId> = layers_at(ectx, cpt).map(|l| l.id).collect();
     let hit = *hits.iter().find(|id| selected.contains(id)).or(hits.first())?;
     if !selected.contains(&hit) {
-        let _ = app.session.execute("layer.select", json!({"layers": [hit.0]}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"layers": [hit.0]}));
     }
     Some(hit)
 }
@@ -207,7 +207,7 @@ pub(super) fn create_shape(app: &mut EffectcraftApp, tool: Tool, a: [f64; 2], b:
             let p0 = inv.apply(gv2(cx - w / 2.0, cy - h / 2.0));
             let p1 = inv.apply(gv2(cx + w / 2.0, cy + h / 2.0));
             let rect = [p0.x.min(p1.x), p0.y.min(p1.y), (p1.x - p0.x).abs(), (p1.y - p0.y).abs()];
-            if let Err(e) = app.session.execute("layer.addMask", json!({"layer": l.id.0, "shape": kind, "rect": rect})) {
+            if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.addMask", json!({"layer": l.id.0, "shape": kind, "rect": rect})) {
                 app.ui.status = e.to_string();
             }
         }
@@ -215,7 +215,7 @@ pub(super) fn create_shape(app: &mut EffectcraftApp, tool: Tool, a: [f64; 2], b:
     }
     // Into the selected shape layer's Contents as a new group (as in After Effects), else a new
     // shape layer; painted with the Tools bar's Fill and Stroke.
-    if let Err(e) = app.session.execute("shape.newShape", json!({"kind": kind, "size": [w, h], "position": [cx, cy]})) {
+    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "shape.newShape", json!({"kind": kind, "size": [w, h], "position": [cx, cy]})) {
         app.ui.status = e.to_string();
     }
 }

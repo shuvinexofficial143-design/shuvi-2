@@ -531,7 +531,7 @@ pub(crate) fn begin_key_drag(app: &mut EffectcraftApp, hits: &[KeyHit], press: P
         None => {
             let k = KeyRef { layer: h.layer, prop: h.prop, time: h.time };
             if !app.session.state.selected_keys.contains(&k) || shift {
-                let _ = app.session.execute("keys.select", json!({"keys": [{"layer": h.layer.0, "prop": h.prop, "time": h.time.seconds()}], "add": shift}));
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.select", json!({"keys": [{"layer": h.layer.0, "prop": h.prop, "time": h.time.seconds()}], "add": shift}));
             }
             Some(Drag::Key { layer: h.layer, prop: h.prop, time: h.time, start: h.value, press: cpt, inv })
         }
@@ -575,7 +575,7 @@ pub(crate) fn begin_feather(app: &mut EffectcraftApp, ectx: &EvalCtx, paths: &[P
     let masks: Vec<PathInfo> = paths.iter().filter(|p| p.is_mask).cloned().collect();
     let (layer, uid, seg, t) = segment_at(&masks, map, press, 10.0)?;
     let inv = masks.iter().find(|p| p.layer == layer && p.uid == uid)?.m.inverse()?;
-    let r = app.session.execute("mask.featherPoint.add", json!({"layer": layer.0, "mask": uid, "segment": seg, "t": t, "radius": 0}));
+    let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.featherPoint.add", json!({"layer": layer.0, "mask": uid, "segment": seg, "t": t, "radius": 0}));
     match r {
         Ok(v) => Some(Drag::Feather { layer, mask: uid, index: v["index"].as_u64()? as usize, inv }),
         Err(e) => {
@@ -607,7 +607,7 @@ pub(crate) fn update(
             target = [target[0] + s[0], target[1] + s[1]];
             let p = inv.apply(gv2(target[0], target[1]));
             let v = json!([p.x, p.y, start[2]]);
-            let r = app.session.execute("keys.set", json!({"layer": layer.0, "prop": prop, "time": time.seconds(), "value": v, "merge": merge}));
+            let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.set", json!({"layer": layer.0, "prop": prop, "time": time.seconds(), "value": v, "merge": merge}));
             if let Err(e) = r {
                 app.ui.status = e.to_string();
             }
@@ -618,7 +618,7 @@ pub(crate) fn update(
             let tg = json!([p.x - key[0], p.y - key[1], 0.0]);
             let mut q = json!({"layer": layer.0, "prop": prop, "time": time.seconds(), "break": mods.alt, "merge": merge});
             q[if out { "out" } else { "in" }] = tg;
-            let _ = app.session.execute("keys.setSpatialTangents", q);
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.setSpatialTangents", q);
             None
         }
         Drag::Ft { layer, path, mode, anchor, last, inv, axes } => {
@@ -649,7 +649,7 @@ pub(crate) fn update(
                 }
             }
             if cur != last {
-                let _ = app.session.execute("path.freeTransform", q);
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "path.freeTransform", q);
             }
             Some(Drag::Ft { layer, path, mode, anchor, last: cur, inv, axes })
         }
@@ -657,7 +657,7 @@ pub(crate) fn update(
             let p = inv.apply(gv2(cpt[0], cpt[1]));
             let _ = (pos, zoom);
             let q = json!({"layer": layer.0, "mask": mask, "index": index, "toward": [p.x, p.y], "merge": merge});
-            if let Err(e) = app.session.execute("mask.featherPoint.set", q) {
+            if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.featherPoint.set", q) {
                 app.ui.status = e.to_string();
             }
             None

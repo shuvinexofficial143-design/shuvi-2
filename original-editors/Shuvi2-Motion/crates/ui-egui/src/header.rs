@@ -219,7 +219,7 @@ fn snapping_toggle(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painte
     // The engine owns snapping (View ▸ Snapping); the checkbox mirrors it.
     app.ui.snapping = app.session.state.snapping;
     if widgets::checkbox(ui, snap, app.ui.snapping, &t, egui::Id::unique("snapping")).clicked() {
-        let _ = app.session.execute("view.snapping", serde_json::json!({}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.snapping", serde_json::json!({}));
         app.ui.snapping = app.session.state.snapping;
     }
     app.auto.add("header.snapping", snap, "Snapping");
@@ -254,7 +254,7 @@ fn community_buttons(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Pain
     p.galley(pos2(discord.min.x + 30.0, cy - label.size().y / 2.0), label, Color32::WHITE);
     app.auto.add("header.discord", discord, "Join the ArtCraft Discord");
     if dresp.on_hover_text(tr("Join the ArtCraft community on Discord")).clicked() {
-        let _ = app.session.execute("help.discord", json!({}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "help.discord", json!({}));
     }
     rx = discord.min.x - 6.0;
     for (id, icon, tip, cmd) in
@@ -262,7 +262,7 @@ fn community_buttons(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Pain
     {
         let r = Rect::from_min_max(pos2(rx - 26.0, cy - 13.0), pos2(rx, cy + 13.0));
         if widgets::icon_button(ui, r, icon, false, &t, egui::Id::unique(id)).on_hover_text(tip).clicked() {
-            let _ = app.session.execute(cmd, json!({}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, cmd, json!({}));
         }
         app.auto.add(&format!("header.{}", &id[4..]), r, tip);
         rx = r.min.x - 4.0;
@@ -389,7 +389,7 @@ fn snapping_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, r: Rect) {
     let f = app.session.state.snap_features;
     let items: Vec<String> = vw::SnapFeatures::OPTIONS.iter().map(|(k, label)| widgets::check_label(f.option(k), label)).collect();
     if let Some((k, _)) = widgets::popup_menu(ui, pop, r.left_bottom(), &items, None).and_then(|i| vw::SnapFeatures::OPTIONS.get(i))
-        && let Err(e) = app.session.execute("view.snappingOptions", json!({"toggle": k}))
+        && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.snappingOptions", json!({"toggle": k}))
     {
         app.ui.status = e.to_string();
     }
@@ -397,7 +397,7 @@ fn snapping_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, r: Rect) {
 
 /// Set the shape tools' options (`shape.toolOptions`).
 fn tool_options(app: &mut EffectcraftApp, v: serde_json::Value) {
-    if let Err(e) = app.session.execute("shape.toolOptions", v) {
+    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "shape.toolOptions", v) {
         app.ui.status = e.to_string();
     }
 }
@@ -452,7 +452,7 @@ fn fill_stroke_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Pa
             return;
         }
         let merge = format!("tool-{key}");
-        if let Err(e) = app.session.execute("shape.fillStroke", json!({"layers": shape_layers, key: v, "merge": merge})) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "shape.fillStroke", json!({"layers": shape_layers, key: v, "merge": merge})) {
             app.ui.status = e.to_string();
         }
     };
@@ -538,7 +538,7 @@ fn paint_kind(app: &mut EffectcraftApp, shape_layers: &[u64], key: &str, kind: P
     if let (PaintKind::Solid, Some(o)) = (kind, v.as_object_mut()) {
         o.insert(key.to_string(), json!(color));
     }
-    if let Err(e) = app.session.execute("shape.fillStroke", v) {
+    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "shape.fillStroke", v) {
         app.ui.status = e.to_string();
     }
 }
@@ -670,7 +670,7 @@ fn roto_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, 
     );
     app.auto.add("header.roto.diameter", r, label);
     if let Some(nv) = nv
-        && let Err(e) = app.session.execute("roto.options", json!({key: nv}))
+        && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "roto.options", json!({key: nv}))
     {
         app.ui.status = e.to_string();
     }
@@ -686,7 +686,7 @@ fn puppet_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter
     x += 40.0;
     let show = Rect::from_min_size(pos2(x, cy - 10.0), vec2(20.0, 20.0));
     if widgets::checkbox(ui, show, o.show_mesh, &t, egui::Id::unique("puppet-show-mesh")).clicked() {
-        let _ = app.session.execute("puppet.mesh", json!({"showMesh": !o.show_mesh}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.mesh", json!({"showMesh": !o.show_mesh}));
     }
     app.auto.add("header.puppet.showMesh", show, "Show mesh");
     p.text(pos2(show.max.x + 2.0, cy), Align2::LEFT_CENTER, tr("Show"), Tokens::ui(12.0), t.text_dim);
@@ -704,7 +704,7 @@ fn puppet_options(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter
         );
         app.auto.add(&format!("header.puppet.{key}"), r, label);
         if let Some(nv) = nv {
-            let _ = app.session.execute("puppet.mesh", json!({key: nv, "merge": format!("puppet-opt-{key}")}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.mesh", json!({key: nv, "merge": format!("puppet-opt-{key}")}));
         }
         x = r.max.x + 12.0;
     }

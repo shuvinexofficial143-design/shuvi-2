@@ -95,8 +95,8 @@ pub fn draw(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect, cid: ItemId
     // Keep the former banner automation id as an alias for the unified error strip.
     app.auto.add("viewer.expressionErrorBanner", msg_rect, &e.describe(&comp_name));
     if resp.clicked() {
-        let _ = app.session.execute("layer.select", json!({"comp": cid.0, "layers": [e.layer]}));
-        let _ = app.session.execute("prop.select", json!({"comp": cid.0, "layer": e.layer, "prop": e.prop, "selectKeys": false}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"comp": cid.0, "layers": [e.layer]}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.select", json!({"comp": cid.0, "layer": e.layer, "prop": e.prop, "selectKeys": false}));
         let _ = crate::menus::frontend(app, &ctx, "timeline.revealProps", json!({"props": [{"layer": e.layer, "prop": e.prop}]}));
         app.ui.timeline.expr_closed.remove(&e.prop);
     }

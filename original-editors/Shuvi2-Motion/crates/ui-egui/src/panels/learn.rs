@@ -55,7 +55,7 @@ pub fn home_tab(app: &mut EffectcraftApp, ui: &mut egui::Ui, area: Rect) {
         app.auto.add(&format!("home.learn.{}.start", tut.id), br, label);
         if clicked || resp.clicked() {
             if running.as_deref() != Some(tut.id.as_str())
-                && let Err(e) = app.session.execute("learn.start", json!({"id": tut.id}))
+                && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "learn.start", json!({"id": tut.id}))
             {
                 app.ui.status = e.to_string();
             }
@@ -189,16 +189,16 @@ pub fn coach(app: &mut EffectcraftApp, ctx: &egui::Context) {
     app.auto.add("learn.coach", area.response.rect, &tut.title);
     match action {
         Some("close") => {
-            let _ = app.session.execute("learn.stop", json!({}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "learn.stop", json!({}));
         }
         Some("more") => {
-            let _ = app.session.execute("learn.stop", json!({}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "learn.stop", json!({}));
             app.ui.home_learn = true;
             app.ui.home_templates = false;
             app.ui.start_screen = true;
         }
         Some(a) => {
-            if let Err(e) = app.session.execute("learn.step", json!({"action": a})) {
+            if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "learn.step", json!({"action": a})) {
                 app.ui.status = e.to_string();
             }
         }

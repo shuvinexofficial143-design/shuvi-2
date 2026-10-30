@@ -137,14 +137,14 @@ pub(super) fn draw_rigs(
 /// layer, or a new shape layer when nothing is selected. The placed point snaps.
 /// Add a Position keyframe at a motion path's frame, keeping the path where it is.
 pub(super) fn add_motion_key(app: &mut EffectcraftApp, f: ov::PathFrame) {
-    if let Err(e) = app.session.execute("prop.addKey", json!({"layer": f.layer.0, "prop": f.prop, "time": f.time.seconds()})) {
+    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.addKey", json!({"layer": f.layer.0, "prop": f.prop, "time": f.time.seconds()})) {
         app.ui.status = e.to_string();
     }
 }
 
 /// Select only the motion path's keyframe `k` (what the vertex tools act on).
 pub(super) fn select_motion_key(app: &mut EffectcraftApp, k: &ov::KeyHit) -> bool {
-    app.session.execute("keys.select", json!({"keys": [{"layer": k.layer.0, "prop": k.prop, "time": k.time.seconds()}]})).is_ok()
+    app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.select", json!({"keys": [{"layer": k.layer.0, "prop": k.prop, "time": k.time.seconds()}]})).is_ok()
 }
 
 /// The pointer for a Pen slot tool: the tool's own pen, the Pen showing Add Vertex's over a path
@@ -209,7 +209,7 @@ pub(super) fn pen_press(
             map.to_screen([q.x, q.y])
         });
         if n >= 2 && first.is_some_and(|f| f.distance(pos) < 8.0) {
-            let _ = app.session.execute("mask.setClosed", json!({"layer": lid.0, "mask": uid, "closed": true}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.setClosed", json!({"layer": lid.0, "mask": uid, "closed": true}));
             ui.data_mut(|d| {
                 d.remove::<(LayerId, u64)>(pen_id());
                 d.remove::<Gesture>(gid);
@@ -224,7 +224,7 @@ pub(super) fn pen_press(
         };
         let lp = inv.apply(gv2(c[0], c[1]));
         let lp = [lp.x, lp.y];
-        if let Ok(v) = app.session.execute("mask.addVertex", json!({"layer": lid.0, "mask": uid, "point": lp})) {
+        if let Ok(v) = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.addVertex", json!({"layer": lid.0, "mask": uid, "point": lp})) {
             let index = v.as_u64().unwrap_or(0) as usize;
             ui.data_mut(|d| d.insert_temp(gid, Gesture::Pen { layer: lid, mask: uid, index, vertex: lp, inv, press: pos }));
         }
@@ -241,7 +241,7 @@ pub(super) fn pen_press(
         return;
     }
     if let Some((l, m, seg, t)) = ov::segment_at(paths, map, pos, 5.0) {
-        let _ = app.session.execute("mask.insertVertex", json!({"layer": l.0, "mask": m, "segment": seg, "t": t}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.insertVertex", json!({"layer": l.0, "mask": m, "segment": seg, "t": t}));
         return;
     }
     let target = app
@@ -256,20 +256,20 @@ pub(super) fn pen_press(
         Some(l) if !matches!(l.source, LayerSource::Shape) || app.session.state.shape_tool.creates_mask => {
             let Some(inv) = l2c(ectx, l).0.inverse() else { return };
             let lp = inv.apply(gv2(c[0], c[1]));
-            let Ok(v) = app.session.execute("mask.new", json!({"layer": l.id.0, "vertices": [[lp.x, lp.y]]})) else { return };
+            let Ok(v) = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.new", json!({"layer": l.id.0, "vertices": [[lp.x, lp.y]]})) else { return };
             let Some(mask) = v["mask"].as_u64() else { return };
             (l.id, mask, inv)
         }
         Some(l) => {
             let Some(inv) = l2c(ectx, l).0.inverse() else { return };
             let lp = inv.apply(gv2(c[0], c[1]));
-            let r = app.session.execute("shape.newPath", json!({"layer": l.id.0, "vertices": [[lp.x, lp.y]], "space": "layer"}));
+            let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "shape.newPath", json!({"layer": l.id.0, "vertices": [[lp.x, lp.y]], "space": "layer"}));
             let Some(path) = r.ok().and_then(|v| v["path"].as_u64()) else { return };
             (l.id, path, inv)
         }
         None => {
             // A new shape layer at the comp centre (unrotated: comp → layer is a translation).
-            let r = app.session.execute("shape.newPath", json!({"vertices": [c], "space": "comp"}));
+            let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "shape.newPath", json!({"vertices": [c], "space": "comp"}));
             let Some(v) = r.ok() else { return };
             let (Some(l), Some(path)) = (v["layer"].as_u64(), v["path"].as_u64()) else { return };
             let inv = Mat3::translate(gv2(-(ectx.comp.width as f64) / 2.0, -(ectx.comp.height as f64) / 2.0));

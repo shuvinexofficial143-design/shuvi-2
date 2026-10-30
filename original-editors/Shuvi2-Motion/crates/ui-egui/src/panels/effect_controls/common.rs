@@ -46,7 +46,7 @@ pub fn reveal_applied(app: &mut EffectcraftApp, params: &serde_json::Value) {
     {
         // Show that layer (dropped on an unselected one), keeping the new effect selected.
         let props = app.session.state.selected_props.clone();
-        match app.session.execute("layer.select", json!({"layers": [l.0]})) {
+        match app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"layers": [l.0]})) {
             Ok(_) => app.session.state.selected_props = props,
             Err(e) => app.ui.status = e.to_string(),
         }
@@ -88,7 +88,7 @@ pub fn choose_files_after_apply(app: &mut EffectcraftApp, applied: &serde_json::
     let exts: Vec<&str> = filters.iter().map(String::as_str).collect();
     let Some(path) = pick(&exts).into_iter().next() else { return };
     for (layer, prop) in targets {
-        if let Err(e) = app.session.execute("prop.set", json!({"layer": layer, "prop": prop, "value": path})) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": layer, "prop": prop, "value": path})) {
             app.ui.status = e.to_string();
         }
     }

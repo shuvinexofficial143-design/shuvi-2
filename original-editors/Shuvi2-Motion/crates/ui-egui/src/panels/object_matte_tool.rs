@@ -105,10 +105,10 @@ pub fn apply(app: &mut EffectcraftApp, ectx: &EvalCtx, map: &ViewerMap, a: Pos2,
         q["effect"] = json!(uid);
     }
     let lid = layer.id;
-    match app.session.execute("objectMatte.apply", q) {
+    match app.motion_owner_gate.manual_menu_command(&mut app.session, "objectMatte.apply", q) {
         Ok(r) => {
             if let Some(uid) = r["effect"].as_u64() {
-                let _ = app.session.execute("prop.select", json!({"layer": lid.0, "prop": uid}));
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.select", json!({"layer": lid.0, "prop": uid}));
             }
         }
         Err(e) => app.ui.status = e.to_string(),

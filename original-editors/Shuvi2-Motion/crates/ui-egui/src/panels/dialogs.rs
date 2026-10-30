@@ -335,7 +335,7 @@ fn about(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
         });
     });
     if let Some(c) = cmd {
-        let _ = app.session.execute(c, json!({}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, c, json!({}));
     }
     if close {
         app.dialog = None;
@@ -414,7 +414,7 @@ fn comp_settings(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens, exis
     // Enter that saved a preset name (or while one is typed) doesn't also press OK.
     let preset_busy = !cmds.is_empty() || d.preset_name.is_some();
     for (id, params) in cmds {
-        if let Err(e) = app.session.execute(id, params) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, id, params) {
             app.ui.status = e.to_string();
         }
     }
@@ -428,7 +428,7 @@ fn comp_settings(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens, exis
             if existing && let (Some(cid), Some(m)) = (app.dialog_state.editing_comp, params.as_object_mut()) {
                 m.insert("comp".into(), json!(cid.0));
             }
-            let r = if existing { app.session.execute("comp.settings", params) } else { app.session.execute("comp.new", params) };
+            let r = if existing { app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.settings", params) } else { app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.new", params) };
             let cid = if existing { app.dialog_state.editing_comp.map(|c| c.0) } else { r.as_ref().ok().and_then(|v| v["comp"].as_u64()) };
             let r = match cid {
                 Some(cid) if r.is_ok() => set_resolution(app, cid, app.dialog_state.comp.resolution).and(r),
@@ -450,8 +450,8 @@ fn comp_settings(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens, exis
 /// saved with the project but no undo step, so it stays out of `comp.new` / `comp.settings`.
 fn set_resolution(app: &mut EffectcraftApp, cid: u64, r: effectcraft_engine::project::Resolution) -> effectcraft_engine::Result<Value> {
     match r.factor() {
-        None => app.session.execute("view.res.auto", json!({"comp": cid})),
-        Some(n) => app.session.execute("view.res.custom", json!({"comp": cid, "factor": n})),
+        None => app.motion_owner_gate.manual_menu_command(&mut app.session, "view.res.auto", json!({"comp": cid})),
+        Some(n) => app.motion_owner_gate.manual_menu_command(&mut app.session, "view.res.custom", json!({"comp": cid, "factor": n})),
     }
 }
 
@@ -592,7 +592,7 @@ fn solid(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     let ds = &mut app.dialog_state;
     (ds.solid_name, ds.solid_color, ds.solid_size, ds.solid_pixel_aspect, ds.solid_affect_all) = (name, color, size, par, affect_all);
     if ok || ui_enter(ctx) {
-        if let Err(e) = app.session.execute(solid_command(ds), solid_params(ds)) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, solid_command(ds), solid_params(ds)) {
             app.ui.status = e.to_string();
         }
         close = true;
@@ -734,7 +734,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
         crate::theme::install(&ctx, &app.tokens, crate::i18n::language(&app));
-        app.session.execute("comp.new", json!({"name": "Main", "width": 640, "height": 360})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.new", json!({"name": "Main", "width": 640, "height": 360})).unwrap();
         (app, ctx)
     }
 
@@ -807,7 +807,7 @@ mod tests {
     fn layer_settings_opens_solid_settings_on_the_layers_solid() {
         let (mut app, ctx) = app();
         let a =
-            app.session.execute("layer.newSolid", json!({"name": "Red", "color": "#ff0000", "width": 200, "height": 100})).unwrap()["layer"].as_u64().unwrap();
+            app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.newSolid", json!({"name": "Red", "color": "#ff0000", "width": 200, "height": 100})).unwrap()["layer"].as_u64().unwrap();
         crate::menus::invoke(&mut app, &ctx, "layer.settings", json!({})).unwrap();
         assert_eq!(app.dialog, Some(Dialog::SolidSettings));
         let d = &app.dialog_state;
@@ -819,19 +819,19 @@ mod tests {
         // Only this layer uses the solid: OK changes it in place.
         app.dialog_state.solid_color = [0.0, 1.0, 0.0];
         assert_eq!(solid_command(&app.dialog_state), "layer.settings");
-        app.session.execute(solid_command(&app.dialog_state), solid_params(&app.dialog_state)).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, solid_command(&app.dialog_state), solid_params(&app.dialog_state)).unwrap();
         let item = solid_item(&app, a);
         assert!(matches!(&app.session.project.item(item).unwrap().kind, ItemKind::Solid(so) if so.color == [0.0, 1.0, 0.0]));
         // Shared with a duplicate: "Affect all" starts off, and OK gives the layer its own solid.
-        let b = app.session.execute("edit.duplicate", json!({})).unwrap()[0].as_u64().unwrap();
+        let b = app.motion_owner_gate.manual_menu_command(&mut app.session, "edit.duplicate", json!({})).unwrap()[0].as_u64().unwrap();
         crate::menus::invoke(&mut app, &ctx, "layer.settings", json!({"layer": b})).unwrap();
         assert!(app.dialog_state.solid_shared && !app.dialog_state.solid_affect_all);
         app.dialog_state.solid_size = [64, 64];
-        app.session.execute(solid_command(&app.dialog_state), solid_params(&app.dialog_state)).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, solid_command(&app.dialog_state), solid_params(&app.dialog_state)).unwrap();
         assert_ne!(solid_item(&app, a), solid_item(&app, b));
         assert!(matches!(&app.session.project.item(solid_item(&app, a)).unwrap().kind, ItemKind::Solid(so) if so.width == 200));
         // A null asks for its name; New Solid makes a solid with the comp's pixel aspect.
-        app.session.execute("layer.newNull", json!({})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.newNull", json!({})).unwrap();
         crate::menus::invoke(&mut app, &ctx, "layer.settings", json!({})).unwrap();
         assert_eq!((app.dialog, app.dialog_state.form.command.as_str()), (Some(Dialog::Form), "layer.settings"));
         open_new_solid(&mut app).unwrap();
@@ -841,8 +841,8 @@ mod tests {
     #[test]
     fn new_comp_from_selection_asks_when_several_items_are_selected() {
         let (mut app, ctx) = app();
-        let a = app.session.execute("file.importSolid", json!({"name": "A", "width": 100, "height": 50})).unwrap();
-        let b = app.session.execute("file.importSolid", json!({"name": "B", "width": 300, "height": 50})).unwrap();
+        let a = app.motion_owner_gate.manual_menu_command(&mut app.session, "file.importSolid", json!({"name": "A", "width": 100, "height": 50})).unwrap();
+        let b = app.motion_owner_gate.manual_menu_command(&mut app.session, "file.importSolid", json!({"name": "B", "width": 300, "height": 50})).unwrap();
         let ids: Vec<ItemId> = [a, b].iter().map(|r| ItemId(r["item"].as_u64().unwrap())).collect();
         app.session.state.project_selection = vec![ids[0]];
         // One item: made at once.
@@ -908,7 +908,7 @@ mod tests {
         use effectcraft_engine::project::Resolution;
         let (mut app, ctx) = app();
         let cid = app.session.active_comp_id().unwrap();
-        app.session.execute("view.res.third", json!({})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "view.res.third", json!({})).unwrap();
         open_comp_settings(&mut app).unwrap();
         assert_eq!(app.dialog_state.comp.resolution, Resolution::Third, "the dialog opens on the comp's Resolution");
         frame(&mut app, &ctx);
@@ -920,7 +920,7 @@ mod tests {
         let c = app.session.project.comp(cid).unwrap();
         assert_eq!((c.width, c.resolution), (700, Resolution::Half));
         assert_eq!(app.session.history.undo.len(), steps + 1, "Composition Settings is one undo step");
-        app.session.execute("edit.undo", json!({})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "edit.undo", json!({})).unwrap();
         let c = app.session.project.comp(cid).unwrap();
         assert_eq!((c.width, c.resolution), (640, Resolution::Half), "undo keeps the Resolution");
         // Only the Resolution changed: still set, and no extra step.

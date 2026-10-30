@@ -311,7 +311,7 @@ fn rail_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, rail:
         p.text(pos2(r.min.x + 30.0, r.center().y), Align2::LEFT_CENTER, tr(label), Tokens::medium(12.0), col);
         app.auto.add(&format!("home.{cmd}"), r, label);
         if resp.clicked() {
-            let _ = app.session.execute(cmd, json!({}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, cmd, json!({}));
         }
         cy += 30.0;
     }
@@ -325,7 +325,7 @@ fn rail_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, rail:
         p.text(r.center(), Align2::CENTER_CENTER, *name, Tokens::ui(11.0), t.text);
         app.auto.add(&format!("home.sibling.{slug}"), r, name);
         if resp.clicked() {
-            let _ = app.session.execute("help.sibling", json!({"app": slug}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "help.sibling", json!({"app": slug}));
         }
     }
 }
@@ -631,7 +631,7 @@ mod tests {
         }
         assert!(app.auto.find("home.recent.0").is_none());
         // Start through the session (as the Start button does); the coach card appears.
-        app.session.execute("learn.start", json!({"id": "animate-title"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "learn.start", json!({"id": "animate-title"})).unwrap();
         app.ui.start_screen = false;
         frame(&mut app);
         frame(&mut app);
@@ -639,7 +639,7 @@ mod tests {
             assert!(app.auto.find(id).is_some(), "{id}");
         }
         // Show me performs the step and the coach moves on.
-        app.session.execute("learn.step", json!({"action": "showMe"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "learn.step", json!({"action": "showMe"})).unwrap();
         assert_eq!(app.session.learn.as_ref().unwrap().step, 1);
         assert!(app.session.active_comp().is_some());
     }

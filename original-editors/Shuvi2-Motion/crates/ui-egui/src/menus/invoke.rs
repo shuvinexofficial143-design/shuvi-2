@@ -445,7 +445,7 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
         app.set_theme(ctx, k);
         return Ok(Value::Null);
     }
-    let timing = |app: &mut EffectcraftApp, op: &str| app.session.execute("layer.timing", json!({"op": op})).map_err(|e| e.to_string());
+    let timing = |app: &mut EffectcraftApp, op: &str| app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.timing", json!({"op": op})).map_err(|e| e.to_string());
     match id {
         "playback.ramPreview" => {
             app.toggle_play_with(now, effectcraft_engine::preview::PreviewShortcut::Numpad0);
@@ -598,8 +598,8 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
                 tl.open_layers.extend(sel);
             }
         }
-        "timeline.workAreaBegin" => return app.session.execute("comp.workArea", json!({"set": "begin"})).map_err(|e| e.to_string()),
-        "timeline.workAreaEnd" => return app.session.execute("comp.workArea", json!({"set": "end"})).map_err(|e| e.to_string()),
+        "timeline.workAreaBegin" => return app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.workArea", json!({"set": "begin"})).map_err(|e| e.to_string()),
+        "timeline.workAreaEnd" => return app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.workArea", json!({"set": "end"})).map_err(|e| e.to_string()),
         "timeline.moveInToTime" => return timing(app, "moveInToTime"),
         "timeline.moveOutToTime" => return timing(app, "moveOutToTime"),
         "timeline.trimInToTime" => return timing(app, "trimInToTime"),
@@ -624,10 +624,10 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
                     p = json!({"wait": false});
                 }
                 app.show_panel(PanelKind::RenderQueue);
-                return app.session.execute(id, p).map_err(|e| e.to_string());
+                return app.motion_owner_gate.manual_menu_command(&mut app.session, id, p).map_err(|e| e.to_string());
             }
             if id == "renderQueue.add" {
-                let r = app.session.execute(id, params).map_err(|e| e.to_string());
+                let r = app.motion_owner_gate.manual_menu_command(&mut app.session, id, params).map_err(|e| e.to_string());
                 match &r {
                     Ok(_) => app.show_panel(PanelKind::RenderQueue),
                     Err(e) => app.ui.status = e.clone(),
@@ -653,10 +653,10 @@ pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: V
                     p = json!({"wait": false});
                 }
                 app.show_panel(PanelKind::RenderQueue);
-                return app.session.execute(id, p).map_err(|e| e.to_string());
+                return app.motion_owner_gate.manual_menu_command(&mut app.session, id, p).map_err(|e| e.to_string());
             }
             if id == "renderQueue.add" {
-                let r = app.session.execute(id, params).map_err(|e| e.to_string());
+                let r = app.motion_owner_gate.manual_menu_command(&mut app.session, id, params).map_err(|e| e.to_string());
                 match &r {
                     Ok(_) => app.show_panel(PanelKind::RenderQueue),
                     Err(e) => app.ui.status = e.clone(),

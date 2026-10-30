@@ -574,7 +574,7 @@ pub fn options_dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens)
             "name": d.name, "channel": channel, "blur": if d.blur_on { o.blur } else { 0.0 }, "enhance": o.enhance,
             "subpixel": o.subpixel, "adaptEveryFrame": o.adapt_every_frame, "threshold": o.threshold, "action": action, "trackShape": o.track_shape,
         });
-        if let Err(e) = app.session.execute("track.options", p) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "track.options", p) {
             app.ui.status = e.to_string();
         }
         cancel = true;
@@ -610,7 +610,7 @@ pub fn target_dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) 
     });
     app.dialog_state.track_target = d.clone();
     if ok || super::dialogs::ui_enter(ctx) {
-        if let Err(e) = app.session.execute("track.setTarget", json!({"target": d.target})) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "track.setTarget", json!({"target": d.target})) {
             app.ui.status = e.to_string();
         }
         cancel = true;
@@ -642,7 +642,7 @@ pub fn apply_dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     app.dialog_state.track_apply = d.clone();
     if ok || super::dialogs::ui_enter(ctx) {
         let dims = ["xy", "x", "y"][d.dims.min(2)];
-        if let Err(e) = app.session.execute("track.apply", json!({"dimensions": dims})) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "track.apply", json!({"dimensions": dims})) {
             app.ui.status = e.to_string();
         }
         cancel = true;
