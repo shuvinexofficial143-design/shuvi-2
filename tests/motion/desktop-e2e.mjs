@@ -101,13 +101,25 @@ async function test(){
       const listed=await text("#motion-layer-list");
       assert.match(listed,/WebDriver Shape/);
     });
-    await step("apply native effect then native mask",async()=>{
+    await step("effect parameters and polygon mask visibly change real rendered PNG",async()=>{
+      const original=await attr("#motion-native-frame","src");
+      assert.match(original,/^data:image\/png;base64,/);
       await click("#motion-add-effect");
       await ready("Applying native effect · native verification complete",60000);
       assert.match(await text("#motion-effect-list"),/Gaussian Blur/);
+      await fill("#motion-fx-value","28");
+      await click("#motion-set-effect");
+      await ready("Editing native effect parameter · native verification complete",60000);
+      const blurred=await attr("#motion-native-frame","src");
+      assert.match(blurred,/^data:image\/png;base64,/);
+      assert.notEqual(blurred,original,"Gaussian Blur failed to change real native preview bytes");
       await click("#motion-add-mask");
       await ready("Creating native polygon mask · native verification complete",60000);
       assert.match(await text("#motion-mask-list"),/Mask 1/);
+      const masked=await attr("#motion-native-frame","src");
+      assert.match(masked,/^data:image\/png;base64,/);
+      assert.notEqual(masked,blurred,"Polygon mask did not change native pixels");
+      result.frames={originalBytes:original.length,blurredBytes:blurred.length,maskedBytes:masked.length};
     });
     await step("save persistent .ecproj and export real PNG to owner temp workspace",async()=>{
       await fill("#motion-workspace",root);
@@ -125,6 +137,25 @@ async function test(){
       assert.ok(png.length>100,"PNG is empty");
       result.pngBytes=png.length;
       result.projectBytes=project.size;
+      // Native owner-owned export must refuse overwriting a real existing file.
+      await click("#motion-export-png");
+      await waitFor("native no-overwrite error",async()=>{
+        const status=await text("#motion-status");
+        return status.startsWith("FAIL:")&&status.includes("cannot create new PNG")?status:null;
+      });
+      assert.deepEqual(await readFile(path.join(root,"webview_e2e.png")),png,
+        "Second PNG export unexpectedly overwrote the owner file");
+    });
+    await step("open saved native project from disk and restore effects and masks",async()=>{
+      await click("#motion-open");
+      await ready("Opening native project · native verification complete",60000);
+      await waitFor("persisted shape layer",async=>
+        (await text("#motion-layer-list")).includes("WebDriver Shape"));
+      await click("#motion-layer-list .motion-layer");
+      await ready("Selecting native layer · native verification complete",60000);
+      assert.match(await text("#motion-effect-list"),/Gaussian Blur/);
+      assert.match(await text("#motion-mask-list"),/Mask 1/);
+      assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
     });
     await step("switch Video -> Motion and keep native state",async()=>{
       await click('button[data-studio="video"]');
@@ -140,7 +171,7 @@ async function test(){
       result.nativeScreenshot="motion-windows-webview2.png";
     });
     result.ok=true;
-    result.proof="clicked-webview2-native-effectcraft-save-export";
+    result.proof="clicked-webview2-native-effects-masks-pixel-diffs-save-open-no-overwrite";
     await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify(result,null,2));
     process.stdout.write(JSON.stringify(result)+"\n");
   }catch(error){
