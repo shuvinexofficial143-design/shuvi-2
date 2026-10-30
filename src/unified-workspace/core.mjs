@@ -94,8 +94,8 @@ export function createWorkspaceController(native) {
   async function readVideo(root, projectPath) {
     if(!nonempty(root)||!nonempty(projectPath)) fail("PATH_REQUIRED","Choose a real folder and .fcproj file");
     const snapshot=checkVideo(await native.videoSnapshot(root,projectPath));
-    if(snapshot.projectPath!==projectPath) fail("PATH_MISMATCH","Native project path differs from the selected path");
-    return {root,projectPath,snapshot,clips:clipsFromSequence(snapshot.sequence)};
+    // checked_project() canonicalizes paths; use its verified canonical return, not raw UI spelling.
+    return {root,projectPath:snapshot.projectPath,snapshot,clips:clipsFromSequence(snapshot.sequence)};
   }
   async function refreshVideo(root,projectPath) {
     return run("Inspecting native FilmCraft project", async()=>{
