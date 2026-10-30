@@ -16,7 +16,7 @@ function snapshot(engine="motion",v=4) {
   return {engine,projectId:engine==="motion"?"workspace:project.ecproj":"/owner/movie.fcproj",
     version:engine==="motion"?v:HASH,sessionId:"host-session-1"};
 }
-function rig({engine="motion",approval,execute,journalHook,readHook}={}) {
+function rig({engine="motion",approval,execute,journalHook,readHook,reserved=new Set()}={}) {
   let current=snapshot(engine);
   const events=[], calls=[];
   let director;
@@ -33,9 +33,9 @@ function rig({engine="motion",approval,execute,journalHook,readHook}={}) {
     if (approval) return approval(preview,()=>director.cancel(TASK));
     return {granted:true,taskId:preview.taskId,planHash:preview.planHash};
   }};
-  const journal={async append(event){ if (journalHook) await journalHook(event,{current,events,setCurrent:v=>{current=v;}});events.push(event); }};
+  const journal={async reserve(record){if(reserved.has(record.taskId))return false;reserved.add(record.taskId);return true;},async append(event){ if (journalHook) await journalHook(event,{current,events,setCurrent:v=>{current=v;}});events.push(event); }};
   director=new AiDirector({adapter,approval:gateway,journal});
-  return {director,events,calls,adapter,get current(){return current;},set current(x){current=x;}};
+  return {director,events,calls,adapter,journal,get current(){return current;},set current(x){current=x;}};
 }
 async function prepare(r,actions=[shape]) {
   return r.director.prepare({taskId:TASK,instruction:"Create and edit title",actions});
@@ -261,4 +261,13 @@ test("snapshot equality is exact, not session-revision guesswork",()=>{
   const a=snapshot();
   assert.equal(sameSnapshot(a,{...a}),true);
   assert.equal(sameSnapshot(a,{...a,sessionId:"changed"}),false);
+});
+
+test("atomic durable reservation blocks replay after simulated application restart",async()=>{
+  const reserved=new Set();
+  const first=rig({reserved});
+  await prepare(first);
+  const second=rig({reserved});
+  await assert.rejects(()=>prepare(second),/already reserved/);
+  assert.equal(second.calls.length,0);
 });
