@@ -197,6 +197,60 @@ mod tests {
     }
 
     #[test]
+    fn actual_effectcraft_app_control_and_menu_routes_share_admission_counter() {
+        // Exercise the real original frontend, not merely calling the gate
+        // in isolation. This test requires no provider/API key or edits by AI.
+        use crate::{EffectcraftApp, ControlRequest};
+        use crate::control::{self, Outcome};
+        let mut app = EffectcraftApp::new(Session::new());
+        let ctx = egui::Context::default();
+        let (req, _reply) = ControlRequest::new("engine.execute",json!({
+            "command":"comp.new",
+            "params":{"name":"Created via Control","width":500,"height":300,
+                "frameRate":30,"duration":3}
+        }));
+        let result = control::handle(&mut app,&ctx,&req,0.0);
+        let cid = match result {
+            Outcome::Done(json) => {
+                assert_eq!(json["ok"],true);
+                json["result"]["comp"].as_u64().unwrap()
+            }
+            _=>panic!("a native direct command must reply synchronously"),
+        };
+        assert!(app.session.project.comp(effectcraft_engine::project::ItemId(cid)).is_some());
+        assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,1);
+        crate::menus::invoke(&mut app,&ctx,"comp.new",json!({
+            "name":"Created via Menu","width":800,"height":600,
+            "frameRate":24,"duration":5
+        })).unwrap();
+        assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,2);
+        assert!(app.session.project.items.values().any(|i|i.name=="Created via Menu"));
+        assert!(!app.motion_owner_gate.status().busy);
+        assert!(app.motion_owner_gate.ai_edit_not_integrated().is_err());
+    }
+
+    #[test]
+    fn original_control_rejects_unknown_params_before_native_mutation() {
+        use crate::{EffectcraftApp, ControlRequest};
+        use crate::control::{self, Outcome};
+        let mut app = EffectcraftApp::new(Session::new());
+        let ctx=egui::Context::default();
+        let before=app.session.revision;
+        let (request,_receiver)=ControlRequest::new("engine.execute",json!({
+            "command":"comp.new",
+            "params":{"name":"Must Be Rejected","unsupportedKey":42}
+        }));
+        match control::handle(&mut app,&ctx,&request,0.0){
+            Outcome::Done(v)=>assert_eq!(v["ok"],false),
+            _=>panic!("schema rejection must be immediate"),
+        }
+        assert_eq!(app.session.revision,before);
+        assert!(!app.session.project.items.values().any(|i|i.name=="Must Be Rejected"));
+        assert_eq!(app.motion_owner_gate.status().admitted_manual_calls,1);
+        assert!(!app.motion_owner_gate.status().busy);
+    }
+
+    #[test]
     fn provider_cannot_acquire_guarded_owner_even_when_idle() {
         let gate = MotionOwnerGate::default();
         assert!(gate.ai_edit_not_integrated().is_err());
