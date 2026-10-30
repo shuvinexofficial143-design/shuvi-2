@@ -15,3 +15,6 @@ A07's canonical `GuardedHost`, SQLite WAL, trusted owner prompt and WinCred adap
 
 ## Pending verification
 Latest commit Windows Actions run tests and compile the native GUI. Previous V-AI07 run may be pending; do not report success until this exact V-AI08 HEAD passes and native Windows artifacts are uploaded. Installer GUI, Save/Reopen and H264 remain unverified.
+
+## Additional V-AI08 security fix
+Preview freshness now requires `Arc::ptr_eq` on a retained native Project allocation and the same native Project path, in addition to SHA-256, revision, document epoch and active sequence. This prevents reusing an in-memory preview on a different FilmCraft Session that happens to have identical project bytes and revision counters. The Arc is retained in memory and is not a durable project UUID or production shared owner lock. Regression test deliberately proves equal project SHA/revision across independent Sessions does not pass.

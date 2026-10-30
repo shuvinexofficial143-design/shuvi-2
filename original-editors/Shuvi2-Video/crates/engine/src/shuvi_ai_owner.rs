@@ -239,6 +239,8 @@ pub(crate) fn preflight_a07_video_plan(
         return Err(EngineError::Other("A07_PLAN_PREVIEW_STALE: editor changed while examining proposal".into()));
     }
     Ok(shuvi_ai_readonly::NativeA07PlanPreview {
+        source_project: std::sync::Arc::clone(&session.project),
+        source_project_path: session.path.clone(),
         project_sha256: source.project_sha256,
         revision: source.revision,
         document_epoch: source.document_epoch,
@@ -671,6 +673,27 @@ mod tests {
             assert!(shuvi_ai_readonly::a07_preflight_video_plan(&mut session, invalid).is_err());
             assert_eq!((session.revision, session.journal.len(), shuvi_ai_readonly::a07_native_project_sha256(&session)), before);
         }
+    }
+
+
+    #[test]
+    fn shuvi_ai08_preview_rejects_different_session_even_with_identical_sha_and_revision() {
+        let mut first = demo();
+        let clip = first.active_sequence().unwrap().video_tracks[0].items.iter()
+            .find(|c| c.start.0 < first.sequence_rate().tick_of(48).0 &&
+                first.sequence_rate().tick_of(48).0 < c.end().0).unwrap().id.0;
+        let plan = shuvi_ai_readonly::a07_preflight_video_plan(
+            &mut first,
+            json!([{"type":"video.split","clipId":clip,"seconds":2.0}])
+        ).unwrap();
+        let second = demo();
+        assert_eq!(first.revision, second.revision);
+        assert_eq!(first.document_epoch, second.document_epoch);
+        assert_eq!(shuvi_ai_readonly::a07_native_project_sha256(&first),
+            shuvi_ai_readonly::a07_native_project_sha256(&second));
+        let rejected = shuvi_ai_readonly::a07_check_plan_preview_fresh(&second, &plan).unwrap_err();
+        assert!(rejected.to_string().contains("STALE"));
+        assert!(shuvi_ai_readonly::a07_check_plan_preview_fresh(&first, &plan).is_ok());
     }
 
     #[test]

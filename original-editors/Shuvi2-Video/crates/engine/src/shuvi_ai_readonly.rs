@@ -6,6 +6,7 @@
 //! installed before adding any AI mutation capability.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -148,6 +149,10 @@ pub fn a07_preflight_video_split(session: &mut Session, proposal: Value) -> Resu
 /// Neither these numeric IDs nor the fingerprint authorize execution.
 #[derive(Debug, Clone)]
 pub struct NativeA07PlanPreview {
+    /// Retain the exact original native project allocation; cannot be set by
+    /// a WebView/model, and prevents a same-hash different-Session replay.
+    pub(crate) source_project: Arc<crate::project::Project>,
+    pub(crate) source_project_path: Option<String>,
     pub project_sha256: String,
     pub revision: u64,
     pub document_epoch: u64,
@@ -164,7 +169,9 @@ pub fn a07_preflight_video_plan(session: &mut Session, proposal: Value) -> Resul
 /// An in-memory UI warning/stale fence. The canonical A07 ledger must do an
 /// independent equivalent check inside its exclusive native Owner lock.
 pub fn a07_check_plan_preview_fresh(session: &Session, plan: &NativeA07PlanPreview) -> Result<()> {
-    if session.revision != plan.revision
+    if !Arc::ptr_eq(&session.project, &plan.source_project)
+        || session.path != plan.source_project_path
+        || session.revision != plan.revision
         || session.document_epoch != plan.document_epoch
         || session.state.active_sequence.map(|id| id.0) != Some(plan.active_sequence)
         || a07_native_project_sha256(session) != plan.project_sha256
