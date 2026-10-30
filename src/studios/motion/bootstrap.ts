@@ -49,19 +49,25 @@ function info(message:string,failed=false):void {
   el.dataset.failure = String(failed);
 }
 async function execute(label:string,work:()=>Promise<void>):Promise<void> {
-  if (busy) return;
+  if (busy) {
+    // Never silently drop an owner command while a prior operation is pending.
+    if(mounted)info("FAIL: Native editor busy; "+label+" was not accepted. Retry.",true);
+    return;
+  }
   busy = true;
   const generation=uiGeneration;
+  let error:unknown=null;
   info(label+"…");
   try {
     await work();
-    if(mounted&&generation===uiGeneration)
-      info(label+" · native verification complete");
-  } catch (error) {
-    if(mounted&&generation===uiGeneration)
-      info("FAIL: "+String(error),true);
+  } catch (failed) {
+    error=failed;
   } finally {
+    // Only report completion AFTER the UI can accept the next owner action.
     busy = false;
+    if(mounted&&generation===uiGeneration) {
+      info(error===null?label+" · native verification complete":"FAIL: "+String(error),error!==null);
+    }
     if(mounted&&pendingPreview){
       pendingPreview=false;
       void execute("Rendering latest playhead",renderFrame);
