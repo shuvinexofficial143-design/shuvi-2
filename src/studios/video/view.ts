@@ -3,6 +3,7 @@ import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import { clipDragDestination } from "./drag.mjs";
 import { timelineViewport,clipViewportBounds } from "./viewport.mjs";
+import {realClipDetail,realSequenceMarkers,revealTimeOffset} from "./inspect.mjs";
 import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
 import {shouldRefreshVideoProjectAfterActionError} from "./error-policy.mjs";
 import {videoTrackStates,videoActionPreflight} from "./track-state.mjs";
@@ -103,6 +104,17 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     </div>
     <div data-v="tracks" class="v-tracks">Open a project to load FilmCraft sequence tracks.</div>
     <div data-v="selected" class="v-muted">Click a clip to select it.</div>
+    <section class="v-native-inspector">
+      <strong>FilmCraft Clip Inspector (saved project)</strong>
+      <div data-v="clipInspector">Select a real clip to inspect its native source and timing.</div>
+      <div class="v-actions"><button type="button" data-inspect-action="reveal" disabled>Reveal Selected Clip</button>
+        <button type="button" data-inspect-action="seekClip" disabled>Seek & Render Clip Start</button></div>
+    </section>
+    <section class="v-native-markers">
+      <strong>Real Sequence Markers</strong>
+      <select data-v="markerSelect"><option value="">No saved markers</option></select>
+      <button type="button" data-inspect-action="seekMarker" disabled>Seek & Render Marker</button>
+    </section>
     <div class="v-actions"><button data-action="place">Place Media</button><button data-action="split">Split</button><button data-action="trim">Trim</button><button data-action="move">Move</button><button data-action="delete">Delete</button>
     <button data-action="undo">Undo Last Edit</button><button data-action="redo">Redo Edit</button>
     <button data-action="recover">Recover Interrupted History</button></div>
@@ -120,6 +132,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   let clips:EditorClip[]=[];
   let history:VideoHistoryStatus|null=null;
   let pending:VideoChatProposal|null=null;
+  let selectedMarkerId:number|null=null;
   const proposalEpoch=createVideoProposalEpoch();
   let busy=false,active=true;
   let disposeFrame:(()=>void)|null=null;
@@ -332,6 +345,46 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     e<HTMLElement>("selected").textContent=selected?
       "Native clip #"+selected.clipId+" · "+selected.track+" · "+selected.name:
       "Select a real clip by clicking its timeline block";
+    const nativeDetail=clipId===null?null:realClipDetail(snapshot?.sequence,clipId);
+    const description=nativeDetail
+      ? [
+          "Clip #"+nativeDetail.clipId+" • "+nativeDetail.track+" • media #"+(nativeDetail.itemId??"?"),
+          "Start "+formatTimecode(nativeDetail.start)+" • End "+formatTimecode(nativeDetail.end)+
+            " • Duration "+formatTimecode(nativeDetail.duration),
+          "Source In "+(nativeDetail.sourceIn===null?"unavailable":formatTimecode(nativeDetail.sourceIn))+
+            " • Source Out "+(nativeDetail.sourceOut===null?"unavailable":formatTimecode(nativeDetail.sourceOut)),
+          "Speed "+(nativeDetail.speed===null?"unavailable":String(nativeDetail.speed)+"×")+
+            " • Reverse "+(nativeDetail.reverse?"yes":"no")+
+            " • Effects "+nativeDetail.effectCount,
+          (nativeDetail.locked?"Locked":"Editable")+" • "+(nativeDetail.enabled?"Enabled":"Disabled")+
+            " • Gain "+(nativeDetail.gainDb===null?"unavailable":String(nativeDetail.gainDb)+" dB")
+        ].join("\n")
+      : "Select an existing native clip to inspect its saved metadata.";
+    e<HTMLElement>("clipInspector").textContent=description;
+    const nativeMarkers=realSequenceMarkers(snapshot?.sequence);
+    const markerSelect=e<HTMLSelectElement>("markerSelect");
+    markerSelect.replaceChildren();
+    const placeholder=document.createElement("option");
+    placeholder.value="";
+    placeholder.textContent=nativeMarkers.length?"Select saved marker":"No saved markers in this FilmCraft sequence";
+    markerSelect.append(placeholder);
+    for(const marker of nativeMarkers){
+      const option=document.createElement("option");
+      option.value=String(marker.id);
+      option.textContent="#"+marker.id+" · "+(marker.name||marker.kind||"Marker")+
+        " · "+formatTimecode(marker.start);
+      option.title=marker.comment;
+      markerSelect.append(option);
+    }
+    if(selectedMarkerId!==null&&nativeMarkers.some(x=>x.id===selectedMarkerId))
+      markerSelect.value=String(selectedMarkerId);
+    else selectedMarkerId=null;
+    lane.querySelectorAll<HTMLButtonElement>("button[data-inspect-action]").forEach(button=>{
+      button.disabled=busy||!active||!snapshot||(
+        button.dataset.inspectAction==="seekMarker" ? selectedMarkerId===null : nativeDetail===null
+      );
+    });
+
     panel.querySelectorAll<HTMLButtonElement>("button[data-action],button[data-choose]").forEach(b=>{b.disabled=busy});
     lane.querySelectorAll<HTMLButtonElement>("button[data-chat-approve]").forEach(b=>{
       b.disabled=busy||!active||!pending;
@@ -656,6 +709,46 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     b.addEventListener("click",()=>{void choose(b.dataset.choose??"");}));
   panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
   lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
+  e<HTMLSelectElement>("markerSelect").addEventListener("change",()=>{
+    const value=Number(e<HTMLSelectElement>("markerSelect").value);
+    selectedMarkerId=Number.isSafeInteger(value)&&value>0?value:null;
+    draw();
+  });
+  lane.querySelectorAll<HTMLButtonElement>("button[data-inspect-action]").forEach(button=>{
+    button.addEventListener("click",()=>{
+      if(!active||busy||!snapshot)return;
+      const action=button.dataset.inspectAction;
+      const chosen=clipId===null?null:realClipDetail(snapshot.sequence,clipId);
+      if(action==="reveal"){
+        if(!chosen)return;
+        const seqDuration=Math.max(1,sequenceDuration(snapshot.sequence),...clips.map(c=>c.start+c.duration));
+        const zoom=Number(e<HTMLSelectElement>("timelineZoom").value);
+        const pan=e<HTMLInputElement>("timelinePan");
+        const viewport=timelineViewport(seqDuration,zoom,Number(pan.value));
+        const target=revealTimeOffset(chosen.start,viewport);
+        if(target===null)return;
+        pan.value=String(target);
+        draw();
+        inform("Revealed real FilmCraft clip #"+chosen.clipId+" at "+formatTimecode(chosen.start));
+        return;
+      }
+      let second:number|null=null;
+      if(action==="seekClip"&&chosen)second=chosen.start;
+      if(action==="seekMarker"){
+        const marker=realSequenceMarkers(snapshot.sequence).find(m=>m.id===selectedMarkerId);
+        if(marker)second=marker.start;
+      }
+      if(second===null)return;
+      const fps=sequenceFps(snapshot.sequence);
+      const last=Math.max(0,sequenceDuration(snapshot.sequence)-(fps?1/fps:0.001));
+      const time=Math.min(last,Math.max(0,second));
+      e<HTMLInputElement>("seconds").value=String(time);
+      e<HTMLInputElement>("scrub").value=String(time);
+      e<HTMLElement>("scrubLabel").textContent=formatTimecode(time);
+      stopSampledPlayback(true);
+      try{renderCurrentFrame(true);}catch(error){inform("Native seek not verified: "+String(error),true);}
+    });
+  });
   e<HTMLSelectElement>("timelineZoom").addEventListener("change",()=>draw());
   e<HTMLInputElement>("timelinePan").addEventListener("input",()=>draw());
   const slider=e<HTMLInputElement>("scrub");
