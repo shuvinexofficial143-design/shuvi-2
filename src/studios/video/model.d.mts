@@ -7,3 +7,5 @@ export declare function sequenceDuration(sequence:unknown):number;
 export declare function formatTimecode(seconds:number):string;
 export declare function localWindowsPath(value:string):boolean;
 export declare function requireNumber(value:unknown,min:number,max:number):number;
+
+export declare function sequenceFps(sequence:unknown):number|null;

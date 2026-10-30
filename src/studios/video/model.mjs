@@ -86,3 +86,19 @@ export function requireNumber(value, min, max) {
   if (!s || !Number.isFinite(n) || n < min || n > max) throw Error("Value must be a finite number from " + min + " to " + max);
   return n;
 }
+
+
+/** Frame rate comes from saved FilmCraft sequence settings, never UI guesswork. */
+export function sequenceFps(sequence) {
+  if (!sequence || typeof sequence !== "object") return null;
+  const settings = sequence.settings;
+  if (!settings || typeof settings !== "object") return null;
+  const rate = settings.frame_rate ?? settings.frameRate;
+  if (!rate || typeof rate !== "object") return null;
+  const numerator = Number(rate.num ?? rate.numerator);
+  const denominator = Number(rate.den ?? rate.denominator);
+  if (!Number.isInteger(numerator) || numerator <= 0 ||
+      !Number.isInteger(denominator) || denominator <= 0) return null;
+  const fps = numerator / denominator;
+  return fps >= 1 && fps <= 240 ? fps : null;
+}

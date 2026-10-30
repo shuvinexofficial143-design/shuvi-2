@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import {mediaItems,timelineClips,sequenceDuration,formatTimecode,localWindowsPath,requireNumber,TICKS_PER_SECOND} from "../src/studios/video/model.mjs";
+import {mediaItems,timelineClips,sequenceDuration,formatTimecode,localWindowsPath,requireNumber,TICKS_PER_SECOND,sequenceFps} from "../src/studios/video/model.mjs";
 
 test("FilmCraft project bins yield unique actual media ids, not sequence ids",()=>{
   const pr={root:{children:[{item:10,name:"clip.mp4",type:"Video"},{name:"Bin",children:[{item:10,name:"duplicate",type:"Video"},{item:14,name:"speech.wav",type:"Audio"}]},{item:18,name:"Sequence",type:"Sequence"}]}};
@@ -29,4 +29,13 @@ test("no fabricated timeline, invalid values ignored and expected timecode",()=>
   assert.equal(requireNumber("1.25",0,10),1.25);
   assert.throws(()=>requireNumber("Infinity",0,10));
   assert.throws(()=>requireNumber("",0,10));
+});
+
+
+test("frame stepping uses actual FilmCraft rational sequence frame rate",()=>{
+  assert.equal(sequenceFps({settings:{frame_rate:{num:24000,den:1001}}}),24000/1001);
+  assert.equal(sequenceFps({settings:{frameRate:{num:12,den:1}}}),12);
+  assert.equal(sequenceFps({settings:{frame_rate:{num:1,den:0}}}),null);
+  assert.equal(sequenceFps({settings:{frame_rate:{num:60,den:1}}}),60);
+  assert.equal(sequenceFps({}),null);
 });
