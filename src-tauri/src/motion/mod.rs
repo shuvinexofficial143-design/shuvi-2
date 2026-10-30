@@ -15,6 +15,7 @@ pub enum MotionRequest{
     Undo,
     Redo,
     CreateComposition { name:String,width:u32,height:u32,fps:f64,duration_seconds:f64 },
+    InspectComposition { comp_id:u64 },
     ListLayers { comp_id:u64 },
     AddText { comp_id:u64,name:String,text:String,x:f64,y:f64,size:f64 },
     EditText { comp_id:u64,layer_id:u64,text:String },
@@ -160,6 +161,12 @@ fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
             })?;
             Ok(json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
                 "fps":c.fps,"durationSeconds":c.duration_seconds,"revision":c.project_revision}))
+        }
+        MotionRequest::InspectComposition{comp_id}=>{
+            let c=e.inspect_composition(comp_id)?;
+            Ok(json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
+                "fps":c.fps,"durationSeconds":c.duration_seconds,
+                "revision":c.project_revision}))
         }
         MotionRequest::ListLayers{comp_id}=>Ok(Value::Array(e.list_layers(comp_id)?
             .into_iter().map(layer_json).collect())),
