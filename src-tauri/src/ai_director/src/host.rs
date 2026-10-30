@@ -70,7 +70,11 @@ impl<'a,O:NativeOwner> GuardedHost<'a,O>{
         bound.checked()?;
         // The persisted hash must be verified *before* opening an approval UI;
         // no prompt, key, or approval can be forged by renderer JSON.
-        self.ledger.verify_binding(&bound.task_id,&bound.plan_hash)?;
+        let persisted=self.ledger.approved_plan_snapshot(&bound.task_id,&bound.plan_hash)?;
+        // Do not prompt about a stale manual tab/project/session. A native
+        // owner-controlled refresh/replan is required before any consent.
+        let current=self.owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if current!=persisted{return Err(GuardError::StaleProject);}
         let granted=self.ledger.approve(&bound.task_id,trusted_owner_ui)?;
         Ok(json!({"granted":granted,"taskId":bound.task_id,
           "planHash":bound.plan_hash,"nativeOwnerInteraction":true}))
