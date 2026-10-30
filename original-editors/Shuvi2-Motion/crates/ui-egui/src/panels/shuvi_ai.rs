@@ -170,6 +170,9 @@ fn inspect(app: &mut EffectcraftApp) -> (Result<Value, String>, Option<Result<Va
 /// Real docked egui control surface. The original EffectcraftApp owns its Session.
 pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let revision = app.session.revision;
+    // Live status from the SAME app-owned manual command gate as both
+    // original egui menu/shortcut and engine.execute control-channel routes.
+    let motion_gate = app.motion_owner_gate.status();
     app.shuvi_ai.invalidate_stale_preview(&app.session);
     let (summary, composition, layer) = inspect(app);
     app.shuvi_ai.last_read_revision = summary.as_ref().ok().map(|_| revision);
@@ -183,6 +186,10 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         ui.heading("Shuvi AI · Motion");
         ui.label(app.shuvi_ai.provider_label());
         ui.small("Original EffectCraft native Session · Read-only AI integration");
+        ui.small(format!("Manual owner: {} | admitted native calls: {} | denied overlaps: {}",
+            if motion_gate.busy { "Busy" } else { "Idle" },
+            motion_gate.admitted_manual_calls, motion_gate.refused_nested_calls));
+        ui.small("Menu + control engine commands use one manual gate; AI execution and other direct edit routes not integrated");
         ui.separator();
 
         ui.collapsing("Live native project inspector", |ui| {
