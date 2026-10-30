@@ -255,7 +255,7 @@ test("static native mapping uses only actual IPC names and trusted project bindi
   assert.equal(v.args.request.expectedProjectSha256,HASH);
   assert.equal(v.args.request.actions[0].type,"split");
   assert.equal(v.readyForGuardedExecution,false);
-  assert.throws(()=>describeNativeCall(split,{snapshot:snapshot("video"),selectedRoot:"/owner",projectPath:"/wrong",sessionRevision:8}),/mismatch/);
+  assert.throws(()=>describeNativeCall(split,{snapshot:snapshot("video"),selectedRoot:"/owner",projectPath:"/wrong",sessionRevision:8}),/owner-selected video project binding required/);
 });
 test("snapshot equality is exact, not session-revision guesswork",()=>{
   const a=snapshot();
