@@ -190,6 +190,7 @@ export class AiDirector {
         expected = observed;
       }
       task.status = "complete";
+      task.error = null; // an earlier refused Stop was not an edit failure.
       await this.#journal.append({event:"complete",taskId,steps:task.receipts.length});
       return view(task);
     } catch (error) {
