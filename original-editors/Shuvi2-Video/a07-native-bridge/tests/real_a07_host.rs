@@ -32,7 +32,7 @@ impl OwnerConsent for TestConsent {
     fn grant(&mut self,scope:&Scope)->bool{
         self.clicks+=1;
         assert!(scope.instruction.contains("Split"));
-        assert!(scope.actions.len()==1);
+        assert!((1..=2).contains(&scope.actions.len()));
         self.allow
     }
 }
@@ -141,4 +141,102 @@ fn canonical_a07_rejects_untrusted_native_identity_and_non_split_actions(){
     })).unwrap();
     assert_eq!(owner.preflight_action(&forbidden).unwrap(),false);
     assert!(owner.apply(&forbidden).is_err());
+}
+
+fn wire_step(p:&Value,index:usize,version:&str)->GuardedWireRequest {
+    serde_json::from_value(json!({
+        "taskId":p["taskId"],"stepIndex":index,
+        "idempotencyKey": if index==0 {"f".repeat(64)} else {"e".repeat(64)},
+        "expectedSnapshot":{"engine":"video","projectId":p["snapshot"]["projectId"],
+            "sessionId":p["snapshot"]["sessionId"],"version":version},
+        "action":p["actions"][index]
+    })).unwrap()
+}
+#[test]
+fn native_filmcraft_two_real_splits_one_approval_two_sqlite_receipts() {
+    let tmp=TempDb::new();
+    let mut session=make_session();
+    let active=session.active_sequence().unwrap();
+    let at=2*filmcraft_time::TICKS_PER_SECOND;
+    let video=active.video_tracks[0].items.iter()
+        .find(|c|c.start.0<at&&at<c.end().0).unwrap().id.0;
+    let audio=active.audio_tracks[0].items.iter()
+        .find(|c|c.start.0<at&&at<c.end().0).unwrap().id.0;
+    assert_ne!(video,audio);
+    let mut owner=VideoOwner::new(&mut session,
+        "trusted-filmcraft-project".into(),"native-owner-session-03".into()).unwrap();
+    let previous_count=owner.read_native_clip_count().unwrap();
+    let state=owner.snapshot().unwrap();
+    let Version::VideoSha256(v)=state.version else {panic!("not FilmCraft SHA")};
+    let snapshot=json!({"engine":"video","projectId":state.project_id,
+        "sessionId":state.session_id,"version":v});
+    let plan=json!({"taskId":"nativefilmtask0003",
+        "instruction":"Split two original native clips in one task",
+        "snapshot":snapshot,
+        "actions":[
+            {"type":"video.split","clipId":video,"seconds":2.0},
+            {"type":"video.split","clipId":audio,"seconds":2.0}
+        ]});
+    let plan_hash=independently_hash(&plan).unwrap();
+    let reservation=ReserveWire{task_id:"nativefilmtask0003".into(),
+        plan_hash:plan_hash.clone(),project:snapshot,plan:plan.clone()};
+    let consent=OwnerConsentRequest{task_id:reservation.task_id.clone(),
+        plan_hash:plan_hash.clone()};
+    let binding=TaskBinding{task_id:reservation.task_id.clone(),
+        plan_hash:plan_hash.clone()};
+    let mut db=tmp.open();
+    {
+        let mut guarded=GuardedHost{ledger:&mut db,owner:&mut owner};
+        guarded.reserve(&reservation).unwrap();
+        let mut ui=TestConsent{clicks:0,allow:true};
+        assert_eq!(guarded.request_consent(&consent,&mut ui).unwrap()["granted"],true);
+        assert_eq!(ui.clicks,1);
+        let original_version=plan["snapshot"]["version"].as_str().unwrap();
+        let first=guarded.execute(wire_step(&plan,0,original_version)).unwrap();
+        assert_eq!(first["nativeVerified"],true);
+        let second_version=first["after"]["version"].as_str().unwrap();
+        assert_ne!(second_version,original_version);
+        assert_eq!(guarded.execute(wire_step(&plan,0,original_version)).unwrap_err(),
+            GuardError::OutOfOrder);
+        let second=guarded.execute(wire_step(&plan,1,second_version)).unwrap();
+        assert_eq!(second["nativeVerified"],true);
+        assert_ne!(second["after"]["version"],second_version);
+        assert_eq!(guarded.recover(&binding).unwrap()["steps"],
+            json!(["verified","verified"]));
+        assert_eq!(ui.clicks,1);
+    }
+    assert_eq!(owner.read_native_clip_count().unwrap(),previous_count+2);
+    drop(owner);
+    let sqlite=tmp.open();
+    assert_eq!(sqlite.recovery_bound(&binding.task_id,&binding.plan_hash).unwrap(),
+        vec!["verified","verified"]);
+    let saved=tmp.0.join("two-native-splits.fcproj");
+    session.execute("file.saveAs",json!({"path":saved.to_string_lossy()})).unwrap();
+    let mut reopened=Session::default();
+    reopened.execute("file.open",json!({"path":saved.to_string_lossy()})).unwrap();
+    let view=shuvi_ai_readonly::snapshot(&mut reopened).unwrap();
+    let sequence=view.sequence.as_ref().unwrap();
+    let count=sequence["video"].as_array().unwrap().iter()
+        .chain(sequence["audio"].as_array().unwrap().iter())
+        .map(|track|track["items"].as_array().unwrap().len()).sum::<usize>();
+    assert_eq!(count,previous_count+2);
+}
+#[test]
+fn unverified_native_split_prevents_second_mutation() {
+    use shuvi_ai_provider::guard::Action;
+    let mut session=make_session();
+    let seq=session.active_sequence().unwrap();
+    let at=2*filmcraft_time::TICKS_PER_SECOND;
+    let video=seq.video_tracks[0].items.iter().find(|c|c.start.0<at&&at<c.end().0).unwrap().id.0;
+    let audio=seq.audio_tracks[0].items.iter().find(|c|c.start.0<at&&at<c.end().0).unwrap().id.0;
+    let mut owner=VideoOwner::new(&mut session,"native-proj".into(),"native-session-04".into()).unwrap();
+    let first=Action::VideoSplit{clip_id:video,seconds:2.0};
+    let other=Action::VideoSplit{clip_id:audio,seconds:2.0};
+    owner.apply(&first).unwrap();
+    let version=owner.snapshot().unwrap();
+    assert!(owner.verify_action(&first).unwrap());
+    assert_eq!(owner.apply(&other).unwrap_err(),"PREVIOUS_NATIVE_OUTCOME_UNVERIFIED");
+    assert_eq!(owner.snapshot().unwrap(),version);
+    let digest=owner.object_proof_sha256(&first).unwrap();
+    assert_eq!(digest.len(),64);
 }

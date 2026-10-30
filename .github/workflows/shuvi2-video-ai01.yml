@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI09 Real A07 FilmCraft SQLite Bridge
+name: Shuvi 2 Video - AI10 Native A07 Two-Step Readback and Receipts
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai09
+  group: shuvi2-video-ai10
   cancel-in-progress: false
 
 jobs:

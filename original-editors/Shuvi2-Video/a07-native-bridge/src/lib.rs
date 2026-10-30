@@ -19,6 +19,7 @@ struct AppliedSplit {
     new_clip_id: u64,
     before_revision: u64,
     before: Value,
+    proof_returned: bool,
 }
 
 /// Identity is supplied ONLY by the future trusted native desktop host. The
@@ -164,10 +165,10 @@ impl NativeOwner for VideoOwner<'_> {
         let Some((clip_id,tick))=self.checked_target(action) else {
             return Err("NATIVE_ACTION_NOT_ALLOWED".into());
         };
-        if self.last.is_some() {
-            // One adapter instance serves only one native mutation. A next step
-            // requires a fresh adapter and a fresh A07 stored receipt/snapshot.
-            return Err("NATIVE_ADAPTER_ALREADY_USED".into());
+        if self.last.as_ref().is_some_and(|x| !x.proof_returned) {
+            // The prior native outcome needs an independent object proof.
+            // A07 additionally requires a verified SQLite receipt for step 2.
+            return Err("PREVIOUS_NATIVE_OUTCOME_UNVERIFIED".into());
         }
         let before_rev = self.session.revision;
         let before = self.sequence()?;
@@ -179,12 +180,20 @@ impl NativeOwner for VideoOwner<'_> {
             return Err("NATIVE_SPLIT_OUTCOME_UNCERTAIN".into());
         }
         self.last=Some(AppliedSplit {
-            clip_id, tick, new_clip_id: created[0].0, before_revision: before_rev, before
+            clip_id, tick, new_clip_id: created[0].0, before_revision: before_rev,
+            before, proof_returned: false,
         });
         Ok(())
     }
     fn verify_action(&mut self, action: &Action) -> Result<bool, String> {
-        Ok(self.inspect_split(action).is_ok())
+        match self.inspect_split(action) {
+            Ok(_) => Ok(true),
+            Err(code) => {
+                // Fixed native verification code: never output paths or secrets.
+                eprintln!("A07_NATIVE_VIDEO_READBACK_REJECTED: {code}");
+                Ok(false)
+            }
+        }
     }
     fn object_proof_sha256(&mut self, action: &Action) -> Result<String, String> {
         let (new_id,after)=self.inspect_split(action)?;
@@ -201,7 +210,11 @@ impl NativeOwner for VideoOwner<'_> {
                     if let (Some(a),Some(b))=(left,right) {
                         let bytes=serde_json::to_vec(&json!({"left":a,"right":b,"track":tr["id"]}))
                             .map_err(|_| "A07_OBJECT_PROOF_SERIALIZE_FAILED".to_string())?;
-                        return Ok(format!("{:x}",Sha256::digest(bytes)));
+                        let proof = format!("{:x}", Sha256::digest(bytes));
+                        if let Some(last) = self.last.as_mut() {
+                            last.proof_returned = true;
+                        }
+                        return Ok(proof);
                     }
                 }
             }
