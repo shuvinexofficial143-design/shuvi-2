@@ -97,6 +97,57 @@ impl<'a> EffectcraftNativeOwner<'a> {
         }
     }
 
+    /// Confirm actual geometry and fill from the native shape path tree.
+    fn shape_readback(&self,comp_id:u64,name:&str,kind:&str,x:f64,y:f64,
+        width:f64,height:f64,fill:&str)->Result<Value,String>{
+        let id=self.last_result.as_ref().and_then(|v|v["layer"].as_u64())
+            .filter(|v|*v>0).ok_or("created shape layer ID missing")?;
+        let l=self.session.project.comp(ItemId(comp_id))
+            .and_then(|c|c.layer(LayerId(id))).ok_or("new shape layer missing")?;
+        if !matches!(l.source,LayerSource::Shape)||l.name!=name{return Err("native shape identity mismatch".into());}
+        let position=match &l.props.prop("transform/position").ok_or("shape position missing")?.value{
+            effectcraft_engine::keyframe::Value::Vec3(v)=>*v,
+            _=>return Err("native shape position wrong type".into())
+        };
+        if (position[0]-x).abs()>1e-6 ||(position[1]-y).abs()>1e-6 {
+            return Err("shape position mismatch".into());
+        }
+        let groups=l.props.group("contents").ok_or("shape contents absent")?;
+        let all:Vec<_>=groups.groups().collect();
+        if all.len()!=1{return Err("ambiguous shape contents".into());}
+        let inside=all[0].sub("contents").ok_or("shape path group absent")?;
+        let expected=if kind=="ellipse"{"ellipse"}else{"rect"};
+        let path=inside.groups().find(|g|g.match_id==expected).ok_or("native path absent")?;
+        let actual=match &path.get("size").ok_or("native size missing")?.value {
+            effectcraft_engine::keyframe::Value::Vec2(v)=>*v,
+            _=>return Err("shape geometry wrong value type".into()),
+        };
+        if (actual[0]-width).abs()>1e-6||(actual[1]-height).abs()>1e-6 {
+            return Err("native geometry dimension mismatch".into());
+        }
+        let rounding=path.get("roundness").and_then(|p|match &p.value{
+            effectcraft_engine::keyframe::Value::Scalar(v)=>Some(*v),_=>None,
+        });
+        if (kind=="rounded"&&!rounding.is_some_and(|v|v>0.0))||
+            (kind=="rect"&&rounding!=Some(0.0)){
+            return Err("native roundness mismatch".into());
+        }
+        let paint=inside.groups().find(|g|g.match_id=="fill").ok_or("native shape fill missing")?;
+        let actual_fill=paint.get("color").and_then(|p|match &p.value{
+            effectcraft_engine::keyframe::Value::Color(v)=>Some(*v),_=>None,
+        }).ok_or("native fill value missing")?;
+        for i in 0..3 {
+            let requested=u8::from_str_radix(&fill[1+i*2..3+i*2],16)
+                .map_err(|_|"invalid fill hex")? as f64/255.0;
+            if (actual_fill[i]-requested).abs()>0.006{
+                return Err("native fill colour mismatch".into());
+            }
+        }
+        Ok(json!({"kind":"shape","compId":comp_id,"id":id,
+            "name":name,"path":expected,"position":position,
+            "size":actual,"roundness":rounding,"fill":actual_fill}))
+    }
+
     /// Independent readback after executing a native EffectCraft command.
     /// Values are read from the live Project, NOT from the command JSON.
     fn inspect_actual_object(&self,action:&Action)->Result<Value,String>{
@@ -138,6 +189,8 @@ impl<'a> EffectcraftNativeOwner<'a> {
                 }
                 Ok(json!({"kind":"textLayer","compId":comp_id,"id":layer_id,"text":text}))
             },
+            Action::MotionAddShape{comp_id,name,kind,x,y,width,height,fill} =>
+                self.shape_readback(*comp_id,name,kind,*x,*y,*width,*height,fill),
             _=>Err("unsupported native Motion action".into())
         }
     }
@@ -152,6 +205,9 @@ impl<'a> EffectcraftNativeOwner<'a> {
                     "position":[x,y],"size":size,"edit":false}))),
             Action::MotionEditText{layer_id,text,..} =>
                 Ok(("layer.setText",json!({"layer":layer_id,"text":text}))),
+            Action::MotionAddShape{name,kind,x,y,width,height,fill,..} =>
+                Ok(("layer.newShape",json!({"name":name,"kind":kind,
+                    "position":[x,y],"size":[width,height],"fill":fill}))),
             _ => Err("typed action unsupported by native bridge".into()),
         }
     }
@@ -175,6 +231,11 @@ impl NativeOwner for EffectcraftNativeOwner<'_> {
                 self.session.active_comp_id()==Some(ItemId(*comp_id)) &&
                 self.native_text(*comp_id,*layer_id)
                     .is_some_and(|existing|existing!=*text),
+            Action::MotionAddShape{comp_id,name,kind,..} =>
+                matches!(kind.as_str(),"rect"|"rounded"|"ellipse") &&
+                self.session.active_comp_id()==Some(ItemId(*comp_id)) &&
+                self.session.project.comp(ItemId(*comp_id))
+                    .is_some_and(|c|c.layers.iter().all(|l|l.name!=*name)),
             _=>false,
         };
         if !valid{return Ok(false);}
