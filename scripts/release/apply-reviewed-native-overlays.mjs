@@ -45,12 +45,17 @@ function replaceExactlyOnce(content,before,after,file){
 }
 export function previewOverlay(mode,read=readFileSync){
   const item=specs[mode];assert.ok(item,"Unknown reviewed overlay: "+mode);
-  const original=read(item.path,"utf8");
+  const disk=read(item.path,"utf8");
+  // Windows git checkouts may use CRLF, while original GitHub patch anchors
+  // are LF. Normalize ONLY for matching, then restore the original EOL style.
+  const wasCrLf=disk.includes("\r\n");
+  const original=disk.replace(/\r\n/g,"\n");
   const blob=hashObject(item.path);
   assert.equal(blob,item.originalBlob,mode+": source diverged from pinned original Git blob");
-  const patched=item.patches.reduce((text,[from,to])=>replaceExactlyOnce(text,from,to,item.path),original);
-  assert.notEqual(original,patched,"No changes");
-  return {path:item.path,sourceBlob:blob,originalSha256:sha256(original),patchedSha256:sha256(patched),patched};
+  const normalized=item.patches.reduce((text,[from,to])=>replaceExactlyOnce(text,from,to,item.path),original);
+  assert.notEqual(original,normalized,"No changes");
+  const patched=wasCrLf?normalized.replace(/\n/g,"\r\n"):normalized;
+  return {path:item.path,sourceBlob:blob,originalSha256:sha256(disk),patchedSha256:sha256(patched),patched};
 }
 export function applyOverlays(modes){
   const out=[];

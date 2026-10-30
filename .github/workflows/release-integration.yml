@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: shuvi2-release-integration-native-owner-v10-${{ github.ref }}
+  group: shuvi2-release-integration-native-owner-v11-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   integrated-windows-native-and-e2e:

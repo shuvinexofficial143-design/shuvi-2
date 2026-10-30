@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: shuvi-original-native-verify-${{ github.ref }}
+  group: shuvi-original-native-verify-v11-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   original-editor-cargo-check:
