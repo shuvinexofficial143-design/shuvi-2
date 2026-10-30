@@ -224,3 +224,27 @@ test("M13 release gate independently verifies exact native desktop WebView scree
   assert.ok(windowsProof.includes("motion-windows-webview2.png"));
   assert.ok(motionCi.includes("needs: motion-desktop-e2e-windows"));
 });
+
+test("M14 accepted owner commands never silently discard busy edits or report success before idle",()=>{
+  assert.ok(ts.includes('if (busy) {'));
+  assert.ok(ts.includes('was not accepted. Retry.'));
+  assert.ok(ts.includes('id="motion-command-notice"'));
+  assert.ok(ts.includes('role="alert"'));
+  assert.ok(ts.includes('busy = false;'));
+  assert.ok(ts.includes('info(error===null?label+" · native verification complete"'));
+  const release=ts.indexOf('busy = false;',ts.indexOf('async function execute('));
+  const success=ts.indexOf('info(error===null?label+" · native verification complete"',release);
+  assert.ok(release>0&&success>release,"native completion must occur after busy clears");
+});
+test("M14 Windows WebView2 error evidence is captured as real per-step journal and DOM",()=>{
+  assert.ok(desktopE2e.includes('progress.json'));
+  assert.ok(desktopE2e.includes('REAL-WEBVIEW STEP START'));
+  assert.ok(desktopE2e.includes('REAL-WEBVIEW STEP PASS'));
+  assert.ok(desktopE2e.includes('motion-failed-webview-dom.html'));
+  assert.ok(desktopE2e.includes('result.failedUiStatus'));
+  assert.ok(desktopE2e.includes('motion-failed.png'));
+  assert.ok(motionCi.includes('cancel-in-progress: true'));
+  assert.ok(motionCi.includes('group: motion-'));
+  assert.ok(windowsRunner.includes('shuvi-motion-msedgedriver'));
+  assert.ok(windowsRunner.includes('RUNNER_TEMP'));
+});
