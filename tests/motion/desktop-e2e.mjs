@@ -100,14 +100,14 @@ async function test(){
     projectDir:root,steps:[],nativeScreenshot:null};
   async function step(name,fn){
     lastStep=name;
-    process.stdout.write("REAL-WEBVIEW STEP START: "+name+"\\n");
+    process.stdout.write("REAL-WEBVIEW STEP START: "+name+"\n");
     // A crash or runner interruption must still leave a durable, truthful progress record.
     await writeFile(path.join(artifacts,"progress.json"),
       JSON.stringify({ok:false,inProgress:name,completed:result.steps,
         gitSha:result.commitSha,driver:result.driver,window:result.window},null,2));
     await fn();
     result.steps.push(name);
-    process.stdout.write("REAL-WEBVIEW STEP PASS: "+name+"\\n");
+    process.stdout.write("REAL-WEBVIEW STEP PASS: "+name+"\n");
     await writeFile(path.join(artifacts,"progress.json"),
       JSON.stringify({ok:false,lastPassed:name,completed:result.steps,
         gitSha:result.commitSha,driver:result.driver,window:result.window},null,2));
