@@ -12,6 +12,8 @@ mod animation;
 pub use animation::{Property,Transform};
 mod render;
 pub use render::Frame;
+mod effects_masks;
+pub use effects_masks::{BuiltinEffect,EffectInfo,MaskInfo};
 
 /// Approved basic composition parameters, rather than arbitrary AI-authored engine JSON.
 #[derive(Debug, Clone)]
