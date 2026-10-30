@@ -2,6 +2,7 @@ import "./view.css";
 import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import { clipDragDestination } from "./drag.mjs";
+import { timelineViewport,clipViewportBounds } from "./viewport.mjs";
 import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
 import {shouldRefreshVideoProjectAfterActionError} from "./error-policy.mjs";
 import {videoTrackStates,videoActionPreflight} from "./track-state.mjs";
@@ -91,6 +92,15 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   lane.className="v-lanes";
   lane.innerHTML=String.raw`
     <div class="v-head"><strong>Native Timeline</strong><span data-v="duration">00:00:00.000</span></div>
+    <div class="v-timeline-nav">
+      <label>Timeline Zoom<select data-v="timelineZoom">
+        <option value="1">1× · Full sequence</option>
+        <option value="2">2×</option><option value="4">4×</option>
+        <option value="8">8×</option><option value="16">16×</option><option value="32">32×</option>
+      </select></label>
+      <label>Timeline Pan<input data-v="timelinePan" type="range" min="0" max="0" value="0" step="any" disabled></label>
+      <span data-v="viewRange">00:00:00.000 – 00:00:00.000</span>
+    </div>
     <div data-v="tracks" class="v-tracks">Open a project to load FilmCraft sequence tracks.</div>
     <div data-v="selected" class="v-muted">Click a clip to select it.</div>
     <div class="v-actions"><button data-action="place">Place Media</button><button data-action="split">Split</button><button data-action="trim">Trim</button><button data-action="move">Move</button><button data-action="delete">Delete</button>
@@ -212,6 +222,15 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     tracks.replaceChildren();
     const seq=snapshot?.sequence as {video?:Array<{name?:string}>,audio?:Array<{name?:string}>}|null|undefined;
     const seconds=Math.max(1,sequenceDuration(seq),...clips.map(c=>c.start+c.duration));
+    const zoom=Number(e<HTMLSelectElement>("timelineZoom").value);
+    const pan=e<HTMLInputElement>("timelinePan");
+    const viewport=timelineViewport(seconds,zoom,Number(pan.value));
+    if(!viewport)throw Error("Timeline viewport settings invalid");
+    pan.max=String(viewport.maxStart);
+    pan.value=String(viewport.start);
+    pan.disabled=viewport.maxStart<=0;
+    e<HTMLElement>("viewRange").textContent=formatTimecode(viewport.start)+
+      " – "+formatTimecode(viewport.end)+" · "+zoom+"× zoom";
     const nativeTracks=videoTrackStates(snapshot?.sequence);
     e<HTMLElement>("duration").textContent=formatTimecode(sequenceDuration(seq));
     const duration=sequenceDuration(seq);
@@ -249,10 +268,14 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         if(locked)row.classList.add("v-track-locked");
         const track=document.createElement("div");track.className="v-track-lane";
         for(const clip of clips.filter(c=>c.kind===kind&&c.track===name)){
+          const visible=clipViewportBounds(clip,viewport);
+          if(!visible)continue;
           const btn=document.createElement("button");btn.type="button";btn.className="v-clip"+(clip.clipId===clipId?" v-selected":"");
           btn.textContent=clip.name;
-          btn.style.left=String(Math.min(99,Math.max(0,clip.start/seconds*100)))+"%";
-          btn.style.width=String(Math.max(3,Math.min(100-clip.start/seconds*100,clip.duration/seconds*100)))+"%";
+          btn.style.left=String(visible.leftPercent)+"%";
+          btn.style.width=String(Math.max(0.25,Math.min(100-visible.leftPercent,visible.widthPercent)))+"%";
+          if(visible.clippedLeft)btn.classList.add("v-clipped-left");
+          if(visible.clippedRight)btn.classList.add("v-clipped-right");
           btn.title="#"+clip.clipId+" · "+formatTimecode(clip.start)+" · "+formatTimecode(clip.duration)+
             (locked?" · FilmCraft track LOCKED; move/trim disabled":
               " · Drag horizontally on same track to request a real FilmCraft move");
@@ -280,7 +303,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
             if(!fps){inform("Cannot drag: native FilmCraft FPS is unavailable",true);return;}
             const destination=clipDragDestination({
               start:clip.start,deltaPixels,lanePixels:track.getBoundingClientRect().width,
-              visibleSeconds:seconds,fps
+              visibleSeconds:viewport.duration,totalSeconds:seconds,fps
             });
             if(destination===null){inform("Invalid pointer drag geometry; no edit made",true);return;}
             if(Math.abs(destination-clip.start)<(0.5/fps))return;
@@ -633,6 +656,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     b.addEventListener("click",()=>{void choose(b.dataset.choose??"");}));
   panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
   lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
+  e<HTMLSelectElement>("timelineZoom").addEventListener("change",()=>draw());
+  e<HTMLInputElement>("timelinePan").addEventListener("input",()=>draw());
   const slider=e<HTMLInputElement>("scrub");
   panel.querySelectorAll<HTMLButtonElement>("button[data-preview-control]").forEach(button=>{
     button.addEventListener("click",()=>{

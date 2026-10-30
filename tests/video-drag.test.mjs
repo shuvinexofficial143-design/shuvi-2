@@ -25,3 +25,10 @@ test("drag supports extending past original clip start but never exceeds visible
   assert.equal(move({start:0,deltaPixels:100,lanePixels:400,visibleSeconds:1,fps:12}),0.25);
   assert.equal(move({start:0.5,deltaPixels:1000,lanePixels:400,visibleSeconds:1,fps:12}),1);
 });
+
+test("zoomed and panned FilmCraft timeline drags in absolute project seconds",()=>{
+  assert.equal(move({start:2150,deltaPixels:100,lanePixels:400,visibleSeconds:900,totalSeconds:7200,fps:24}),2375);
+  assert.equal(move({start:7050,deltaPixels:400,lanePixels:400,visibleSeconds:450,totalSeconds:7200,fps:24}),7200);
+  assert.equal(move({start:100,deltaPixels:200,lanePixels:0,visibleSeconds:450,totalSeconds:7200,fps:24}),null);
+  assert.equal(move({start:100,deltaPixels:200,lanePixels:400,visibleSeconds:450,totalSeconds:200,fps:24}),null);
+});
