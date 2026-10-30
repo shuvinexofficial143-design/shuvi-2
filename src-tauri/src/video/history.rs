@@ -204,21 +204,52 @@ pub fn restore(request:RestoreRequest)->Result<RestoreReceipt,String>{
         return Err("Snapshot changed between read and restore".into());
     }
     snapshot(&project,&before_bytes,&current)?;
-    // Preserve old contents even if process crashes mid-restore. We verify
-    // the write and journal; source media files are never altered.
+    // Validate the candidate in an isolated temporary .fcproj BEFORE touching
+    // the original user's project. A corrupt, forged or incompatible snapshot
+    // is never copied over the verified source.
+    let scratch=super::Scratch::create()?;
+    let candidate=scratch.0.join("undo-preflight.fcproj");
     {
-        let mut writer=OpenOptions::new().write(true).truncate(true).open(&project)
-            .map_err(|e|format!("Cannot restore FilmCraft project: {e}"))?;
-        writer.write_all(&target_bytes).map_err(|e|format!("Restore write failed; previous SHA snapshot preserved: {e}"))?;
+        let mut writer=OpenOptions::new().write(true).create_new(true).open(&candidate)
+            .map_err(|e|format!("Cannot stage history candidate: {e}"))?;
+        writer.write_all(&target_bytes).map_err(|e|e.to_string())?;
         writer.sync_all().map_err(|e|e.to_string())?;
     }
-    if super::project_sha256(&project)?!=target_sha {
-        return Err("Restored bytes failed checksum; previous snapshot preserved".into());
+    if super::project_sha256(&candidate)?!=target_sha {
+        return Err("Staged candidate failed SHA-256; original untouched".into());
     }
     let cli=super::configured_cli_path()?;
+    let candidate_path=candidate.to_str().ok_or("Invalid temporary preflight path")?;
+    let preflight=super::run_json_bounded(&cli,&["--compact","--project",candidate_path,"inspect","project"],INSPECT_TIMEOUT)?;
+    if preflight["root"].is_null() {
+        return Err("FilmCraft rejects history candidate; original untouched".into());
+    }
+    let _preflight_seq=if preflight["activeSequence"].is_u64() {
+        Some(super::run_json_bounded(&cli,&["--compact","--project",candidate_path,"inspect","sequence"],INSPECT_TIMEOUT)?)
+    }else{None};
+    if super::project_sha256(&project)?!=current {
+        return Err("EXTERNAL_PROJECT_EDIT: original changed while staging restore".into());
+    }
+    // Existing SHA-verified source snapshot remains available for recovery.
+    let write_result=(||->Result<(),String>{
+        let mut writer=OpenOptions::new().write(true).truncate(true).open(&project)
+            .map_err(|e|format!("Cannot restore FilmCraft project: {e}"))?;
+        writer.write_all(&target_bytes).map_err(|e|format!("Restore write failed: {e}"))?;
+        writer.sync_all().map_err(|e|e.to_string())?;
+        if super::project_sha256(&project)?!=target_sha {
+            return Err("Restored bytes failed SHA-256 check".into());
+        }
+        Ok(())
+    })();
+    if let Err(e)=write_result {
+        // Best-effort immediate rollback from independently saved source bytes;
+        // a persisted source snapshot still exists if rollback also fails.
+        let rollback=fs::write(&project,&before_bytes);
+        return Err(format!("Restore aborted: {e}; rollback result: {rollback:?}"));
+    }
     let path=project.to_str().ok_or("Invalid project path")?;
     let info=super::run_json_bounded(&cli,&["--compact","--project",path,"inspect","project"],INSPECT_TIMEOUT)?;
-    if info["root"].is_null(){return Err("Restored FilmCraft project cannot be reopened".into());}
+    if info["root"].is_null(){return Err("Restored project readback invalid; previous snapshot retained".into());}
     let seq=if info["activeSequence"].is_u64() {
         Some(super::run_json_bounded(&cli,&["--compact","--project",path,"inspect","sequence"],INSPECT_TIMEOUT)?)
     }else{None};
