@@ -8,6 +8,7 @@ import {rulerTicks,rulerSeekTime,percentOnRuler} from "./ruler.mjs";
 import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
 import {shouldRefreshVideoProjectAfterActionError} from "./error-policy.mjs";
 import {videoTrackStates,videoActionPreflight} from "./track-state.mjs";
+import { matchingVideoSelection } from "./selection.mjs";
 import {requestVideoAiProposal} from "./ai";
 import {canSubmitVideoAiRequest} from "./privacy.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
@@ -133,6 +134,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   let itemId:number|null=null,clipId:number|null=null;
   let clips:EditorClip[]=[];
   let history:VideoHistoryStatus|null=null;
+  let loadedSelection:{selectedRoot:string;projectPath:string}|null=null;
   let pending:VideoChatProposal|null=null;
   let selectedMarkerId:number|null=null;
   const proposalEpoch=createVideoProposalEpoch();
@@ -197,8 +199,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   }
   function request(){
     const p=paths(),s=snapshot;
-    if(!s||s.projectPath.toLowerCase()!==p.projectPath.toLowerCase())
-      throw Error("Open / Refresh the selected project first");
+    if(!s||!matchingVideoSelection(p,loadedSelection))
+      throw Error("Project selection changed. Open / Refresh this exact project before editing");
     return {...p,expectedRevision:s.sessionRevision,expectedProjectSha256:s.projectSha256};
   }
   function clearProposal():void{
@@ -434,6 +436,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     const h=await inspectVideoHistory(p.selectedRoot,p.projectPath);
     if(h.projectSha256!==found.projectSha256)throw Error("Project changed between snapshot and history readback");
     if(pending&&pending.expectedProjectSha256!==found.projectSha256)clearProposal();
+    loadedSelection=p;
     snapshot=found;history=h;clearFrame();draw();return found;
   }
   function renderCurrentFrame(immediate:boolean):void {
@@ -724,7 +727,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
           // Only switching the actual .fcproj or its permitted root loses
           // current native snapshot/history. Export target and new media source
           // are settings of the SAME verified FilmCraft project.
-          clearProposal();history=null;snapshot=null;clipId=null;itemId=null;
+          clearProposal();history=null;snapshot=null;loadedSelection=null;clipId=null;itemId=null;
           scrubber.invalidate();clearFrame();draw();
         }
         inform("Selected native path · "+selected+" · no editor operation executed yet");
