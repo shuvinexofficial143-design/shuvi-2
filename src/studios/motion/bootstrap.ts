@@ -25,6 +25,7 @@ const videoTab = document.querySelector<HTMLButtonElement>('button[data-studio="
 let mounted = false;
 let uiGeneration = 0;
 let activeComp: Comp | null = null;
+let lastHistoryCompId: number | null = null;
 let activeLayer: Layer | null = null;
 let activeEffect: Effect | null = null;
 let activeMask: Mask | null = null;
@@ -235,23 +236,24 @@ async function afterEdit():Promise<void> {
 async function historyEdit(action:"undo"|"redo"):Promise<void>{
   const receipt=await request<NativeHistoryReceipt>({action});
   if(!receipt.projectChanged)throw new Error("Native history did not change the project");
-  if(activeComp){
+  const compId=activeComp?.id??lastHistoryCompId;
+  if(compId!==null){
     try {
-      await request<Comp>({action:"inspectComposition",compId:activeComp.id});
+      // Redo can restore an entire composition previously removed by native Undo.
+      const inspected=await request<Comp>({action:"inspectComposition",compId});
+      activeComp=inspected;lastHistoryCompId=null;
+      activeLayer=null;activeEffect=null;activeMask=null;
+      await afterEdit();
+      return;
     }catch{
-      // Undo may genuinely remove the first composition. Do not show a stale canvas.
+      lastHistoryCompId=compId;
       activeComp=null;activeLayer=null;activeEffect=null;activeMask=null;
       node<HTMLImageElement>("#motion-native-frame").removeAttribute("src");
       node<HTMLElement>("#motion-frame-info").textContent="No native composition after "+action;
       node<HTMLElement>("#motion-layer-list").textContent="No active composition";
-      await refreshNativeHistory();
-      return;
     }
-    activeLayer=null;activeEffect=null;activeMask=null;
-    await afterEdit();
-  }else{
-    await refreshNativeHistory();
   }
+  await refreshNativeHistory();
 }
 function bindClick(selector:string,label:string,action:()=>Promise<void>):void {
   node<HTMLButtonElement>(selector).addEventListener("click",()=>void execute(label,action));
@@ -362,7 +364,7 @@ function bind():void {
     const comp=await request<Comp>({action:"createComposition",name:value("#motion-name"),
       width:number("#motion-width"),height:number("#motion-height"),
       fps:number("#motion-fps"),durationSeconds:number("#motion-duration")});
-    activeComp=comp;activeLayer=null;activeEffect=null;activeMask=null;currentTime=0;updateSlider();await afterEdit();
+    activeComp=comp;lastHistoryCompId=null;activeLayer=null;activeEffect=null;activeMask=null;currentTime=0;updateSlider();await afterEdit();
   });
   bindClick("#motion-add-text","Creating editable text",async()=>{
     const c=ensureComp();
@@ -524,7 +526,7 @@ function bind():void {
     });
     if(!opened.verifiedFromDisk)throw new Error("Native project reopen failed");
     activeComp=opened.compositions[0]??null;
-    activeLayer=null;activeEffect=null;activeMask=null;currentTime=0;updateSlider();
+    lastHistoryCompId=null;activeLayer=null;activeEffect=null;activeMask=null;currentTime=0;updateSlider();
     if(activeComp)await afterEdit();
   });
 }
@@ -552,3 +554,18 @@ function unmount():void {
 }
 motionTab.addEventListener("click",()=>void mount());
 videoTab.addEventListener("click",unmount);
+
+// Native history shortcuts, only while the editor (not a text input) owns focus.
+document.addEventListener("keydown",(event)=>{
+  if(!mounted||busy||!(event.ctrlKey||event.metaKey)||event.altKey)return;
+  const target=event.target;
+  if(target instanceof HTMLElement && target.closest('input,textarea,select,[contenteditable="true"]'))return;
+  const key=event.key.toLowerCase();
+  const redo=(key==="z"&&event.shiftKey)||key==="y";
+  const undo=key==="z"&&!event.shiftKey;
+  if(!undo&&!redo)return;
+  const button=node<HTMLButtonElement>(redo?"#motion-redo":"#motion-undo");
+  if(button.disabled)return;
+  event.preventDefault();
+  void execute(redo?"Redoing native edit":"Undoing native edit",()=>historyEdit(redo?"redo":"undo"));
+});
