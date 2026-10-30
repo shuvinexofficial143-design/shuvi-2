@@ -16,7 +16,7 @@ struct Consent{accept:bool,calls:usize}
 impl OwnerConsent for Consent{
     fn grant(&mut self,_:&Scope)->bool{self.calls+=1;self.accept}
 }
-struct FakeOwner {current:Snapshot,calls:usize,fail_after:bool,no_change:bool}
+struct FakeOwner {current:Snapshot,calls:usize,fail_after:bool,no_change:bool,verify:bool}
 impl NativeOwner for FakeOwner {
     fn snapshot(&mut self)->Result<Snapshot,String>{Ok(self.current.clone())}
     fn apply(&mut self,_action:&Action)->Result<(),String>{
@@ -29,6 +29,9 @@ impl NativeOwner for FakeOwner {
         }
         if self.fail_after {Err("simulated response timeout after native mutation".into())}
         else {Ok(())}
+    }
+    fn verify_action(&mut self,_action:&Action)->Result<bool,String> {
+        Ok(self.verify)
     }
 }
 fn motion()->Scope{
@@ -51,7 +54,7 @@ fn video()->Scope {
     }
 }
 fn owner(p:&Scope)->FakeOwner{
-    FakeOwner{current:p.snapshot.clone(),calls:0,fail_after:false,no_change:false}
+    FakeOwner{current:p.snapshot.clone(),calls:0,fail_after:false,no_change:false,verify:true}
 }
 #[test]
 fn real_disk_reservation_survives_reopen_and_rejects_duplicate(){
@@ -154,4 +157,26 @@ fn only_owner_selected_existing_journal_folder_is_accepted(){
     assert!(Ledger::new(&root.0.join("missing")).is_err());
     let l=Ledger::new(&root.0).unwrap();
     assert_eq!(l.recover("../../../wrong").unwrap_err(),GuardError::Invalid);
+}
+
+#[test]
+fn unverified_affected_object_after_revision_change_is_uncertain(){
+    let dir=TempDir::new();let l=Ledger::new(&dir.0).unwrap();let p=motion();
+    l.reserve(&p).unwrap();l.approve(&p.task_id,&mut Consent{accept:true,calls:0}).unwrap();
+    let mut engine=owner(&p);engine.verify=false;
+    assert_eq!(l.execute(&p.task_id,0,&mut engine).unwrap_err(),GuardError::NativeOutcomeUncertain);
+    assert_eq!(l.recover(&p.task_id).unwrap()[0],"uncertain");
+    engine.verify=true;
+    assert_eq!(l.execute(&p.task_id,0,&mut engine).unwrap_err(),GuardError::DuplicateOrUncertain);
+    assert_eq!(engine.calls,1);
+}
+#[test]
+fn denial_or_crash_during_approval_cannot_request_again(){
+    let dir=TempDir::new();let l=Ledger::new(&dir.0).unwrap();let p=motion();
+    l.reserve(&p).unwrap();
+    let mut consent=Consent{accept:false,calls:0};
+    assert!(!l.approve(&p.task_id,&mut consent).unwrap());
+    consent.accept=true;
+    assert_eq!(l.approve(&p.task_id,&mut consent).unwrap_err(),GuardError::AlreadyExists);
+    assert_eq!(consent.calls,1);
 }
