@@ -148,6 +148,51 @@ impl<'a> EffectcraftNativeOwner<'a> {
             "size":actual,"roundness":rounding,"fill":actual_fill}))
     }
 
+    /// Real current native property and requested values. Reject animated or
+    /// unsupported transforms rather than claiming an unverified AI edit.
+    fn transform_readback(&self,comp_id:u64,layer_id:u64,kind:&str,
+        x:Option<f64>,y:Option<f64>,value:Option<f64>)->Result<Value,String>{
+        let l=self.session.project.comp(ItemId(comp_id))
+            .and_then(|c|c.layer(LayerId(layer_id))).ok_or("native transformed layer missing")?;
+        let path=match kind {
+            "position"=>"transform/position",
+            "scale"=>"transform/scale",
+            "rotation"=>"transform/rotation",
+            "opacity"=>"transform/opacity",
+            _=>return Err("unsupported transform kind".into()),
+        };
+        let p=l.props.prop(path).ok_or("native transform property missing")?;
+        let observed=match &p.value {
+            effectcraft_engine::keyframe::Value::Vec3(v) if kind=="position"||kind=="scale"=>{
+                let a=x.ok_or("x missing")?;let b=y.ok_or("y missing")?;
+                let z=if kind=="scale"{100.0}else{0.0};
+                if (v[0]-a).abs()>1e-5||(v[1]-b).abs()>1e-5||(v[2]-z).abs()>1e-5{
+                    return Err("native transform vector mismatch".into());
+                }
+                json!(v)
+            }
+            effectcraft_engine::keyframe::Value::Scalar(v) if kind=="rotation"||kind=="opacity"=>{
+                if (v-value.ok_or("scalar target missing")?).abs()>1e-5{
+                    return Err("native transform scalar mismatch".into());
+                }
+                json!(v)
+            }
+            _=>return Err("native transform not a plain static property".into()),
+        };
+        Ok(json!({"kind":"transform","compId":comp_id,
+            "layerId":layer_id,"property":kind,"observed":observed}))
+    }
+
+    /// Effect ID is translated from AI Director's fixed allowlist to the
+    /// original EffectCraft effect registry. This is not a dynamic string tool.
+    fn effect_id(name:&str)->Option<&'static str>{
+        match name{
+            "gaussianBlur"=>Some("ec.blur.gaussian"),
+            "brightnessContrast"=>Some("ec.color.brightnesscontrast"),
+            _=>None,
+        }
+    }
+
     /// Independent readback after executing a native EffectCraft command.
     /// Values are read from the live Project, NOT from the command JSON.
     fn inspect_actual_object(&self,action:&Action)->Result<Value,String>{
@@ -191,6 +236,22 @@ impl<'a> EffectcraftNativeOwner<'a> {
             },
             Action::MotionAddShape{comp_id,name,kind,x,y,width,height,fill} =>
                 self.shape_readback(*comp_id,name,kind,*x,*y,*width,*height,fill),
+            Action::MotionSetTransform{comp_id,layer_id,kind,x,y,value} =>
+                self.transform_readback(*comp_id,*layer_id,kind,*x,*y,*value),
+            Action::MotionAddEffect{comp_id,layer_id,effect}=>{
+                let uid=self.last_result.as_ref().and_then(|v|v["effects"].as_array())
+                    .and_then(|v|v.first()).and_then(Value::as_u64)
+                    .filter(|n|*n>0).ok_or("new effect uid missing")?;
+                let l=self.session.project.comp(ItemId(*comp_id))
+                    .and_then(|c|c.layer(LayerId(*layer_id))).ok_or("effect layer missing")?;
+                let expected=Self::effect_id(effect).ok_or("unknown whitelisted effect")?;
+                let group=l.effects().and_then(|v|v.groups()
+                    .find(|g|g.uid==uid && g.match_id==expected))
+                    .ok_or("actual effect group id does not match native receipt")?;
+                Ok(json!({"kind":"effect","compId":comp_id,
+                    "layerId":layer_id,"effectUid":uid,
+                    "effectId":group.match_id,"name":group.name}))
+            },
             _=>Err("unsupported native Motion action".into())
         }
     }
@@ -208,6 +269,20 @@ impl<'a> EffectcraftNativeOwner<'a> {
             Action::MotionAddShape{name,kind,x,y,width,height,fill,..} =>
                 Ok(("layer.newShape",json!({"name":name,"kind":kind,
                     "position":[x,y],"size":[width,height],"fill":fill}))),
+            Action::MotionSetTransform{layer_id,kind,x,y,value,..}=>{
+                let (path,v)=match kind.as_str(){
+                    "position"=>("transform/position",json!([x,y,0.0])),
+                    "scale"=>("transform/scale",json!([x,y,100.0])),
+                    "rotation"=>("transform/rotation",json!(value)),
+                    "opacity"=>("transform/opacity",json!(value)),
+                    _=>return Err("transform type not supported".into()),
+                };
+                Ok(("prop.set",json!({"layer":layer_id,"path":path,"value":v})))
+            }
+            Action::MotionAddEffect{layer_id,effect,..}=>{
+                let id=Self::effect_id(effect).ok_or("effect not allowed by original engine")?;
+                Ok(("effect.apply",json!({"layers":[layer_id],"effect":id})))
+            }
             _ => Err("typed action unsupported by native bridge".into()),
         }
     }
@@ -236,6 +311,45 @@ impl NativeOwner for EffectcraftNativeOwner<'_> {
                 self.session.active_comp_id()==Some(ItemId(*comp_id)) &&
                 self.session.project.comp(ItemId(*comp_id))
                     .is_some_and(|c|c.layers.iter().all(|l|l.name!=*name)),
+            Action::MotionSetTransform{comp_id,layer_id,kind,x,y,value}=>{
+                if self.session.active_comp_id()!=Some(ItemId(*comp_id)){false}
+                else{
+                    let path=match kind.as_str(){
+                        "position"=>"transform/position",
+                        "scale"=>"transform/scale",
+                        "rotation"=>"transform/rotation",
+                        "opacity"=>"transform/opacity",
+                        _=>return Ok(false),
+                    };
+                    self.session.project.comp(ItemId(*comp_id))
+                        .and_then(|c|c.layer(LayerId(*layer_id)))
+                        .and_then(|l|l.props.prop(path))
+                        .is_some_and(|pr|match (&pr.value,kind.as_str()){
+                            (effectcraft_engine::keyframe::Value::Vec3(v),"position"|"scale")=>{
+                                let target_z=if kind=="scale"{100.0}else{0.0};
+                                (v[2]-target_z).abs()<1e-6 &&
+                                match (x,y){
+                                    (Some(a),Some(b))=>
+                                        (v[0]-a).abs()>1e-6||(v[1]-b).abs()>1e-6,
+                                    _=>false,
+                                }
+                            }
+                            (effectcraft_engine::keyframe::Value::Scalar(v),"rotation"|"opacity")=>
+                                value.is_some_and(|wanted|(v-wanted).abs()>1e-6),
+                            _=>false,
+                        })
+                }
+            },
+            Action::MotionAddEffect{comp_id,layer_id,effect}=>{
+                if self.session.active_comp_id()!=Some(ItemId(*comp_id)){false}
+                else if let Some(id)=Self::effect_id(effect){
+                    self.session.project.comp(ItemId(*comp_id))
+                        .and_then(|c|c.layer(LayerId(*layer_id)))
+                        .and_then(|l|l.effects())
+                        .is_some_and(|fx|fx.groups().all(|g|g.match_id!=id)) &&
+                    effectcraft_engine::effects::lookup(id).is_some()
+                } else {false}
+            },
             _=>false,
         };
         if !valid{return Ok(false);}
