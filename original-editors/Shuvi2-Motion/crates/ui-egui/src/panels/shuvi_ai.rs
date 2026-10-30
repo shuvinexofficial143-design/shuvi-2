@@ -337,11 +337,20 @@ mod tests {
         let mut session = Session::new();
         let mut state = ShuviAiState::default();
         install_bound_preview(&session, &mut state);
-        let original_revision = session.revision;
         session.execute_checked("file.newProject", serde_json::json!({})).unwrap();
-        assert_eq!(session.revision, original_revision);
         state.invalidate_stale_preview(&session);
-        assert!(state.pending.is_none(), "old project preview must never survive a same-revision new project");
+        assert!(state.pending.is_none(), "old project preview must never survive a new project");
+    }
+
+    #[test]
+    fn different_document_same_revision_invalidates_preview() {
+        let first = Session::new();
+        let other = Session::new();
+        assert_eq!(first.revision, other.revision);
+        let mut state = ShuviAiState::default();
+        install_bound_preview(&first, &mut state);
+        state.invalidate_stale_preview(&other);
+        assert!(state.pending.is_none(), "same revision across separate native projects cannot authorize stale preview");
     }
 
     #[test]
