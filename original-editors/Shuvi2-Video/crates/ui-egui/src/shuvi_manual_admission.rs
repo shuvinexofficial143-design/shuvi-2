@@ -6,7 +6,6 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use filmcraft_engine::Session;
 use serde_json::Value;
 use crate::FilmcraftApp;
 
@@ -77,6 +76,7 @@ impl FilmcraftApp {
 #[cfg(test)]
 mod shuvi_manual_admission_tests {
     use super::*;
+    use filmcraft_engine::Session;
     use serde_json::json;
 
     #[test]
@@ -110,7 +110,7 @@ mod shuvi_manual_admission_tests {
         let lane=app.shuvi_manual_admission.clone();
         let _=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
             let _lease=lane.try_claim().unwrap();
-            assert!(lane.is_claimed());
+            assert_eq!(lane.blocked_reason(),Some("SHUVI_NATIVE_OWNER_BUSY"));
             panic!("expected test-only simulated manual callback panic")
         }));
         assert_eq!(lane.blocked_reason(),Some("SHUVI_NATIVE_OWNER_POISONED"));
