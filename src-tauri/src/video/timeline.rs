@@ -24,7 +24,9 @@ pub struct TimelineRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+// Variant names and fields independently follow the TS camelCase contract.
+// rename_all alone only renames enum variants, not item_id etc.
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TimelineAction {
     CreateSequence { name: String, width: u32, height: u32, fps: u32 },
     Place { item_id: u64, track: String, seconds: f64, video: bool, audio: bool },
@@ -203,6 +205,50 @@ mod tests {
         assert!(mapped_action(&TimelineAction::Trim {clip_id:1,edge:"middle".into(),ripple:false,delta_frames:1}).is_err());
         assert!(mapped_action(&TimelineAction::Move {clip_id:1,track:"V1".into(),seconds:-1.0,insert:false}).is_err());
         assert!(valid_track("V1") && valid_track("A16") && !valid_track("V17"));
+    }
+    #[test]
+    fn tauri_camel_case_action_fields_deserialize_real_webview_payloads() {
+        // Reproduces Windows CI 41019773743: TS sends itemId but serde
+        // required item_id, rejecting native Place before FilmCraft execution.
+        let table: Vec<(Value, &str)> = vec![
+            (json!({"type":"createSequence","name":"Real","width":1280,"height":720,"fps":30}),"file.newSequence"),
+            (json!({"type":"place","itemId":1,"track":"V1","seconds":0.0,"video":true,"audio":false}),"timeline.place"),
+            (json!({"type":"split","clipId":12,"seconds":0.5}),"timeline.razor"),
+            (json!({"type":"trim","clipId":12,"edge":"out","ripple":false,"deltaFrames":-3}),"timeline.trim"),
+            (json!({"type":"move","clipId":12,"track":"V1","seconds":0.25,"insert":false}),"timeline.move"),
+            (json!({"type":"delete","clipId":12,"ripple":false}),"edit.clear"),
+            (json!({"type":"undo"}),"edit.undo"),
+            (json!({"type":"redo"}),"edit.redo")
+        ];
+        for (webview_payload, expected_cli_command) in table {
+            let action: TimelineAction=serde_json::from_value(webview_payload.clone())
+                .unwrap_or_else(|e|panic!("WebView payload {webview_payload} was rejected: {e}"));
+            let mapped=mapped_action(&action).expect("Typed browser action must map to real FilmCraft");
+            assert_eq!(mapped["id"],expected_cli_command);
+        }
+        let place:TimelineAction=serde_json::from_value(json!({
+            "type":"place","itemId":3,"track":"A1","seconds":1.0,"video":false,"audio":true
+        })).unwrap();
+        match place {
+            TimelineAction::Place{item_id,track,video,audio,..}=>{
+                assert_eq!(item_id,3);
+                assert_eq!(track,"A1");
+                assert!(!video && audio);
+            },
+            _=>panic!("Wrong typed video action")
+        };
+    }
+    #[test]
+    fn tauri_rejects_snake_case_or_missing_required_browser_fields() {
+        for payload in [
+            json!({"type":"place","item_id":1,"track":"V1","seconds":0.0,"video":true,"audio":false}),
+            json!({"type":"place","track":"V1","seconds":0.0,"video":true,"audio":false}),
+            json!({"type":"trim","clipId":2,"edge":"out","delta_frames":-3,"ripple":false}),
+            json!({"type":"move","clip_id":2,"track":"V1","seconds":0.0,"insert":false})
+        ] {
+            let parsed=serde_json::from_value::<TimelineAction>(payload.clone());
+            assert!(parsed.is_err(),"Unsafe/legacy action unexpectedly deserialized: {payload}");
+        }
     }
     #[test]
     fn maps_real_filmcraft_command_ids() {
