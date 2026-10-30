@@ -10,6 +10,11 @@ on:
       - 'docs/motion/**'
       - '.github/workflows/motion-smoke.yml'
 
+concurrency:
+  # Only newest Motion branch source should consume lengthy Windows Rust+WebView runners.
+  group: motion-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
