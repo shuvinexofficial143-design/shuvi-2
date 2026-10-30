@@ -4,7 +4,7 @@
  * CDP is exposed ONLY in ephemeral CI process env, never the shipped app.
  */
 import {chromium} from "playwright-core";
-import {spawn} from "node:child_process";
+import {spawn,execFileSync} from "node:child_process";
 import {mkdtempSync,copyFileSync,existsSync,statSync,writeFileSync,readFileSync,rmSync} from "node:fs";
 import {resolve,dirname,join} from "node:path";
 import {tmpdir} from "node:os";
@@ -26,6 +26,45 @@ const shotPath=join(repo,"src-tauri","target","video-desktop-e2e.png");
 copyFileSync(fixture,media);
 const checks=[];
 let browser=null,app=null,page=null;
+const policyKey="HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
+let policyApplied=false;
+let previousPolicy=null;
+function parseRegPolicy(){
+  try{
+    const text=execFileSync("reg.exe",["query",policyKey,"/v","shuvi2.exe"],{encoding:"utf8",timeout:6000});
+    const match=text.match(/shuvi2\.exe\s+REG_SZ\s+(.+)/);
+    return match?match[1].trim():null;
+  }catch{return null;}
+}
+function applyCiOnlyPolicy(port){
+  previousPolicy=parseRegPolicy();
+  // Microsoft-supported WebView2 per-exe override, scoped to ephemeral CI
+  // Windows user, never written into the production Tauri binary.
+  execFileSync("reg.exe",["add",policyKey,"/v","shuvi2.exe","/t","REG_SZ",
+    "/d","--remote-debugging-port="+port,"/f"],{stdio:"pipe",timeout:10000});
+  policyApplied=true;
+}
+function restoreCiPolicy(){
+  if(!policyApplied)return;
+  try{
+    if(previousPolicy===null){
+      execFileSync("reg.exe",["delete",policyKey,"/v","shuvi2.exe","/f"],{stdio:"pipe",timeout:10000});
+    }else{
+      execFileSync("reg.exe",["add",policyKey,"/v","shuvi2.exe","/t","REG_SZ","/d",previousPolicy,"/f"],{stdio:"pipe",timeout:10000});
+    }
+  }catch(error){console.error("Could not restore CI WebView2 debug policy:",String(error));process.exitCode=1;}
+}
+function cdpDiagnostics(){
+  const details={processes:"",ports:""};
+  for(const [key,cmd,args] of [
+    ["processes","powershell.exe",["-NoProfile","-Command","Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('msedgewebview2.exe','shuvi2.exe') } | Select-Object Name,ProcessId,ParentProcessId,CommandLine | Format-List | Out-String -Width 220"]],
+    ["ports","powershell.exe",["-NoProfile","-Command","Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -First 30 LocalAddress,LocalPort,OwningProcess | Format-Table | Out-String -Width 160"]],
+  ]){
+    try{details[key]=execFileSync(cmd,args,{encoding:"utf8",timeout:10000,maxBuffer:250000}).slice(0,12000);}
+    catch(e){details[key]=String(e);}
+  }
+  return details;
+}
 const report={status:"running",sha:process.env.GITHUB_SHA??"local",steps:checks,project,output,
   screenshot:shotPath,error:null};
 function note(name,details){checks.push({name,details,at:new Date().toISOString()});console.log("E2E: "+name+" | "+details);}
@@ -56,6 +95,9 @@ async function clickAction(action,expected,timeout=120000){
 }
 try{
   const port=await freePort();
+  report.cdpPort=port;
+  applyCiOnlyPolicy(port);
+  note("debug-policy","Applied temporary per-app WebView2 CDP port on ephemeral Windows CI runner");
   const env={
     ...process.env,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:"--remote-debugging-port="+port,
@@ -72,7 +114,11 @@ try{
     }catch{}
     await sleep(400);
   }
-  if(!online)throw Error("Real WebView2 did not expose debug session on Windows");
+  if(!online){
+    const diagnostics=cdpDiagnostics();
+    report.cdpDiagnostics=diagnostics;
+    throw Error("Real WebView2 CDP endpoint did not respond on 127.0.0.1:"+port+" (Windows process diagnostics archived)");
+  }
   browser=await chromium.connectOverCDP("http://127.0.0.1:"+port,{timeout:25000});
   const context=browser.contexts()[0];
   if(!context)throw Error("WebView2 CDP had no browser context");
@@ -152,6 +198,7 @@ try{
 }finally{
   if(browser)try{await browser.close();}catch{}
   if(app&&!app.killed)try{app.kill("SIGTERM");}catch{}
+  restoreCiPolicy();
   writeFileSync(reportPath,JSON.stringify(report,null,2));
   console.log("Desktop E2E proof: "+reportPath);
   // Do not delete workspace before WebView2 child processes release profile.
