@@ -1,4 +1,5 @@
 import "./view.css";
+import { createPreviewCoordinator } from "./scrub.mjs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { probeVideoEngine } from "./engine";
 import { inspectVideoProject, type VideoProjectSnapshot } from "./snapshot";
@@ -43,6 +44,11 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         <label>Sequence Height<input data-v="height" type="number" value="720" step="1" min="16" max="4320"></label>
         <label>Sequence FPS<input data-v="fps" type="number" value="30" step="1" min="1" max="120"></label>
         <label>Playhead seconds<input data-v="seconds" type="number" value="0.25" step=".04" min="0" max="86400"></label>
+        <div class="v-scrub">
+          <label for="v-scrub-slider">Frame Scrubber · drag to inspect real frames</label>
+          <input id="v-scrub-slider" data-v="scrub" type="range" min="0" max="1" value="0" step="any" disabled>
+          <span data-v="scrubLabel">00:00:00.000</span>
+        </div>
         <label>Track (V1 / A1)<input data-v="track" value="V1"></label>
         <label>Frame preview scale<select data-v="previewScale"><option value="0.25">25% (faster)</option><option value="0.5">50% (clearer)</option></select></label>
         <label>Export scale<select data-v="exportScale"><option value="1">100% original sequence</option><option value="0.5">50% (faster)</option><option value="0.25">25% (small)</option></select></label>
@@ -70,6 +76,19 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
   let clips:EditorClip[]=[];
   let busy=false,active=true;
   let disposeFrame:(()=>void)|null=null;
+  const scrubber=createPreviewCoordinator(
+    renderVideoPreview,
+    frame=>{
+      if(!active||!snapshot||frame.projectSha256!==snapshot.projectSha256)return;
+      if(disposeFrame)disposeFrame();
+      disposeFrame=applyPreviewToImage(e<HTMLImageElement>("image"),frame);
+      e<HTMLImageElement>("image").hidden=false;
+      e<HTMLElement>("empty").hidden=true;
+      inform("Verified real FilmCraft frame "+frame.width+"×"+frame.height+" · "+formatTimecode(frame.seconds));
+    },
+    error=>inform("Real FilmCraft preview failed: "+String(error),true),
+    {debounceMs:160},
+  );
   function e<T extends HTMLElement>(name:string):T {
     const selector='[data-v="'+name+'"]';
     const node=panel.querySelector<T>(selector)??lane.querySelector<T>(selector);
@@ -96,6 +115,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     return {...p,expectedRevision:s.sessionRevision,expectedProjectSha256:s.projectSha256};
   }
   function clearFrame():void {
+    scrubber.invalidate();
     if(disposeFrame){disposeFrame();disposeFrame=null;}
     e<HTMLImageElement>("image").hidden=true;
     e<HTMLElement>("empty").hidden=false;
@@ -124,6 +144,14 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     const seq=snapshot?.sequence as {video?:Array<{name?:string}>,audio?:Array<{name?:string}>}|null|undefined;
     const seconds=Math.max(1,sequenceDuration(seq),...clips.map(c=>c.start+c.duration));
     e<HTMLElement>("duration").textContent=formatTimecode(sequenceDuration(seq));
+    const duration=sequenceDuration(seq);
+    const slider=e<HTMLInputElement>("scrub");
+    slider.max=String(duration>0?Math.min(86400,duration):1);
+    slider.disabled=busy||!active||!snapshot||duration<=0;
+    if(!Number.isFinite(Number(slider.value))||Number(slider.value)>duration){
+      slider.value=String(Math.min(duration,Math.max(0,Number(value("seconds"))||0)));
+    }
+    e<HTMLElement>("scrubLabel").textContent=formatTimecode(Number(slider.value));
     if(!seq){
       const msg=document.createElement("span");msg.textContent="No native sequence yet · create one after import";
       tracks.append(msg);
@@ -168,6 +196,14 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     const p=paths();const found=await inspectVideoProject(p.selectedRoot,p.projectPath);
     snapshot=found;clearFrame();draw();return found;
   }
+  function renderCurrentFrame(immediate:boolean):void {
+    const req=request();
+    const seconds=requireNumber(value("seconds"),0,86400);
+    const scale=requireNumber(e<HTMLSelectElement>("previewScale").value,0.1,0.5);
+    const accepted=scrubber.request({...req,seconds,scale},immediate);
+    if(!accepted)throw Error("Preview is busy or inactive");
+    inform("FilmCraft rendering requested at "+formatTimecode(seconds)+" · newest frame will replace older requests");
+  }
   async function edit(action:TimelineAction):Promise<void>{
     const response=await editVideoTimeline({...request(),actions:[action]});
     const after=await load();
@@ -179,6 +215,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     busy=true;draw();
     inform("Running native "+action+"… No result is claimed until verification finishes.");
     try {
+      if(action!=="preview")await scrubber.pauseAndDrain();
       if(action==="probe"){
         const result=await probeVideoEngine();
         inform("Real FilmCraft engine round-trip · "+result.savedProjectBytes+" project bytes");
@@ -205,12 +242,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         const audio=track.startsWith("A");
         await edit({type:"place",itemId:id,track,seconds:requireNumber(value("seconds"),0,86400),video:!audio,audio});
       }else if(action==="preview"){
-        const frame=await renderVideoPreview({...request(),seconds:requireNumber(value("seconds"),0,86400),scale:requireNumber(e<HTMLSelectElement>("previewScale").value,0.1,0.5)});
-        if(disposeFrame)disposeFrame();
-        disposeFrame=applyPreviewToImage(e<HTMLImageElement>("image"),frame);
-        e<HTMLImageElement>("image").hidden=false;
-        e<HTMLElement>("empty").hidden=true;
-        inform("Real Program frame "+frame.width+"×"+frame.height+" · "+formatTimecode(frame.seconds));
+        renderCurrentFrame(true);
       }else if(action==="export"){
         const outputPath=value("output");
         if(!localWindowsPath(outputPath)||!outputPath.toLowerCase().endsWith(".mp4"))throw Error("Choose a new absolute .mp4 filename");
@@ -235,7 +267,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         if(action==="delete")await edit({type:"delete",clipId:clip.clipId,ripple:e<HTMLInputElement>("ripple").checked});
       }
     }catch(error){inform(String(error),true);}
-    finally{busy=false;draw();}
+    finally{scrubber.resume();busy=false;draw();}
   }
   async function choose(which:string):Promise<void>{
     if(busy||!active)return;
@@ -265,13 +297,38 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       if(selected && which!=="folder" && !value("root")){
         e<HTMLInputElement>("root").value=selected.replace(/[\\/][^\\/]+$/,"");
       }
-      if(selected)inform("Selected native path · "+selected+" · no editor operation executed yet");
+      if(selected){
+        scrubber.invalidate();clearFrame();
+        inform("Selected native path · "+selected+" · no editor operation executed yet");
+      }
     }catch(err){inform("Native dialog unavailable: "+String(err),true);}
   }
   panel.querySelectorAll<HTMLButtonElement>("button[data-choose]").forEach(b=>
     b.addEventListener("click",()=>{void choose(b.dataset.choose??"");}));
   panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
   lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
+  const slider=e<HTMLInputElement>("scrub");
+  slider.addEventListener("input",()=>{
+    if(busy||!active||!snapshot)return;
+    const seconds=Number(slider.value);
+    if(!Number.isFinite(seconds))return;
+    e<HTMLInputElement>("seconds").value=String(seconds);
+    e<HTMLElement>("scrubLabel").textContent=formatTimecode(seconds);
+    try{renderCurrentFrame(false);}catch(error){inform(String(error),true);}
+  });
+  e<HTMLInputElement>("seconds").addEventListener("change",()=>{
+    if(busy||!active||!snapshot)return;
+    const seconds=Number(value("seconds"));
+    if(Number.isFinite(seconds)&&seconds>=0&&seconds<=Number(slider.max)){
+      slider.value=String(seconds);
+      e<HTMLElement>("scrubLabel").textContent=formatTimecode(seconds);
+    }
+  });
+  for(const key of ["root","project"]){
+    e<HTMLInputElement>(key).addEventListener("change",()=>{
+      scrubber.invalidate();clearFrame();
+    });
+  }
   e<HTMLSelectElement>("media").addEventListener("change",()=>{
     const id=Number(e<HTMLSelectElement>("media").value);
     itemId=Number.isSafeInteger(id)&&id>0?id:null;
@@ -279,9 +336,11 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
   draw();
   return {setActive(next:boolean){
     active=next;
+    if(!next)scrubber.invalidate();
     panel.hidden=!next;lane.hidden=!next;
     oldPreview.forEach(n=>{n.hidden=next});
     oldTimeline.forEach(n=>{n.hidden=next});
+    draw();
     if(initialChat)initialChat.textContent=next
       ? "Shuvi AI chat is not connected yet. Manual Video editing runs through the real FilmCraft engine after an explicit button click."
       : initialChatText;
