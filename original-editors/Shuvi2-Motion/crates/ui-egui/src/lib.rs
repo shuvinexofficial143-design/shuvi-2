@@ -28,6 +28,8 @@ pub mod panels;
 mod pointer_wrap;
 pub mod prefs_live;
 pub mod shuvi_ai;
+// M-AI03 test-gated native command/readback adapter; AI editing remains OFF.
+mod shuvi_motion_owner;
 pub mod state;
 pub mod theme;
 pub mod updates_ui;
