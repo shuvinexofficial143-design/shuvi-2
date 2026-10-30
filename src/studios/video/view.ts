@@ -2,6 +2,7 @@ import "./view.css";
 import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import {requestVideoAiProposal} from "./ai";
+import {canSubmitVideoAiRequest} from "./privacy.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { probeVideoEngine } from "./engine";
@@ -51,6 +52,10 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         </select></label>
         <label>OpenAI API key (optional if OPENAI_API_KEY set)
           <input data-v="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Session only · not saved">
+        </label>
+        <label class="v-inline v-ai-consent">
+          <input data-v="aiConsent" type="checkbox">
+          Allow sending my instruction and numeric timeline metadata to OpenAI (API charges may apply)
         </label>
         <label>Sequence Width<input data-v="width" type="number" value="1280" step="1" min="16" max="7680"></label>
         <label>Sequence Height<input data-v="height" type="number" value="720" step="1" min="16" max="4320"></label>
@@ -309,6 +314,10 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     let instruction=text;
     let explanation="";
     if(modelMode){
+      if(!canSubmitVideoAiRequest({mode:"openai",
+        optedIn:e<HTMLInputElement>("aiConsent").checked,prompt:text})){
+        return "OpenAI was not contacted. Enable the OpenAI sharing checkbox and enter a request up to 700 characters.";
+      }
       busy=true;draw();
       try{
         const credential=e<HTMLInputElement>("apiKey").value.trim();
@@ -599,6 +608,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     if(!next){
       stopSampledPlayback(true);clearProposal();
       e<HTMLInputElement>("apiKey").value="";
+      e<HTMLInputElement>("aiConsent").checked=false;
+      e<HTMLSelectElement>("chatMode").value="local";
     }
     panel.hidden=!next;lane.hidden=!next;
     oldPreview.forEach(n=>{n.hidden=next});

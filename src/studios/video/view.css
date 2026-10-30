@@ -10,3 +10,5 @@
 .v-lanes [data-action=recover]{border:1px solid #c19d51;background:#4b3b29;color:#ffdda0}.v-lanes [data-action=recover]:disabled{opacity:.35}
 
 .v-chat-review{display:grid;gap:7px;padding:10px;border:1px solid #7383a3;border-radius:8px;background:#18253b}.v-chat-review[hidden]{display:none!important}.v-chat-review strong{font-size:11px}.v-chat-review p{font-size:11px;overflow-wrap:anywhere}
+
+.v-ai-consent{align-items:flex-start!important;line-height:1.4;color:#d9c6ad!important}.v-ai-consent input{margin-top:1px;min-width:14px;flex-shrink:0}
