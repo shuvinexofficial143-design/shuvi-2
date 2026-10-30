@@ -1,0 +1,25 @@
+/* Scoped Motion Studio styling. Does not affect the Video branch/editor. */
+.motion-pane{height:100%;width:100%;min-height:0;display:flex;flex-direction:column;background:#10131c;border:1px solid #30394f;border-radius:12px;overflow:hidden}
+.motion-toolbar{padding:10px 14px;display:flex;justify-content:space-between;gap:12px;align-items:center;border-bottom:1px solid #2b3144;font-size:12px}
+.motion-toolbar strong{color:#d7caff}
+#motion-status{font-size:11px;color:#a8c9ad;max-width:60%;text-align:right}
+#motion-status[data-failure="true"]{color:#ffb0ab}
+.motion-preview{background:repeating-conic-gradient(#293044 0% 25%,#151924 0% 50%) 50% / 26px 26px;position:relative;flex:1;min-height:120px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.motion-preview img{display:block;object-fit:contain;max-width:100%;max-height:100%;image-rendering:auto}
+.motion-preview img:not([src]){display:none}
+.motion-preview p{position:absolute;bottom:3px;left:10px;font-size:10px;color:#a9b6d3;text-shadow:0 1px 5px #0a0e17;background:#141a27b8;padding:4px 8px;border-radius:6px}
+.motion-time{display:flex;align-items:center;gap:9px;padding:8px 12px;border-top:1px solid #30394f;font-size:11px}
+.motion-time input[type="range"]{flex:1;accent-color:#a893f5;min-width:40px}
+.motion-time button,.motion-fields button{background:#373253;color:#e8ddff;border:1px solid #625590;padding:7px 10px;border-radius:7px;white-space:nowrap}
+.motion-time button:hover,.motion-fields button:hover{background:#514378}
+.motion-tools{font-size:11px;min-width:0;max-height:275px;overflow:auto;padding:10px 15px;background:#191e2b}
+.motion-fields{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin:5px 0 11px}
+.motion-fields label{display:flex;flex-direction:column;gap:4px;font-size:10px;color:#b4c0d6;max-width:100%}
+.motion-fields input,.motion-fields select{background:#111725;color:#f1f4fe;border:1px solid #434c61;border-radius:6px;padding:7px 8px;font-size:11px;min-width:58px;width:105px}
+.motion-fields #motion-name,.motion-fields #motion-text,.motion-fields #motion-layer-name{width:160px}
+.motion-fields #motion-workspace{width:min(360px,65vw)}
+.motion-fields #motion-filename{width:150px}
+.motion-layers{padding:6px 0;margin:6px 0;border-top:1px solid #333b51;border-bottom:1px solid #333b51;display:flex;gap:6px;flex-wrap:wrap;color:#9caacc;min-height:35px}
+.motion-layer{background:#242b3a;border:1px solid #42506d;color:#cbd9f3;padding:7px 9px;border-radius:5px;font-size:11px}
+.motion-layer.selected{border-color:#b4a2f9;background:#3d335a}
+@media(max-width:1050px){.motion-toolbar{flex-direction:column;align-items:flex-start}#motion-status{max-width:100%;text-align:left}.motion-time{flex-wrap:wrap}}

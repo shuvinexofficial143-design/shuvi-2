@@ -1,0 +1,159 @@
+//! A11 isolated admission gate for the ACTUAL FilmCraft Session.
+//! Manual native actions and canonical A07 GuardedHost borrow ONE Mutex.
+//! Production egui has NOT yet been refactored to use this gate.
+//! This is NOT a model/renderer API, permission service, or approval UI.
+use std::sync::{Mutex, MutexGuard, TryLockError};
+use filmcraft_engine::{Session, shuvi_ai_readonly};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use shuvi_ai_provider::{
+    guard::{GuardError, NativeOwner, Snapshot},
+    host::{GuardedHost,OwnerConsentRequest},
+    transactional::TransactionalLedger,
+};
+use crate::{VideoOwner,native_consent::WindowsNativeOwnerConsent};
+
+#[derive(Debug)]
+pub enum AdmissionError {
+    /// Exclusive native manual/AI Session currently has another owner.
+    Busy,
+    /// A previous panic invalidated the native owner; do not bypass it.
+    Poisoned,
+    Native(String),
+    A07(GuardError),
+}
+
+/// Local, trusted, native-owner-only identity. Never accept IDs from a
+/// provider plan, WebView, external request, or untrusted path.
+pub struct NativeVideoAdmission {
+    owned: Mutex<Session>,
+    project_id: String,
+    /// Trusted per-application session seed, never a renderer-provided ID.
+    session_id: String,
+}
+impl NativeVideoAdmission {
+    pub fn new(mut session: Session, project_id: String, session_id: String)
+        -> Result<Self, AdmissionError>
+    {
+        // Exact same validation as the real FilmCraft -> canonical A07 adapter,
+        // before the Session can become eligible for this owner gate.
+        VideoOwner::new(&mut session, project_id.clone(), session_id.clone())
+            .map_err(AdmissionError::Native)?;
+        Ok(Self { owned: Mutex::new(session), project_id, session_id })
+    }
+
+    fn acquire(&self) -> Result<MutexGuard<'_,Session>, AdmissionError> {
+        match self.owned.try_lock() {
+            Ok(guard) => Ok(guard),
+            Err(TryLockError::WouldBlock) => Err(AdmissionError::Busy),
+            Err(TryLockError::Poisoned(_)) => Err(AdmissionError::Poisoned),
+        }
+    }
+
+    /// The original manual GUI should route *all* native edit commands, tab
+    /// changes, Save/Open, undo/redo and read operations through this boundary
+    /// before the real AI integration may ever be enabled.
+    pub fn manual_command(&self, id: &str, params: Value)
+        -> Result<Value, AdmissionError>
+    {
+        let mut owner=self.acquire()?;
+        owner.execute(id,params).map_err(|e|AdmissionError::Native(e.to_string()))
+    }
+
+
+    /// Admission for native manual timeline gestures that call FilmCraft
+    /// Session::edit_sequence/edit_group directly, bypassing command registry.
+    /// Must be used from the future production GUI panel/drag/tool hooks.
+    /// The closure borrows the exact same Session as canonical A07; a nested
+    /// manual gesture returns Busy while A07 owns the mutex.
+    pub fn with_manual_session<R>(
+        &self,
+        operation: impl FnOnce(&mut Session)->Result<R,String>,
+    ) -> Result<R,AdmissionError> {
+        let mut owner=self.acquire()?;
+        operation(&mut owner).map_err(AdmissionError::Native)
+    }
+
+    /// Return local native data for building a test or displaying a consent
+    /// plan, while the original Session is under the SAME admission gate.
+    pub fn native_readback(&self)
+        -> Result<shuvi_ai_readonly::NativeVideoSnapshot, AdmissionError>
+    {
+        let mut owner=self.acquire()?;
+        shuvi_ai_readonly::snapshot(&mut owner)
+            .map_err(|e|AdmissionError::Native(e.to_string()))
+    }
+
+
+    /// Derive the canonical A07 identity from the *current* trusted native
+    /// document context. SaveAs, Open, New, tab/sequence switches must not
+    /// inherit a prior approval merely because project bytes match.
+    /// The trusted base session ID is a per-running-app unique host secret
+    /// identifier, not the API key or anything visible to a model.
+    fn current_session_id(&self, session: &Session) -> String {
+        let mut sha = Sha256::new();
+        sha.update(b"SHUVI-FILMCRAFT-A11-NATIVE-CONTEXT");
+        sha.update((self.session_id.len() as u64).to_le_bytes());
+        sha.update(self.session_id.as_bytes());
+        sha.update(session.document_epoch.to_le_bytes());
+        sha.update(session.state.active_sequence.map(|id|id.0).unwrap_or(0).to_le_bytes());
+        match &session.path {
+            Some(path) => {
+                sha.update([1]);
+                sha.update((path.len() as u64).to_le_bytes());
+                sha.update(path.as_bytes());
+            }
+            None => sha.update([0]),
+        }
+        format!("s-{:x}",sha.finalize())
+    }
+
+    /// Native A07 snapshot. It is a project/session VERSION, NOT consent.
+    pub fn a07_snapshot(&self) -> Result<Snapshot, AdmissionError> {
+        let mut owner=self.acquire()?;
+        let bound_id=self.current_session_id(&owner);
+        let mut bridge=VideoOwner::new(
+            &mut owner, self.project_id.clone(), bound_id
+        ).map_err(AdmissionError::Native)?;
+        bridge.snapshot().map_err(AdmissionError::Native)
+    }
+
+    /// V-AI16 REAL trusted Win32 consent entry point. This method can ONLY
+    /// be called by native Rust integration, never by a JS/WebView command.
+    /// The stored A07 scope is fetched and compared to the current original
+    /// FilmCraft native owner before an OS YES/NO dialog is opened.
+    ///
+    /// WARNING: this isolated crate is NOT wired into the production egui
+    /// editor; that migration must be completed before live AI editing.
+    pub fn request_windows_native_consent(
+        &self,
+        ledger:&mut TransactionalLedger,
+        task_id:String,
+        plan_hash:String,
+    ) -> Result<Value,AdmissionError> {
+        let request=OwnerConsentRequest{task_id,plan_hash};
+        self.with_guarded_a07(ledger,|host|{
+            let mut ui=WindowsNativeOwnerConsent;
+            host.request_consent(&request,&mut ui)
+        })
+    }
+
+    /// Reserve, owner consent and all A07 mutations hold the SAME native lock
+    /// as manual commands. Canonical SQLite GuardedHost still independently
+    /// checks the persisted approved plan, intent, idempotency and receipts.
+    /// Caller is trusted native integration only. It must never be exported as
+    /// a JSON command directly reachable from an AI provider or frontend.
+    pub fn with_guarded_a07<R>(
+        &self,
+        ledger:&mut TransactionalLedger,
+        execute:impl FnOnce(&mut GuardedHost<'_,VideoOwner<'_>>)->Result<R,GuardError>,
+    ) -> Result<R,AdmissionError> {
+        let mut owner=self.acquire()?;
+        let bound_id=self.current_session_id(&owner);
+        let mut bridge=VideoOwner::new(
+            &mut owner, self.project_id.clone(), bound_id
+        ).map_err(AdmissionError::Native)?;
+        let mut guarded=GuardedHost {ledger,owner:&mut bridge};
+        execute(&mut guarded).map_err(AdmissionError::A07)
+    }
+}

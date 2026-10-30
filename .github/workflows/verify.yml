@@ -4,11 +4,17 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: shuvi2-foundation-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -16,8 +22,16 @@ jobs:
       - run: npm test
       - run: npm run build
   native:
+    if: github.head_ref != 'feature/shuvi2-release-integration'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+

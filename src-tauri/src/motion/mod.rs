@@ -1,0 +1,443 @@
+//! Single-owner EffectCraft engine worker for Shuvi Motion Studio.
+//! One in-process engine, shared by manual UI and later approved AI commands.
+//! Separate thread keeps possibly non-Send render hosts away from Tauri state.
+use std::{path::Path, sync::mpsc::{self,Sender,SyncSender,Receiver,TrySendError}, thread, time::{Duration,Instant}};
+use serde::Deserialize;
+use serde_json::{json,Value};
+use shuvi_motion_bridge::{BuiltinEffect,CompositionSpec,MaskProperty,MotionBridge,Property,ShapeKind,Transform};
+use base64::{engine::general_purpose::STANDARD,Engine as _};
+
+#[derive(Debug,Deserialize)]
+#[serde(tag="action",rename_all="camelCase",rename_all_fields="camelCase")]
+pub enum MotionRequest{
+    Status,
+    CreateComposition { name:String,width:u32,height:u32,fps:f64,duration_seconds:f64 },
+    ListLayers { comp_id:u64 },
+    // Read-only native composition inspection needed by Unified Workspace recovery.
+    InspectComposition { comp_id:u64 },
+    AddText { comp_id:u64,name:String,text:String,x:f64,y:f64,size:f64 },
+    EditText { comp_id:u64,layer_id:u64,text:String },
+    AddShape { comp_id:u64,name:String,kind:String,x:f64,y:f64,width:f64,height:f64,fill:String },
+    SetTransform { comp_id:u64,layer_id:u64,kind:String,x:Option<f64>,y:Option<f64>,value:Option<f64> },
+    AddKey { comp_id:u64,layer_id:u64,property:String,time:f64,value:Value },
+    EaseKeys { comp_id:u64,layer_id:u64,property:String,times:Vec<f64> },
+    Render { comp_id:u64,time:f64,max_side:u32,transparent:bool },
+    SaveProject { workspace:String,basename:String },
+    OpenProject { workspace:String,basename:String },
+    AddEffect { comp_id:u64,layer_id:u64,effect:String },
+    ListEffects { comp_id:u64,layer_id:u64 },
+    SetEffectParameter { comp_id:u64,layer_id:u64,uid:u64,effect:String,parameter:String,value:f64 },
+    ToggleEffect { comp_id:u64,layer_id:u64,uid:u64,enabled:bool },
+    RemoveEffect { comp_id:u64,layer_id:u64,uid:u64 },
+    AddPolygonMask { comp_id:u64,layer_id:u64,vertices:Vec<[f64;2]> },
+    ListMasks { comp_id:u64,layer_id:u64 },
+    SetMaskVertex { comp_id:u64,layer_id:u64,uid:u64,index:usize,point:[f64;2] },
+    RemoveMask { comp_id:u64,layer_id:u64,uid:u64 },
+    ExportPng { workspace:String,filename:String,comp_id:u64,time:f64,max_side:u32,transparent:bool },
+    InspectEffectParameter { comp_id:u64,layer_id:u64,uid:u64,effect:String,parameter:String },
+    GetMaskSettings { comp_id:u64,layer_id:u64,uid:u64 },
+    SetMaskProperty { comp_id:u64,layer_id:u64,uid:u64,property:String,value:f64 },
+}
+
+struct Work { request:MotionRequest, respond:Sender<Result<Value,String>>, deadline:Instant }
+#[derive(Clone)]
+pub struct MotionHost { tx:SyncSender<Work> }
+const MAX_PENDING:usize=32;
+const COMMAND_TIMEOUT:Duration=Duration::from_secs(120);
+impl MotionHost{
+    pub fn new()->Self{
+        // Bound memory and pending edits: prevent unlimited queued commands under heavy rendering.
+        let (tx,rx)=mpsc::sync_channel(MAX_PENDING);
+        // A native engine session lives on this worker alone, never duplicated
+        // between UI events or silently lost between commands.
+        thread::Builder::new().name("shuvi-effectcraft".into())
+            .spawn(move || worker(rx)).expect("cannot start EffectCraft worker");
+        Self{tx}
+    }
+    pub fn execute(&self,request:MotionRequest)->Result<Value,String>{
+        let (answer_tx,answer_rx)=mpsc::channel();
+        let deadline=Instant::now()+COMMAND_TIMEOUT;
+        match self.tx.try_send(Work{request,respond:answer_tx,deadline}){
+            Ok(())=>{},
+            Err(TrySendError::Full(_))=>return Err("Motion engine busy: queue capacity reached; no action was accepted".into()),
+            Err(TrySendError::Disconnected(_))=>return Err("Motion engine worker unavailable".into()),
+        }
+        answer_rx.recv_timeout(COMMAND_TIMEOUT)
+            .map_err(|e|format!("motion worker did not respond: {e}; pending work expires before execution"))?
+    }
+}
+fn worker(rx:Receiver<Work>){
+    let mut engine=MotionBridge::new();
+    while let Ok(work)=rx.recv(){
+        let response=admitted_action(&mut engine,work.request,work.deadline);
+        let _=work.respond.send(response);
+    }
+}
+fn admitted_action(engine:&mut MotionBridge,request:MotionRequest,deadline:Instant)->Result<Value,String>{
+    // A request that timed out while queued must NOT mutate the live project later.
+    // EffectCraft already running at deadline cannot yet be forcibly preempted.
+    if Instant::now()>=deadline {
+        return Err("Motion command expired before native execution; no edit applied".into());
+    }
+    apply(engine,request)
+}
+fn prop(name:&str)->Result<Property,String>{
+    match name{
+        "position"=>Ok(Property::Position),"scale"=>Ok(Property::Scale),
+        "rotation"=>Ok(Property::Rotation),"opacity"=>Ok(Property::Opacity),
+        _=>Err("allowed keyframe properties: position|scale|rotation|opacity".into())
+    }
+}
+fn shape(name:&str)->Result<ShapeKind,String>{
+    match name {
+        "rect"=>Ok(ShapeKind::Rectangle),"ellipse"=>Ok(ShapeKind::Ellipse),
+        "rounded"=>Ok(ShapeKind::Rounded),"star"=>Ok(ShapeKind::Star),
+        "polygon"=>Ok(ShapeKind::Polygon),
+        _=>Err("allowed shapes: rect|ellipse|rounded|star|polygon".into())
+    }
+}
+fn builtin(name:&str)->Result<BuiltinEffect,String>{
+    match name {
+        "gaussianBlur"=>Ok(BuiltinEffect::GaussianBlur),
+        "brightnessContrast"=>Ok(BuiltinEffect::BrightnessContrast),
+        _=>Err("only gaussianBlur and brightnessContrast built-ins are approved".into())
+    }
+}
+fn effect_json(f:shuvi_motion_bridge::EffectInfo)->Value{
+    json!({"uid":f.uid,"id":f.id,"name":f.name,"enabled":f.enabled})
+}
+fn mask_json(m:shuvi_motion_bridge::MaskInfo)->Value{
+    json!({"uid":m.uid,"name":m.name,"closed":m.closed,"vertices":m.vertices})
+}
+fn mask_property(name:&str)->Result<MaskProperty,String>{
+    match name{
+        "feather"=>Ok(MaskProperty::Feather),
+        "expansion"=>Ok(MaskProperty::Expansion),
+        "opacity"=>Ok(MaskProperty::Opacity),
+        _=>Err("allowed mask properties: feather|expansion|opacity".into()),
+    }
+}
+fn mask_settings_json(m:shuvi_motion_bridge::MaskSettings)->Value{
+    json!({"uid":m.uid,"feather":m.feather,"expansion":m.expansion,"opacity":m.opacity})
+}
+fn coords(x:Option<f64>,y:Option<f64>)->Result<(f64,f64),String>{
+    match (x,y){(Some(x),Some(y))=>Ok((x,y)),_=>Err("both x and y are required".into())}
+}
+fn layer_json(l:shuvi_motion_bridge::LayerSnapshot)->Value{
+    json!({"compId":l.comp_id,"id":l.id,"name":l.name,"kind":l.kind,
+       "position":l.position,"scale":l.scale,"rotation":l.rotation,
+       "opacity":l.opacity,"keyframes":l.keyframes,"revision":l.project_revision})
+}
+fn receipt(r:shuvi_motion_bridge::ProjectReceipt)->Value{
+    json!({"path":r.path.to_string_lossy(),"bytes":r.bytes,
+       "verifiedFromDisk":r.verified_from_disk,
+       "compositions":r.compositions.iter().map(|c|
+         json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
+           "fps":c.fps,"durationSeconds":c.duration_seconds})).collect::<Vec<_>>()})
+}
+fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
+    match request {
+        MotionRequest::Status=>Ok(json!({"ready":true,"engine":"effectcraft",
+            "native":true,"projectRevision":e.revision(),"dirty":e.is_dirty()})),
+        MotionRequest::CreateComposition{name,width,height,fps,duration_seconds}=>{
+            let c=e.create_composition(&CompositionSpec{
+                name,width,height,fps,duration_seconds
+            })?;
+            Ok(json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
+                "fps":c.fps,"durationSeconds":c.duration_seconds,"revision":c.project_revision}))
+        }
+        MotionRequest::InspectComposition{comp_id}=>{
+            let c=e.inspect_composition(comp_id)?;
+            Ok(json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
+                "fps":c.fps,"durationSeconds":c.duration_seconds,
+                "revision":c.project_revision,"source":"native-effectcraft"}))
+        }
+        MotionRequest::ListLayers{comp_id}=>Ok(Value::Array(e.list_layers(comp_id)?
+            .into_iter().map(layer_json).collect())),
+        MotionRequest::AddText{comp_id,name,text,x,y,size}=>
+            Ok(layer_json(e.add_text(comp_id,&name,&text,x,y,size)?)),
+        MotionRequest::EditText{comp_id,layer_id,text}=>
+            Ok(layer_json(e.edit_text(comp_id,layer_id,&text)?)),
+        MotionRequest::AddShape{comp_id,name,kind,x,y,width,height,fill}=>
+            Ok(layer_json(e.add_shape(comp_id,&name,shape(&kind)?,x,y,width,height,&fill)?)),
+        MotionRequest::SetTransform{comp_id,layer_id,kind,x,y,value}=>{
+            let transform=match kind.as_str(){
+                "position"=>{let (x,y)=coords(x,y)?;Transform::Position{x,y}},
+                "scale"=>{let (x,y)=coords(x,y)?;Transform::Scale{x,y}},
+                "rotation"=>Transform::Rotation(value.ok_or("rotation value required")?),
+                "opacity"=>Transform::Opacity(value.ok_or("opacity value required")?),
+                _=>return Err("allowed transforms: position|scale|rotation|opacity".into()),
+            };
+            Ok(layer_json(e.set_transform(comp_id,layer_id,transform)?))
+        }
+        MotionRequest::AddKey{comp_id,layer_id,property,time,value}=>
+            e.add_transform_key(comp_id,layer_id,prop(&property)?,time,value),
+        MotionRequest::EaseKeys{comp_id,layer_id,property,times}=>
+            e.ease_transform_keys(comp_id,layer_id,prop(&property)?,&times),
+        MotionRequest::Render{comp_id,time,max_side,transparent}=>{
+            // Prevent huge Tauri IPC payloads; owner can request full export separately.
+            if max_side==0||max_side>768 {return Err("IPC preview max_side must be 1..768".into());}
+            let frame=e.render_preview(comp_id,time,max_side,transparent)?;
+            let png=frame.png()?;
+            Ok(json!({"width":frame.width,"height":frame.height,
+                "pngBase64":STANDARD.encode(png),"visiblePixels":frame.visible_pixels(),
+                "checksum":frame.checksum().to_string(),"revision":frame.project_revision,
+                "transparent":transparent,"source":"native-effectcraft"}))
+        }
+        MotionRequest::SaveProject{workspace,basename}=>{
+            Ok(receipt(e.save_project(Path::new(&workspace),&basename)?))
+        }
+        MotionRequest::OpenProject{workspace,basename}=>{
+            Ok(receipt(e.open_project(Path::new(&workspace),&basename)?))
+        }
+        MotionRequest::AddEffect{comp_id,layer_id,effect}=>
+            Ok(effect_json(e.add_effect(comp_id,layer_id,builtin(&effect)?)?)),
+        MotionRequest::ListEffects{comp_id,layer_id}=>Ok(Value::Array(e.list_effects(comp_id,layer_id)?
+            .into_iter().map(effect_json).collect())),
+        MotionRequest::SetEffectParameter{comp_id,layer_id,uid,effect,parameter,value}=>{
+            let actual=e.set_effect_numeric(comp_id,layer_id,uid,builtin(&effect)?,&parameter,value)?;
+            Ok(json!({"uid":uid,"parameter":parameter,"value":actual,"verified":true}))
+        }
+        MotionRequest::ToggleEffect{comp_id,layer_id,uid,enabled}=>
+            Ok(effect_json(e.set_effect_enabled(comp_id,layer_id,uid,enabled)?)),
+        MotionRequest::RemoveEffect{comp_id,layer_id,uid}=>{
+            e.remove_effect(comp_id,layer_id,uid)?;
+            Ok(json!({"removed":true,"uid":uid}))
+        }
+        MotionRequest::AddPolygonMask{comp_id,layer_id,vertices}=>
+            Ok(mask_json(e.new_polygon_mask(comp_id,layer_id,&vertices)?)),
+        MotionRequest::ListMasks{comp_id,layer_id}=>Ok(Value::Array(e.list_masks(comp_id,layer_id)?
+            .into_iter().map(mask_json).collect())),
+        MotionRequest::SetMaskVertex{comp_id,layer_id,uid,index,point}=>
+            Ok(mask_json(e.set_mask_vertex(comp_id,layer_id,uid,index,point)?)),
+        MotionRequest::RemoveMask{comp_id,layer_id,uid}=>{
+            e.remove_mask(comp_id,layer_id,uid)?;
+            Ok(json!({"removed":true,"uid":uid}))
+        }
+        MotionRequest::ExportPng{workspace,filename,comp_id,time,max_side,transparent}=>{
+            // Explicit owner-specified existing workspace; bridge refuses clobber/traversal.
+            let receipt=e.export_png_frame(Path::new(&workspace),&filename,
+                comp_id,time,max_side,transparent)?;
+            Ok(json!({"path":receipt.path.to_string_lossy(),"bytes":receipt.bytes,
+                "width":receipt.width,"height":receipt.height,
+                "transparent":receipt.transparent,
+                "verifiedFromDisk":receipt.verified_from_disk,
+                "source":"native-effectcraft"}))
+        }
+        MotionRequest::InspectEffectParameter{comp_id,layer_id,uid,effect,parameter}=>{
+            let p=e.effect_parameter_state(comp_id,layer_id,uid,builtin(&effect)?,&parameter)?;
+            Ok(json!({"uid":p.uid,"parameter":p.parameter,"value":p.value,
+                "minimum":p.minimum,"maximum":p.maximum,"source":"native-effectcraft"}))
+        }
+        MotionRequest::GetMaskSettings{comp_id,layer_id,uid}=>
+            Ok(mask_settings_json(e.mask_settings(comp_id,layer_id,uid)?)),
+        MotionRequest::SetMaskProperty{comp_id,layer_id,uid,property,value}=>{
+            let state=e.set_mask_property(comp_id,layer_id,uid,mask_property(&property)?,value)?;
+            Ok(mask_settings_json(state))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn motion_command(
+    state:tauri::State<'_,MotionHost>,
+    request:MotionRequest
+)->Result<Value,String>{
+    let host=state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move ||host.execute(request))
+        .await.map_err(|e|format!("Motion request task failed: {e}"))?
+}
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+    #[test]
+    fn unified_inspect_composition_reads_current_native_worker_revision() {
+        let host=MotionHost::new();
+        let initial=host.execute(MotionRequest::CreateComposition {
+            name:"Unified inspect native".into(),width:640,height:360,fps:30.0,
+            duration_seconds:5.0
+        }).unwrap();
+        let id=initial["id"].as_u64().unwrap();
+        let readback=host.execute(MotionRequest::InspectComposition{comp_id:id}).unwrap();
+        let status=host.execute(MotionRequest::Status).unwrap();
+        assert_eq!(readback["name"],"Unified inspect native");
+        assert_eq!(readback["revision"],initial["revision"]);
+        assert_eq!(readback["revision"],status["projectRevision"]);
+        assert_eq!(readback["source"],"native-effectcraft");
+        assert!(host.execute(MotionRequest::InspectComposition{comp_id:id+1000}).is_err());
+    }
+    #[test]
+    fn same_worker_preserves_live_engine_state_and_native_preview(){
+        let host=MotionHost::new();
+        let created=host.execute(MotionRequest::CreateComposition{
+            name:"Motion IPC Live".into(),width:320,height:180,fps:30.0,duration_seconds:3.0
+        }).unwrap();
+        let id=created["id"].as_u64().unwrap();
+        let shape=host.execute(MotionRequest::AddShape{
+            comp_id:id,name:"IPC Shape".into(),kind:"rect".into(),x:160.0,y:90.0,
+            width:130.0,height:80.0,fill:"#ff0088".into()
+        }).unwrap();
+        let layers=host.execute(MotionRequest::ListLayers{comp_id:id}).unwrap();
+        assert_eq!(layers.as_array().unwrap().len(),1);
+        assert_eq!(layers[0]["id"],shape["id"]);
+        let render=host.execute(MotionRequest::Render{comp_id:id,time:0.0,max_side:320,transparent:true}).unwrap();
+        assert_eq!(render["source"],"native-effectcraft");
+        assert!(render["visiblePixels"].as_u64().unwrap()>0);
+        let png=STANDARD.decode(render["pngBase64"].as_str().unwrap()).unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(host.execute(MotionRequest::Render{comp_id:id,time:0.0,max_side:9999,transparent:true}).is_err());
+    }
+    #[test]
+    fn unknown_operations_do_not_mutate_live_project(){
+        let host=MotionHost::new();
+        let before=host.execute(MotionRequest::Status).unwrap();
+        assert!(host.execute(MotionRequest::AddShape{
+            comp_id:42,name:"Bad".into(),kind:"unsafe".into(),x:1.0,y:1.0,
+            width:20.0,height:20.0,fill:"#ffffff".into()
+        }).is_err());
+        let after=host.execute(MotionRequest::Status).unwrap();
+        assert_eq!(before["projectRevision"],after["projectRevision"]);
+    }
+    #[test]
+    fn actual_effect_mask_commands_share_native_worker(){
+        let host=MotionHost::new();
+        let c=host.execute(MotionRequest::CreateComposition{
+            name:"Effect IPC".into(),width:320,height:180,fps:30.0,duration_seconds:3.0
+        }).unwrap()["id"].as_u64().unwrap();
+        let l=host.execute(MotionRequest::AddShape{
+            comp_id:c,name:"Plate".into(),kind:"rect".into(),x:160.0,y:90.0,
+            width:160.0,height:90.0,fill:"#557799".into()
+        }).unwrap()["id"].as_u64().unwrap();
+        let fx=host.execute(MotionRequest::AddEffect{
+            comp_id:c,layer_id:l,effect:"brightnessContrast".into()
+        }).unwrap();
+        let uid=fx["uid"].as_u64().unwrap();
+        let p=host.execute(MotionRequest::SetEffectParameter{
+            comp_id:c,layer_id:l,uid,effect:"brightnessContrast".into(),
+            parameter:"brightness".into(),value:70.0
+        }).unwrap();
+        assert_eq!(p["value"],70.0);
+        let ms=host.execute(MotionRequest::AddPolygonMask{
+            comp_id:c,layer_id:l,
+            vertices:vec![[-40.0,-30.0],[40.0,-30.0],[40.0,30.0],[-40.0,30.0]]
+        }).unwrap();
+        assert_eq!(ms["closed"],true);
+        assert_eq!(host.execute(MotionRequest::ListEffects{
+            comp_id:c,layer_id:l
+        }).unwrap().as_array().unwrap().len(),1);
+        assert_eq!(host.execute(MotionRequest::ListMasks{
+            comp_id:c,layer_id:l
+        }).unwrap().as_array().unwrap().len(),1);
+        assert!(host.execute(MotionRequest::AddEffect{
+            comp_id:c,layer_id:l,effect:"userPlugin".into()
+        }).is_err());
+    }
+    #[test]
+    fn real_native_png_export_is_verified_and_never_overwrites(){
+        let folder=std::env::temp_dir().join(format!("shuvi-m08-ipc-{}-{}",
+            std::process::id(),std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let host=MotionHost::new();
+        let comp=host.execute(MotionRequest::CreateComposition{
+            name:"Export Native".into(),width:320,height:180,fps:30.0,duration_seconds:2.0
+        }).unwrap()["id"].as_u64().unwrap();
+        host.execute(MotionRequest::AddShape{
+            comp_id:comp,name:"Export Plate".into(),kind:"rect".into(),
+            x:160.0,y:90.0,width:150.0,height:85.0,fill:"#557799".into()
+        }).unwrap();
+        let folder=folder.to_string_lossy().to_string();
+        let request=||MotionRequest::ExportPng{
+            workspace:folder.clone(),filename:"native_frame.png".into(),
+            comp_id:comp,time:0.0,max_side:320,transparent:true
+        };
+        let receipt=host.execute(request()).unwrap();
+        assert_eq!(receipt["verifiedFromDisk"],true);
+        assert_eq!(receipt["source"],"native-effectcraft");
+        assert!(std::path::Path::new(receipt["path"].as_str().unwrap()).exists());
+        assert!(host.execute(request()).is_err());
+    }
+    #[test]
+    fn native_mask_advanced_properties_and_effect_inspection_roundtrip_in_one_worker(){
+        let host=MotionHost::new();
+        let comp=host.execute(MotionRequest::CreateComposition{
+            name:"IPC Advanced M09".into(),width:320,height:180,fps:30.0,duration_seconds:3.0
+        }).unwrap()["id"].as_u64().unwrap();
+        let layer=host.execute(MotionRequest::AddShape{
+            comp_id:comp,name:"M09 Plate".into(),kind:"rect".into(),
+            x:160.0,y:90.0,width:160.0,height:110.0,fill:"#557799".into()
+        }).unwrap()["id"].as_u64().unwrap();
+        let mask=host.execute(MotionRequest::AddPolygonMask{
+            comp_id:comp,layer_id:layer,
+            vertices:vec![[-50.0,-40.0],[50.0,-40.0],[50.0,40.0],[-50.0,40.0]]
+        }).unwrap()["uid"].as_u64().unwrap();
+        let state=host.execute(MotionRequest::SetMaskProperty{
+            comp_id:comp,layer_id:layer,uid:mask,property:"feather".into(),value:12.0
+        }).unwrap();
+        assert_eq!(state["feather"],json!([12.0,12.0]));
+        assert_eq!(host.execute(MotionRequest::GetMaskSettings{
+            comp_id:comp,layer_id:layer,uid:mask
+        }).unwrap()["feather"],json!([12.0,12.0]));
+        assert!(host.execute(MotionRequest::SetMaskProperty{
+            comp_id:comp,layer_id:layer,uid:mask,property:"filesystem".into(),value:2.0
+        }).is_err());
+        let uid=host.execute(MotionRequest::AddEffect{
+            comp_id:comp,layer_id:layer,effect:"brightnessContrast".into()
+        }).unwrap()["uid"].as_u64().unwrap();
+        let p=host.execute(MotionRequest::InspectEffectParameter{
+            comp_id:comp,layer_id:layer,uid,effect:"brightnessContrast".into(),
+            parameter:"brightness".into()
+        }).unwrap();
+        assert_eq!(p["value"],0.0);
+    }
+    #[test]
+    fn expired_queued_command_never_executes_a_hidden_native_edit(){
+        let mut bridge=MotionBridge::new();
+        let prior=bridge.revision();
+        let expired=Instant::now()-Duration::from_millis(1);
+        let result=admitted_action(&mut bridge,MotionRequest::CreateComposition{
+            name:"Must Not Be Created".into(),width:640,height:360,fps:30.0,duration_seconds:3.0
+        },expired);
+        assert!(result.is_err());
+        assert_eq!(bridge.revision(),prior);
+        assert!(result.unwrap_err().contains("expired before native execution"));
+    }
+    #[test]
+    fn bounded_worker_refuses_unlimited_backlog_without_admitting_hidden_edits(){
+        // No engine executes here; this isolates the bounded queue's capacity contract.
+        let (tx,rx)=mpsc::sync_channel::<Work>(MAX_PENDING);
+        for _ in 0..MAX_PENDING{
+            let (answer,_)=mpsc::channel();
+            assert!(tx.try_send(Work{request:MotionRequest::Status,
+                respond:answer,deadline:Instant::now()+Duration::from_secs(20)}).is_ok());
+        }
+        let (answer,_)=mpsc::channel();
+        assert!(matches!(tx.try_send(Work{request:MotionRequest::Status,
+            respond:answer,deadline:Instant::now()+Duration::from_secs(20)}),
+            Err(TrySendError::Full(_))));
+        drop(rx);
+    }
+    #[test]
+    fn frontend_json_contract_uses_only_typed_camel_case_actions(){
+        let valid=serde_json::json!({
+            "action":"createComposition","name":"IPC Name",
+            "width":640,"height":360,"fps":30.0,"durationSeconds":5.0
+        });
+        assert!(serde_json::from_value::<MotionRequest>(valid).is_ok());
+        let render=serde_json::json!({
+            "action":"render","compId":1,"time":0.0,
+            "maxSide":640,"transparent":true
+        });
+        assert!(serde_json::from_value::<MotionRequest>(render).is_ok());
+        let mask=serde_json::json!({"action":"addPolygonMask","compId":1,"layerId":2,
+            "vertices":[[0.0,0.0],[50.0,0.0],[50.0,50.0]]});
+        assert!(serde_json::from_value::<MotionRequest>(mask).is_ok());
+        let fx=serde_json::json!({"action":"setEffectParameter","compId":1,"layerId":2,
+            "uid":3,"effect":"gaussianBlur","parameter":"blurriness","value":12.0});
+        assert!(serde_json::from_value::<MotionRequest>(fx).is_ok());
+        let untrusted=serde_json::json!({"action":"shell","command":"unsafe"});
+        assert!(serde_json::from_value::<MotionRequest>(untrusted).is_err());
+    }
+
+}

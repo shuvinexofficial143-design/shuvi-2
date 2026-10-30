@@ -1,0 +1,141 @@
+name: Shuvi 2 Integrated Windows Release Candidate
+on:
+  push:
+    branches:
+      - feature/shuvi2-release-integration
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: shuvi2-release-integration-motion-owner-v13-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  integrated-windows-native-and-e2e:
+    if: github.ref == 'refs/heads/feature/shuvi2-release-integration'
+    # Win2025 image 20261021.278.1 failed WebView2 DevToolsActivePort despite
+    # a successful real NSIS install and matching native EXE/sidecar SHA-256.
+    # Pin supported Win2022 image for real Tauri-driver/EdgeDriver E2E.
+    # https://github.com/actions/runner-images/issues/14738
+    runs-on: windows-2022
+    timeout-minutes: 115
+    steps:
+      - name: Checkout both real pinned engines
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            src-tauri
+            crates/shuvi-motion-bridge
+            src-tauri/src/ai_director
+            vendor/filmcraft
+      - name: Parse all installed Windows launcher scripts BEFORE expensive native build
+        shell: pwsh
+        run: |
+          foreach ($script in @('scripts/motion/run-windows-e2e.ps1','scripts/release/run-installed-e2e.ps1','scripts/release/windows-installed-smoke.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "PowerShell native runner parser failure in $($script): $($errors | Out-String)" }
+          }
+      - name: Validate ORIGINAL native sources and exact AI+UI tree provenance
+        shell: pwsh
+        run: |
+          node scripts/release/assert-original-source-tree.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original editor tree integrity failed' }
+      - name: Integration regression, native UI contracts, TypeScript build
+        shell: pwsh
+        run: |
+          npm install --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm dependencies failed' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Integrated UI contract tests failed' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+      - name: Build actual FilmCraft Windows native sidecar
+        shell: pwsh
+        run: ./scripts/video/build-engine.ps1
+      - name: Release-only A08 test fixture isolation for parallel Windows SQLite ledger
+        shell: pwsh
+        run: |
+          node scripts/release/apply-reviewed-native-overlays.mjs ai
+          if ($LASTEXITCODE -ne 0) { throw 'A08 test fixture overlay rejected; no native edits attempted' }
+      - name: Verify canonical A08 native AI Director provider and guarded ledger
+        shell: pwsh
+        run: |
+          cargo test --manifest-path src-tauri/src/ai_director/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw 'Native AI provider and guarded journal verification failed' }
+      - name: Test real in-process EffectCraft compositor
+        shell: pwsh
+        run: |
+          cargo test --manifest-path crates/shuvi-motion-bridge/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw 'Motion engine tests failed' }
+      - name: Verify one integrated Tauri Rust application
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib
+          if ($LASTEXITCODE -ne 0) { throw 'Integrated Tauri tests failed' }
+          cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Real FilmCraft media/timeline/preview/export tests failed' }
+      - name: Build real unsigned NSIS installer with BOTH native studios
+        shell: pwsh
+        run: |
+          # One Windows NSIS bundle only: do not let Tauri mutate the compiled EXE
+          # when packaging; installed bytes MUST still match the built EXE hash.
+          $helpText = npm run tauri -- build --help | Out-String
+          if ($LASTEXITCODE -ne 0 -or -not $helpText.Contains('--no-binary-patching')) { throw 'Pinned Tauri CLI cannot build without executable patching' }
+          npm run tauri -- build --no-binary-patching --config src-tauri/tauri.video.conf.json
+          if ($LASTEXITCODE -ne 0) { throw 'Integrated Windows package failed' }
+          $files = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File)
+          if ($files.Count -ne 1 -or $files[0].Length -lt 100000) { throw 'NSIS installer missing or too small' }
+          Write-Host "Unsigned integrated installer: $($files[0].Name), bytes=$($files[0].Length)"
+      - name: Launch actual native Shuvi Windows executable
+        shell: pwsh
+        timeout-minutes: 4
+        run: ./scripts/video/desktop-launch-smoke.ps1
+      - name: Silently install the actual Windows NSIS package and launch installed EXE
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./scripts/release/windows-installed-smoke.ps1
+      - name: Both studios through the exact installed production EXE and verified disk receipts
+        shell: pwsh
+        timeout-minutes: 35
+        run: ./scripts/release/run-installed-e2e.ps1
+      - name: Upload integrated unsigned Windows installer ONLY after all checks succeed
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi2-integrated-windows-unsigned-installer
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            proof/release/installed-editing-slice.json
+            src-tauri/target/release/installed-smoke.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve real Windows E2E screenshots, receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi2-integration-e2e-evidence
+          path: |
+            src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/release/installed-smoke.json
+            proof/video-desktop/
+            proof/release/
+            proof/motion-desktop/
+            proof/unified-desktop/
+          if-no-files-found: warn
+          retention-days: 7
+

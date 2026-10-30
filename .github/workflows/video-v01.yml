@@ -1,0 +1,125 @@
+name: Shuvi 2 video V10 Windows engine + desktop E2E
+on:
+  pull_request:
+    paths:
+      - "src-tauri/src/video/**"
+      - "src-tauri/src/lib.rs"
+      - "src-tauri/tauri.video.conf.json"
+      - "src-tauri/binaries/.gitignore"
+      - "src/studios/video/**"
+      - "docs/video/**"
+      - "scripts/video/**"
+      - ".github/workflows/video-v01.yml"
+      - ".gitmodules"
+      - "vendor/filmcraft"
+  workflow_dispatch:
+
+# Avoid burning several Windows builders for obsolete PR commits; only newest
+# head gets a complete integration/desktop E2E verdict.
+concurrency:
+  group: shuvi2-video-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  video-windows-package:
+    if: github.head_ref != 'feature/shuvi2-release-integration'
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            vendor/filmcraft
+            src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build pinned FilmCraft and stage exact Windows sidecar
+        shell: pwsh
+        run: ./scripts/video/build-engine.ps1
+      - name: Verify real engine round-trip against staged sidecar
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::tests::real_filmcraft_smoke -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "FilmCraft round-trip test failed." }
+      - name: Real H.264 MP4 import/metadata/save/reload test
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::media::tests::real_mp4_import_round_trip -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "V03 real media import test failed." }
+      - name: Real FilmCraft timeline placement split move and undo/redo
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::timeline::tests::real_timeline_placement_split_move_delete -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "V04 real timeline test failed." }
+      - name: Render a real FilmCraft Program frame PNG from imported MP4
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::preview::tests::real_program_frame_png -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "V05 PNG preview smoke failed." }
+      - name: Real FilmCraft H264 MP4 export and metadata verification
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::export::tests::real_export_playable_h264_mp4 -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "FilmCraft real H264 export test failed." }
+      - name: Verify real cross-session FilmCraft Undo Redo saved snapshots
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::history::tests::real_cross_session_undo_redo -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Video persistent history E2E failed." }
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Windows NSIS experimental Shuvi video package
+        run: npm run tauri -- build --config src-tauri/tauri.video.conf.json
+      - name: Smoke launch actual Windows Shuvi 2 application window
+        shell: pwsh
+        timeout-minutes: 3
+        run: ./scripts/video/desktop-launch-smoke.ps1
+      - name: End-to-end real WebView2 UI + FilmCraft MP4 export
+        shell: pwsh
+        timeout-minutes: 12
+        run: node scripts/video/windows-desktop-e2e.mjs
+      - name: Preserve Windows desktop E2E proof and failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi2-video-desktop-e2e-proof
+          path: |
+            src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/video-desktop-e2e.json
+            src-tauri/target/video-desktop-e2e.png
+          if-no-files-found: warn
+      - name: Verify real nonempty NSIS installer and staged binary
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis -Filter "*.exe" -File | Select-Object -First 1
+          if (-not $installer -or $installer.Length -le 100000) { throw "NSIS installer missing or too small." }
+          $manifest = Get-Content src-tauri/binaries/filmcraft-cli.build.json | ConvertFrom-Json
+          $staged = Get-FileHash src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe -Algorithm SHA256
+          if ($staged.Hash.ToLowerInvariant() -ne $manifest.sha256) { throw "Staged CLI integrity mismatch." }
+          Write-Host "Installer: $($installer.FullName) ($($installer.Length) bytes)"
+          Write-Host "FilmCraft SHA256: $($manifest.sha256)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shuvi2-video-v02-windows-unsigned
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/binaries/filmcraft-cli.build.json
+            src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/video-desktop-e2e.json
+            src-tauri/target/video-desktop-e2e.png
+          if-no-files-found: error
+
