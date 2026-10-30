@@ -98,7 +98,20 @@ async function test(){
     nativeEffectCraftPin:process.env.SHUVI_EFFECTCRAFT_PIN??null,
     runnerOS:process.env.RUNNER_OS??process.platform,
     projectDir:root,steps:[],nativeScreenshot:null};
-  async function step(name,fn){lastStep=name;await fn();result.steps.push(name)}
+  async function step(name,fn){
+    lastStep=name;
+    process.stdout.write("REAL-WEBVIEW STEP START: "+name+"\\n");
+    // A crash or runner interruption must still leave a durable, truthful progress record.
+    await writeFile(path.join(artifacts,"progress.json"),
+      JSON.stringify({ok:false,inProgress:name,completed:result.steps,
+        gitSha:result.commitSha,driver:result.driver,window:result.window},null,2));
+    await fn();
+    result.steps.push(name);
+    process.stdout.write("REAL-WEBVIEW STEP PASS: "+name+"\\n");
+    await writeFile(path.join(artifacts,"progress.json"),
+      JSON.stringify({ok:false,lastPassed:name,completed:result.steps,
+        gitSha:result.commitSha,driver:result.driver,window:result.window},null,2));
+  }
   try{
     await step("click Motion Studio tab",async()=>{
       await waitFor("Motion Studio tab",()=>find('button[data-studio="motion"]'));
@@ -245,6 +258,17 @@ async function test(){
     process.stdout.write(JSON.stringify(result)+"\n");
   }catch(error){
     result.ok=false;result.failedStep=lastStep;result.error=String(error);
+    result.errorStack=error instanceof Error?error.stack??null:null;
+    if(session){
+      try{
+        const source=await wd("GET",`/session/${session}/source`);
+        if(typeof source==="string")
+          await writeFile(path.join(artifacts,"motion-failed-webview-dom.html"),source);
+      }catch{}
+      try{
+        result.failedUiStatus=await text("#motion-status");
+      }catch{}
+    }
     try{await screenshot("motion-failed.png")}catch{}
     await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify(result,null,2));
     throw error;
