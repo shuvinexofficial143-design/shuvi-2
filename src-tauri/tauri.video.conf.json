@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "binaries/filmcraft-cli"
+    ]
+  }
+}

@@ -1,0 +1,441 @@
+/**
+ * Actual packaged Tauri WebView2 → native IPC E2E on GitHub Windows runner.
+ * No mocks: input paths are real, FilmCraft CLI is real and MP4 is probed.
+ * CDP is exposed ONLY in ephemeral CI process env, never the shipped app.
+ */
+import {chromium} from "playwright-core";
+import {spawn,execFileSync} from "node:child_process";
+import {mkdtempSync,copyFileSync,existsSync,statSync,writeFileSync,readFileSync,rmSync} from "node:fs";
+import {resolve,dirname,join} from "node:path";
+import {tmpdir} from "node:os";
+import net from "node:net";
+
+if(process.platform!=="win32")throw Error("WebView2 E2E requires an actual Windows runner.");
+const repo=resolve(import.meta.dirname,"../..");
+const exe=join(repo,"src-tauri","target","release","shuvi2.exe");
+const staged=join(repo,"src-tauri","binaries","filmcraft-cli-x86_64-pc-windows-msvc.exe");
+const fixture=join(repo,"tests","video","blue-64x64-12fps.mp4");
+for(const file of [exe,staged,fixture])if(!existsSync(file))throw Error("Missing real E2E prerequisite: "+file);
+copyFileSync(staged,join(dirname(exe),"filmcraft-cli.exe"));
+const folder=mkdtempSync(join(tmpdir(),"shuvi-video-native-e2e-"));
+const media=join(folder,"fixture.mp4");
+const project=join(folder,"studio.fcproj");
+const output=join(folder,"verified-output.mp4");
+const reportPath=join(repo,"src-tauri","target","video-desktop-e2e.json");
+const shotPath=join(repo,"src-tauri","target","video-desktop-e2e.png");
+copyFileSync(fixture,media);
+const checks=[];
+let browser=null,app=null,page=null;
+const policyKey="HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
+let policyApplied=false;
+let previousPolicy=null;
+function parseRegPolicy(){
+  try{
+    const text=execFileSync("reg.exe",["query",policyKey,"/v","shuvi2.exe"],{encoding:"utf8",timeout:6000});
+    const match=text.match(/shuvi2\.exe\s+REG_SZ\s+(.+)/);
+    return match?match[1].trim():null;
+  }catch{return null;}
+}
+function applyCiOnlyPolicy(port){
+  previousPolicy=parseRegPolicy();
+  // Microsoft-supported WebView2 per-exe override, scoped to ephemeral CI
+  // Windows user, never written into the production Tauri binary.
+  execFileSync("reg.exe",["add",policyKey,"/v","shuvi2.exe","/t","REG_SZ",
+    "/d","--remote-debugging-port="+port,"/f"],{stdio:"pipe",timeout:10000});
+  policyApplied=true;
+}
+function restoreCiPolicy(){
+  if(!policyApplied)return;
+  try{
+    if(previousPolicy===null){
+      execFileSync("reg.exe",["delete",policyKey,"/v","shuvi2.exe","/f"],{stdio:"pipe",timeout:10000});
+    }else{
+      execFileSync("reg.exe",["add",policyKey,"/v","shuvi2.exe","/t","REG_SZ","/d",previousPolicy,"/f"],{stdio:"pipe",timeout:10000});
+    }
+  }catch(error){console.error("Could not restore CI WebView2 debug policy:",String(error));process.exitCode=1;}
+}
+function cdpDiagnostics(){
+  const details={processes:"",ports:""};
+  for(const [key,cmd,args] of [
+    ["processes","powershell.exe",["-NoProfile","-Command","Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('msedgewebview2.exe','shuvi2.exe') } | Select-Object Name,ProcessId,ParentProcessId,CommandLine | Format-List | Out-String -Width 220"]],
+    ["ports","powershell.exe",["-NoProfile","-Command","Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -First 30 LocalAddress,LocalPort,OwningProcess | Format-Table | Out-String -Width 160"]],
+  ]){
+    try{details[key]=execFileSync(cmd,args,{encoding:"utf8",timeout:10000,maxBuffer:250000}).slice(0,12000);}
+    catch(e){details[key]=String(e);}
+  }
+  return details;
+}
+const report={status:"running",sha:process.env.GITHUB_SHA??"local",steps:checks,project,output,
+  screenshot:shotPath,error:null};
+function note(name,details){checks.push({name,details,at:new Date().toISOString()});console.log("E2E: "+name+" | "+details);}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+async function freePort(){
+  return new Promise((ok,bad)=>{
+    const server=net.createServer();
+    server.once("error",bad);
+    server.listen(0,"127.0.0.1",()=>{
+      const address=server.address(),port=address.port;
+      server.close(()=>ok(port));
+    });
+  });
+}
+/** Capture user-visible action result, including explicit errors; never wait two
+ * minutes on a failed native Tauri request just because success didn't appear.
+ */
+async function visibleStatus(fragment, timeout=120000){
+  let observed;
+  try{
+    observed=await page.waitForFunction(expected=>{
+      const node=document.querySelector('.v-editor [data-v="status"]');
+      if(!node)return null;
+      const text=node.textContent??"";
+      if(text.includes(expected))return {ok:true,text};
+      if(node.classList.contains("v-error"))return {ok:false,text};
+      return null;
+    },fragment,{timeout});
+  }catch(error){
+    const state=await captureEditorStatus();
+    throw Error("Native action timed out waiting for "+fragment+
+      "; current actual WebView2 status: "+JSON.stringify(state)+
+      "; original timeout: "+String(error));
+  }
+  const result=await observed.jsonValue();
+  if(!result.ok)throw Error("Native FilmCraft UI reported failure while expecting "+
+    fragment+": "+result.text);
+  return result.text;
+}
+async function captureEditorStatus(){
+  if(!page)return {state:"no-webview-page"};
+  try{
+    return await page.evaluate(()=>{
+      const find=k=>document.querySelector('.v-editor [data-v="'+k+'"]');
+      const status=find("status");
+      const buttons=[...document.querySelectorAll(".v-editor button[data-action]")];
+      return {
+        status:status?.textContent??null,
+        statusIsError:status?.classList.contains("v-error")??null,
+        health:find("health")?.textContent??null,
+        meta:find("meta")?.textContent??null,
+        history:document.querySelector('.v-lanes [data-v="history"]')?.textContent??null,
+        busyButtons:buttons.filter(el=>el.disabled).map(el=>el.dataset.action),
+        activeButtons:buttons.filter(el=>!el.disabled).map(el=>el.dataset.action),
+        timelineClips:document.querySelectorAll(".v-lanes .v-clip").length,
+        realTracks:document.querySelectorAll(".v-lanes .v-track-row").length
+      };
+    });
+  }catch(error){return {state:"webview-unavailable",error:String(error)};}
+}
+function inspectNativeOnFailure(){
+  const result={projectExists:existsSync(project)};
+  if(!result.projectExists)return result;
+  try{
+    const raw=execFileSync(staged,["--compact","--project",project,"inspect","project"],
+      {encoding:"utf8",timeout:20000,maxBuffer:512000});
+    const parsed=JSON.parse(raw);
+    result.project={revision:parsed.revision,activeSequence:parsed.activeSequence,
+      keys:Object.keys(parsed).slice(0,20)};
+  }catch(error){result.projectError=String(error).slice(0,300);}
+  try{
+    const raw=execFileSync(staged,["--compact","--project",project,"inspect","sequence"],
+      {encoding:"utf8",timeout:20000,maxBuffer:512000});
+    const parsed=JSON.parse(raw);
+    result.sequence={videoTracks:parsed.video?.length,audioTracks:parsed.audio?.length,
+      markers:parsed.markers?.length};
+  }catch(error){result.sequenceError=String(error).slice(0,300);}
+  return result;
+}
+async function clickAction(action,expected,timeout=120000){
+  await page.locator('.v-editor [data-action="'+action+'"],.v-lanes [data-action="'+action+'"]').click();
+  const msg=await visibleStatus(expected,timeout);
+  note(action,msg);
+}
+try{
+  const port=process.env.SHUVI_CI_E2E_CDP_PORT?Number(process.env.SHUVI_CI_E2E_CDP_PORT):await freePort();
+  if(!Number.isInteger(port)||port<1024||port>65535)throw Error("CI CDP port invalid");
+  report.cdpPort=port;
+  applyCiOnlyPolicy(port);
+  note("debug-policy","Applied temporary per-app WebView2 CDP port on ephemeral Windows CI runner");
+  const env={
+    ...process.env,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:"--remote-debugging-port="+port,
+    WEBVIEW2_USER_DATA_FOLDER:join(folder,"webview-profile"),
+  };
+  app=spawn(exe,[],{cwd:dirname(exe),env,stdio:"ignore",windowsHide:false});
+  app.on("error",e=>{report.error=String(e)});
+  let online=false;
+  for(let i=0;i<120;i++){
+    if(app.exitCode!==null)throw Error("Desktop app exited before CDP attach: "+app.exitCode);
+    try{
+      const response=await fetch("http://127.0.0.1:"+port+"/json/version",{signal:AbortSignal.timeout(450)});
+      if(response.ok){online=true;break;}
+    }catch{}
+    await sleep(400);
+  }
+  if(!online){
+    const diagnostics=cdpDiagnostics();
+    report.cdpDiagnostics=diagnostics;
+    throw Error("Real WebView2 CDP endpoint did not respond on 127.0.0.1:"+port+" (Windows process diagnostics archived)");
+  }
+  browser=await chromium.connectOverCDP("http://127.0.0.1:"+port,{timeout:25000});
+  const context=browser.contexts()[0];
+  if(!context)throw Error("WebView2 CDP had no browser context");
+  for(let n=0;n<80;n++){
+    const all=context.pages();
+    for(const candidate of all){
+      try{
+        if(await candidate.locator(".v-editor").count()){page=candidate;break;}
+      }catch{}
+    }
+    if(page)break;
+    await sleep(250);
+  }
+  if(!page)throw Error("Native WebView2 did not render the Video Studio DOM");
+  report.browserErrors=[];
+  page.on("pageerror",error=>{
+    if(report.browserErrors.length<18)report.browserErrors.push({
+      kind:"pageerror",message:String(error).slice(0,500)
+    });
+  });
+  page.on("console",message=>{
+    if(message.type()==="error" && report.browserErrors.length<18)
+      report.browserErrors.push({kind:"console",message:message.text().slice(0,500)});
+  });
+  await page.locator(".v-editor").waitFor({state:"visible",timeout:15000});
+  note("window","Real Windows app and WebView2 Video Studio DOM visible");
+
+  // Regression for visible M0 demo panels: [hidden] alone was overridden by
+  // legacy .screen{display:flex} and .track{display:grid} author CSS.
+  if(await page.locator(".workspace.video-workspace .preview > .screen").isVisible())
+    throw Error("Old 'Live Editor Integration Pending' placeholder still visible in Video mode");
+  if(await page.locator(".workspace.video-workspace .timeline > .track").first().isVisible())
+    throw Error("Old mock timeline track visible beside actual FilmCraft sequence");
+  await page.locator(".workspace.video-workspace .v-program .v-monitor")
+    .waitFor({state:"visible",timeout:10000});
+  if(!(await page.locator(".top-note .phase").textContent())?.includes("FilmCraft"))
+    throw Error("Video Studio shell still labels itself M0 Foundation");
+  note("native-workspace","Verified no visible M0 placeholder or synthetic timeline in Video mode");
+
+
+  // Actual user-facing inputs; no direct Tauri invoke bypass, no mock engine.
+  await page.locator('[data-v="root"]').fill(folder);
+  await page.locator('[data-v="project"]').fill(project);
+  await page.locator('[data-v="source"]').fill(media);
+  await page.locator('[data-v="output"]').fill(output);
+  await page.locator('[data-v="width"]').fill("64");
+  await page.locator('[data-v="height"]').fill("64");
+  await page.locator('[data-v="fps"]').fill("12");
+  await clickAction("import","Imported real media",180000);
+
+  // Native media bin has exactly the FilmCraft-imported item, not a mock card.
+  const mediaRow=page.locator(".v-media-list .v-media-item").first();
+  await mediaRow.waitFor({state:"visible",timeout:15000});
+  if(await page.locator(".v-media-list .v-media-item").count()!==1)
+    throw Error("Native media bin did not contain exactly the imported fixture");
+  if(!(await page.locator('[data-v="mediaCount"]').textContent())?.includes("1 / 1"))
+    throw Error("Media Bin count is not sourced from real FilmCraft project");
+  const beforeBinSelect=readFileSync(project);
+  await page.locator('[data-v="mediaFilter"]').fill("no-match-media");
+  if(await page.locator(".v-media-list .v-media-item").count()!==0)
+    throw Error("Searching native Media Bin should hide non-matching imported media");
+  await page.locator('[data-v="mediaFilter"]').fill("");
+  await mediaRow.click();
+  if(!readFileSync(project).equals(beforeBinSelect))
+    throw Error("Selecting imported media in native Media Bin wrote to .fcproj");
+  note("media-bin","Real inspected imported media found, searched and selected without project edit");
+
+  if(!existsSync(project)||statSync(project).size<=0)throw Error("Import did not save real .fcproj");
+  note("import-file","Actual FilmCraft project on disk: "+statSync(project).size+" bytes");
+
+  await clickAction("sequence","Verified createSequence",120000);
+  const independentSequence=inspectNativeOnFailure();
+  if(!Number.isInteger(independentSequence.sequence?.videoTracks) ||
+     independentSequence.sequence.videoTracks<1)
+    throw Error("Native FilmCraft CLI could not independently inspect a saved sequence: "+
+      JSON.stringify(independentSequence));
+  note("sequence-file","Independently reopened real .fcproj: "+
+    JSON.stringify(independentSequence.sequence));
+  const select=page.locator('[data-v="media"]');
+  if(await select.locator("option").count()<2)throw Error("Media bin has no imported FilmCraft item");
+  await select.selectOption({index:1});
+  await page.locator('[data-v="track"]').fill("V1");
+  await page.locator('[data-v="seconds"]').fill("0");
+  await clickAction("place","Verified place",120000);
+  await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
+  note("timeline","Real FilmCraft .v-clip built from saved sequence.inspect, not demo fixture DOM");
+
+  // These are independent native IPC calls and FilmCraft CLI processes.
+  // A fake in-process edit history cannot pass this cross-session check.
+  await clickAction("undo","Verified persistent FilmCraft undo",120000);
+  if(await page.locator(".v-lanes .v-clip").count()!==0) {
+    throw Error("Persistent Undo did not remove the placed FilmCraft timeline clip");
+  }
+  note("undo","Verified saved project readback contains no placed clip");
+  await clickAction("redo","Verified persistent FilmCraft redo",120000);
+  await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
+  note("redo","Verified independent CLI session restored same FilmCraft project clip");
+
+  // Real read-only FilmCraft clip inspector and reveal must not write project.
+  const beforeInspect=readFileSync(project);
+  await page.locator(".v-lanes .v-clip").first().click();
+  const detail=await page.locator('[data-v="clipInspector"]').textContent();
+  if(!detail?.includes("Clip #")||!detail.includes("Source In")||!detail.includes("Effects"))
+    throw Error("Native FilmCraft clip inspector omitted source/effects metadata");
+  await page.locator('[data-inspect-action="reveal"]').click();
+  if(!readFileSync(project).equals(beforeInspect))
+    throw Error("Reveal selected clip mutated saved FilmCraft .fcproj");
+  if(!await page.locator('[data-inspect-action="seekClip"]').isEnabled())
+    throw Error("Real clip frame navigation not enabled");
+  const nativeSequence=JSON.parse(execFileSync(staged,[
+    "--compact","--project",project,"inspect","sequence"
+  ],{encoding:"utf8",timeout:25000,maxBuffer:1024*1024}));
+  const nativeMarkerIds=new Set((Array.isArray(nativeSequence.markers)?nativeSequence.markers:[])
+    .filter(m=>Number.isSafeInteger(m?.id)&&m.id>0&&Number.isFinite(m?.start)&&m.start>=0)
+    .map(m=>m.id));
+  const actualMarkerCount=(await page.locator('[data-v="markerSelect"] option').count())-1;
+  if(actualMarkerCount!==nativeMarkerIds.size)
+    throw Error("Marker UI does not match real FilmCraft saved marker IDs: "+
+      actualMarkerCount+" UI vs "+nativeMarkerIds.size+" in saved sequence");
+  note("clip-inspector","Real FilmCraft clip metadata and reveal inspected without project write");
+
+
+  // Zoom/Pan must be purely visual and reflect saved native FilmCraft clip geometry.
+  const preZoomProject=readFileSync(project);
+  await page.locator('[data-v="timelineZoom"]').selectOption("4");
+  const panControl=page.locator('[data-v="timelinePan"]');
+  await panControl.evaluate(el=>{
+    el.value=String(Number(el.max)/2);
+    el.dispatchEvent(new Event("input",{bubbles:true}));
+  });
+  // The actual saved clip may cover the full fixture duration, or be shorter.
+  // Check the inspected clip's real geometry rather than assuming a
+  // synthetic "clipped left" marker always exists at this pan position.
+  const zoomedClips=await page.locator('.v-lanes .v-clip').count();
+  if(zoomedClips<1)throw Error("Timeline zoom/pan lost real saved FilmCraft clip");
+  const clipped=await page.locator('.v-lanes .v-clipped-left,.v-lanes .v-clipped-right').count();
+  if(clipped<1)throw Error("Zoomed clip viewport did not mark any clipped edge");
+  if(!(await page.locator('[data-v="viewRange"]').textContent())?.includes("4× zoom"))
+    throw Error("Native FilmCraft timeline zoom viewport label missing");
+  if(!readFileSync(project).equals(preZoomProject))
+    throw Error("Changing timeline zoom/pan modified saved .fcproj bytes");
+  note("zoom-pan","Real FilmCraft timeline visually clipped/panned without editing project");
+  await page.locator('[data-v="timelineZoom"]').selectOption("1");
+
+
+  // Real mouse pointer drag: actual FilmCraft typed "move" saves .fcproj.
+  // Verify the saved file SHA changes only after native readback; undo restores.
+  const originalBeforeDrag=readFileSync(project);
+  const dragClip=page.locator(".v-lanes .v-clip").first();
+  const bounding=await dragClip.boundingBox();
+  const laneBounds=await page.locator(".v-lanes .v-track-lane").first().boundingBox();
+  if(!bounding||!laneBounds||laneBounds.width<=120)throw Error("Real track geometry unavailable for drag E2E");
+  const x=bounding.x+Math.min(50,bounding.width/2);
+  const y=bounding.y+bounding.height/2;
+  const dx=Math.max(25,Math.min(95,laneBounds.width*0.18));
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x+dx,y,{steps:8});
+  await page.mouse.up();
+  await visibleStatus("Verified real timeline move",180000);
+  if(readFileSync(project).equals(originalBeforeDrag))throw Error("Drag did not save changed .fcproj bytes");
+  note("drag","Real pointer drag moved saved FilmCraft timeline clip, not just its DOM");
+  await clickAction("undo","Verified persistent FilmCraft undo",120000);
+  if(!readFileSync(project).equals(originalBeforeDrag))throw Error("Undo did not restore exact pre-drag project bytes");
+  note("drag-undo","Verified native SHA-identical rollback after pointer drag");
+
+
+  // Offline Hindi parser, no API key and no paid model call.
+  await page.locator(".v-lanes .v-clip").first().click();
+  const previous=readFileSync(project);
+  await page.locator("#prompt").fill("चयनित क्लिप हटाओ");
+  await page.locator("#chat-form").evaluate(form=>form.requestSubmit());
+  await page.locator('[data-v="chatReview"]').waitFor({state:"visible",timeout:10000});
+  await page.locator('[data-chat-approve="no"]').click();
+  if(!readFileSync(project).equals(previous))throw Error("Rejected Hindi command changed native project");
+  note("hindi-reject","Native .fcproj bytes unchanged after rejected Hindi command");
+
+
+  // Chat is a deterministic parser, NOT an LLM. It requires explicit approval.
+  await page.locator(".v-lanes .v-clip").first().click();
+  await page.locator("#prompt").fill("split selected at 0.5");
+  await page.locator("#chat-form").evaluate(form=>form.requestSubmit());
+  await page.locator('[data-v="chatReview"]').waitFor({state:"visible",timeout:10000});
+  if(await page.locator(".v-lanes .v-clip").count()!==1)
+    throw Error("Chat proposal executed without user approval");
+  note("chat-proposal","Chat generated typed split proposal without touching real project");
+  await page.locator('[data-chat-approve="yes"]').click();
+  await visibleStatus("Verified approved Chat split",180000);
+  if(await page.locator(".v-lanes .v-clip").count()!==2)
+    throw Error("Approved chat split did not persist two native clips");
+  note("chat-approval","Explicitly approved typed chat action split native FilmCraft clip");
+  await clickAction("undo","Verified persistent FilmCraft undo",120000);
+  if(await page.locator(".v-lanes .v-clip").count()!==1)
+    throw Error("Undo after approved chat edit did not restore timeline");
+
+  await page.locator('[data-v="seconds"]').fill("0.25");
+  await clickAction("preview","Verified real FilmCraft frame",180000);
+  await page.waitForFunction(()=>{
+    const img=document.querySelector('.v-monitor img');
+    return img && !img.hidden && img.naturalWidth>0 && img.naturalHeight>0;
+  },null,{timeout:20000});
+  const dims=await page.locator(".v-monitor img").evaluate(img=>[img.naturalWidth,img.naturalHeight]);
+  if(dims[0]===0||dims[1]===0)throw Error("Real frame did not decode in native WebView");
+  note("preview","Actual decoded FilmCraft PNG "+dims.join("×"));
+
+  // Click an actual time ruler, wait for FilmCraft to return a newly rendered
+  // frame from the saved project, not merely a changed input/DOM label.
+  const beforeRuler=readFileSync(project);
+  const ruler=page.locator('[data-v="timeRuler"]');
+  const rulerBox=await ruler.boundingBox();
+  if(!rulerBox||rulerBox.width<100)throw Error("Actual Video Timeline time ruler not visible");
+  await ruler.click({position:{x:rulerBox.width/2,y:rulerBox.height/2}});
+  await page.waitForFunction(()=>{
+    const status=document.querySelector('.v-editor [data-v="status"]')?.textContent??"";
+    const time=document.querySelector('.v-editor [data-v="seconds"]')?.value??"";
+    return status.includes("Verified real FilmCraft frame")&&
+      status.includes("00:00:00.500")&&Number(time)===0.5;
+  },null,{timeout:180000});
+  if(!readFileSync(project).equals(beforeRuler))
+    throw Error("Read-only FilmCraft ruler seek mutated native project file");
+  note("ruler-seek","Real clicked timeline ruler rendered FilmCraft frame at half second");
+
+
+  const slider=page.locator('[data-v="scrub"]');
+  await slider.evaluate(el=>{
+    el.value="0.75";
+    el.dispatchEvent(new Event("input",{bubbles:true}));
+  });
+  await page.waitForFunction(()=>{
+    const msg=document.querySelector('.v-editor [data-v="status"]')?.textContent??"";
+    return msg.includes("Verified real FilmCraft frame") && msg.includes("00:00:00.750");
+  },null,{timeout:180000});
+  note("scrub","Real FilmCraft frame seek 0.75s completed through UI, not just queued");
+
+  // Avoid an empty audio track forcing a codec mode; video stream is still real.
+  await page.locator('[data-v="audio"]').uncheck();
+  await clickAction("export","Verified MP4",300000);
+  if(!existsSync(output)||statSync(output).size<=100)throw Error("Native MP4 output file absent");
+  const header=readFileSync(output).subarray(4,8).toString("ascii");
+  if(header!=="ftyp")throw Error("Output is not MP4 ISO BMFF");
+  note("export","Actual FilmCraft H264 MP4 "+statSync(output).size+" bytes with ftyp atom");
+
+  await page.screenshot({path:shotPath,fullPage:true,timeout:15000});
+  note("screenshot","Actual WebView2 application screenshot saved");
+  report.status="pass";
+}catch(error){
+  report.status="fail";report.error=String(error?.stack??error);
+  report.uiAtFailure=await captureEditorStatus();
+  report.realFilmCraftAtFailure=inspectNativeOnFailure();
+  console.error("WebView2 UI state:",JSON.stringify(report.uiAtFailure));
+  console.error("FilmCraft independently inspected state:",JSON.stringify(report.realFilmCraftAtFailure));
+  console.error("ACTUAL WINDOWS E2E FAILED:",report.error);
+  if(page){try{await page.screenshot({path:shotPath,timeout:6000});}catch{}}
+  process.exitCode=1;
+}finally{
+  if(browser)try{await browser.close();}catch{}
+  if(app&&!app.killed)try{app.kill("SIGTERM");}catch{}
+  restoreCiPolicy();
+  writeFileSync(reportPath,JSON.stringify(report,null,2));
+  console.log("Desktop E2E proof: "+reportPath);
+  // Do not delete workspace before WebView2 child processes release profile.
+  // GitHub runner cleans isolated temporary fixture files.
+}

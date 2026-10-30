@@ -1,9 +1,9 @@
 use serde::Serialize;
 
 mod subtitles;
+mod video;
 
 // Source-pinned does NOT imply installed, compiled, loaded, or operational.
-// False means no verified direct engine integration is available yet.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineStatus {
@@ -25,10 +25,100 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Real OpenAI structured proposal only. Never executes an editing action.
+#[tauri::command]
+async fn video_ai_propose(request:video::ai::ModelRequest)
+    -> Result<video::ai::ModelProposal,String> {
+    tauri::async_runtime::spawn_blocking(move||video::ai::propose(request))
+        .await.map_err(|e|format!("Video AI worker failed: {e}"))?
+}
+
+/// Explicit recovery of an interrupted history journal commit, not a file overwrite.
+#[tauri::command]
+async fn video_history_reconcile(request:video::history::ReconcileRequest)
+    -> Result<video::history::HistoryStatus,String> {
+    tauri::async_runtime::spawn_blocking(move||video::history::reconcile(request))
+        .await.map_err(|e|format!("History recovery worker failed: {e}"))?
+}
+
+/// Cross-session FilmCraft project snapshot history; user-initiated only.
+#[tauri::command]
+async fn video_history_status(selected_root:String,project_path:String)
+    -> Result<video::history::HistoryStatus,String> {
+    tauri::async_runtime::spawn_blocking(move||video::history::status(selected_root,project_path))
+        .await.map_err(|e|format!("History worker failed: {e}"))?
+}
+
+#[tauri::command]
+async fn video_history_restore(request:video::history::RestoreRequest)
+    -> Result<video::history::RestoreReceipt,String> {
+    tauri::async_runtime::spawn_blocking(move||video::history::restore(request))
+        .await.map_err(|e|format!("History restore worker failed: {e}"))?
+}
+
+/// Refresh exact project SHA-256 before AI-planned edits or manual operations.
+#[tauri::command]
+async fn video_project_snapshot(
+    selected_root:String,
+    project_path:String,
+) -> Result<video::snapshot::ProjectSnapshot,String> {
+    tauri::async_runtime::spawn_blocking(move || video::snapshot::inspect(selected_root,project_path))
+        .await.map_err(|e|format!("Video snapshot worker failed: {e}"))?
+}
+
+/// Verify a real H264 MP4 written by FilmCraft; refuse replacement of existing files.
+#[tauri::command]
+async fn video_export_mp4(
+    request: video::export::ExportRequest,
+) -> Result<video::export::ExportReceipt, String> {
+    tauri::async_runtime::spawn_blocking(move || video::export::export_mp4(request))
+        .await.map_err(|e| format!("Export worker failed: {e}"))?
+}
+
+/// Actual FilmCraft Program frame PNG; never substitute a mock render.
+#[tauri::command]
+async fn video_preview_frame(
+    request: video::preview::PreviewRequest,
+) -> Result<video::preview::PreviewReceipt, String> {
+    tauri::async_runtime::spawn_blocking(move || video::preview::render(request))
+        .await.map_err(|e| format!("Preview worker failed: {e}"))?
+}
+
+/// Explicit user-scoped timeline request, with project revision verification.
+#[tauri::command]
+async fn video_timeline_apply(
+    request: video::timeline::TimelineRequest,
+) -> Result<video::timeline::TimelineReceipt, String> {
+    tauri::async_runtime::spawn_blocking(move || video::timeline::apply(request))
+        .await.map_err(|e| format!("Timeline worker failed: {e}"))?
+}
+
+/// Explicitly owner-selected import scoped to selected_root. No AI permission
+/// delegation is implied by accepting these paths.
+#[tauri::command]
+async fn video_import_media(
+    selected_root: String,
+    project_path: String,
+    source_path: String,
+) -> Result<video::media::VideoImportedMedia, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        video::media::import_media(selected_root, project_path, source_path)
+    }).await.map_err(|e| format!("Video import worker failed: {e}"))?
+}
+
+/// Opt-in real FilmCraft headless smoke, never a fabricated readiness signal.
+#[tauri::command]
+async fn video_engine_probe() -> Result<video::VideoProbe, String> {
+    tauri::async_runtime::spawn_blocking(video::smoke_probe)
+        .await
+        .map_err(|e| format!("Video engine probe worker failed: {e}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot, video_history_status, video_history_restore, video_history_reconcile, video_ai_propose])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

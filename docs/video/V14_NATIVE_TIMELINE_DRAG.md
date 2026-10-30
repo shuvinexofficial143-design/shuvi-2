@@ -1,0 +1,7 @@
+# V14 — Real same-track Timeline drag to move
+
+A real FilmCraft video/audio clip can now be dragged horizontally within its inspected native track in the Windows editor. Mouse pointer distance is translated into timeline seconds and snapped to the real sequence rational FPS; movement is bounded and rejected if geometry is invalid.
+Unlike a synthetic frontend drag, clip DOM position **does not change on pointer movement**. On pointer release beyond a small threshold, the editor calls the actual typed FilmCraft `move` action with the saved project SHA-256 and existing per-project native lock.
+It drains active frame preview before editing, waits for a verified .fcproj save, reloads the actual FilmCraft sequence and only then redraws the moved clip. Failure leaves the old DOM/real model state and shows an error.
+Cross-track movement is intentionally NOT implemented by dragging; manually choose target track and use the Move button. This makes accidental audio/video track changes impossible.
+Pure JS tests cover frame snapping, clamping, finite input checks and invalid pointer geometry. The interactive Windows GUI pointer workflow remains NOT VERIFIED until exact-SHA WebView2 E2E succeeds.

@@ -1,0 +1,6 @@
+# V17.1 — Exact CI findings & typed viewport / Windows E2E fixes
+
+Exact V17 HEAD e7a62cf GitHub Actions results: 46 JavaScript tests PASS, native Rust PASS, Windows FilmCraft real MP4 import, timeline, PNG preview, H264 MP4 export and persistent cross-session undo/redo tests PASS.
+Frontend TypeScript and Windows packaging failed in the same frontend build step: inspector `revealTimeOffset` runtime supports a nullable viewport but `.d.mts` incorrectly required non-null. The declaration now matches implementation, and a direct null-case regression test is included.
+Windows real E2E now matches the marker picker count against the actual `filmcraft-cli --project <saved fcproj> inspect sequence` readback; a fixture is not assumed to contain zero markers. Zoom/pan checks at least one real visible clip with a clipped edge without requiring the left edge specifically.
+These are strict real native tests. They are not disabled or converted to synthetic editor DOM data. Installed NSIS and full WebView2 CDP still require exact-SHA successful Windows CI.

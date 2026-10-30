@@ -1,0 +1,1 @@
+export declare function shouldRefreshVideoProjectAfterActionError(action:string):boolean;

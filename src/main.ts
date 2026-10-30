@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import "./styles.css";
+import { mountVideoStudio } from "./studios/video/view";
 
 type EngineStatus = { name: string; sourcePinned: boolean; runtimeReady: boolean };
 
@@ -10,9 +11,33 @@ const thread = document.querySelector<HTMLElement>("#chat-thread")!;
 const prompt = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 
 let selectedStudio: "video" | "motion" = "video";
+const videoStudio = mountVideoStudio();
+const phase=document.querySelector<HTMLElement>(".top-note .phase");
+const topNote=document.querySelector<HTMLElement>(".top-note");
+const railFooter=document.querySelector<HTMLElement>(".rail-bottom");
+const chatStatus=document.querySelector<HTMLElement>(".chat-heading .offline");
+const chatSubmit=document.querySelector<HTMLButtonElement>('#chat-form button[type="submit"]');
+// Video is the default tab; hide the M0 placeholder immediately.
+videoStudio.setActive(true);
 let engines: EngineStatus[] = [];
 
+/** Presentation-only shell labels. Never mark AI or native engine healthy without a real command. */
+function updateShellForStudio():void {
+  const video=selectedStudio==="video";
+  if(phase)phase.textContent=video?"FilmCraft · Native Video":"M0 · Foundation";
+  if(topNote)topNote.firstChild!.textContent=video?"Windows Video Editor ":"AI Creative Studio ";
+  if(railFooter)railFooter.textContent=video?
+    "FilmCraft project editing / live OpenAI requires explicit approval":"Source pinned · Runtime not built";
+  if(chatStatus)chatStatus.textContent=video?"Local + optional AI":"Not connected";
+  if(chatSubmit)chatSubmit.textContent=video?"Propose edit for review →":"Save local draft →";
+  document.querySelector(".workspace")?.classList.toggle("video-workspace",video);
+  document.querySelector(".chat")?.classList.toggle("video-chat",video);
+}
 function showHealth(): void {
+  if (selectedStudio === "video") {
+    health.textContent = "FilmCraft · click Verify Engine for real runtime check";
+    return;
+  }
   const found = engines.find((engine) => engine.name === selectedStudio);
   health.textContent = found?.runtimeReady
     ? "Engine ready"
@@ -27,6 +52,8 @@ document.querySelectorAll<HTMLButtonElement>("button[data-studio]").forEach((but
     selectedStudio = next;
     title.textContent = next === "video" ? "Video Studio" : "Motion Studio";
     document.querySelectorAll("button[data-studio]").forEach((b) => b.classList.toggle("active", b === button));
+    videoStudio.setActive(next === "video");
+    updateShellForStudio();
     showHealth();
   });
 });
@@ -39,13 +66,28 @@ function appendMessage(role: "user" | "assistant", message: string): void {
   thread.scrollTop = thread.scrollHeight;
 }
 
-document.querySelector<HTMLFormElement>("#chat-form")!.addEventListener("submit", (event) => {
+document.querySelector<HTMLFormElement>("#chat-form")!.addEventListener("submit", async (event) => {
   event.preventDefault();
   const value = prompt.value.trim();
   if (!value) return;
-  appendMessage("user", value);
-  appendMessage("assistant", "Draft saved only in this window. No AI provider or editing engine is connected, so no edit was executed.");
   prompt.value = "";
+  appendMessage("user", value);
+  if(selectedStudio!=="video"){
+    appendMessage("assistant","Motion Studio chat not connected; no motion edit executed.");
+    return;
+  }
+  const reply=document.createElement("div");
+  reply.className="message assistant";
+  reply.textContent="Checking proposed FilmCraft command…";
+  thread.appendChild(reply);
+  thread.scrollTop=thread.scrollHeight;
+  try {
+    const text=await videoStudio.proposeChatText(value);
+    reply.textContent=text;
+  }catch(error){
+    reply.textContent="No Video edit executed: "+String(error);
+  }
+  thread.scrollTop=thread.scrollHeight;
 });
 
 document.querySelector<HTMLButtonElement>("#srt-test")!.addEventListener("click", async () => {
@@ -70,4 +112,5 @@ async function initialize(): Promise<void> {
   }
   showHealth();
 }
+updateShellForStudio();
 void initialize();

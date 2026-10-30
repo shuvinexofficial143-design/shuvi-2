@@ -4,9 +4,15 @@ on:
     branches: [main]
   pull_request:
 
+# Only the newest PR commit needs a full foundation verdict.
+# Previous check runs remain in GitHub history but no longer monopolize runners.
+concurrency:
+  group: shuvi2-foundation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   frontend:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,4 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
       - run: cargo test --manifest-path src-tauri/Cargo.toml

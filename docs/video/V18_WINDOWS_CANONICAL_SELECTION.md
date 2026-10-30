@@ -1,0 +1,7 @@
+# V18.3 — Windows short-path versus canonical FilmCraft project identity
+
+Root cause hypothesis for E2E Create Sequence at run 41016666349: importing an MP4 succeeded, but the next user action may fail frontend `request()` because Windows CI's input path contains an 8.3 alias (`RUNNER~1`), while Rust `std::fs::canonicalize` returns a long canonical path. Previously JavaScript directly compared `VideoProjectSnapshot.projectPath` against the original text, and rejected a legitimate same-file project.
+The Video Studio now records the exact owner-selected `root` and `.fcproj` strings that produced a successfully verified FilmCraft snapshot. Subsequent typed editing requests require the same recorded user selection (case/separator normalized), instead of comparing it to Rust's differently formatted canonical path.
+Native Rust remains authoritative: every editing request again canonicalizes the owner root/project path, proves containment, validates project revision and SHA-256 before any write. Switching the input to a different root or project still rejects edits until fresh real inspection.
+Tests include Windows 8.3 short-path and canonical alias distinctions, harmless separators/case, and rejection on project/root changes. This is a code-grounded fix for a **plausible** failure cause, not proof of root cause until the exact-head WebView2 E2E is green.
+Any failure on the new run must use the enhanced UI/CLI diagnostic JSON rather than assuming this was sufficient.
