@@ -12,6 +12,52 @@ use sha2::{Digest, Sha256};
 use shuvi_ai_provider::guard::{Action, Editor, NativeOwner, Snapshot, Version};
 use std::collections::BTreeSet;
 
+/// M-AI05 local single-owner admission gate over the EXACT native editor Session.
+/// RefCell is deliberate: the actual EffectCraft egui event loop is single-threaded,
+/// and nested manual requests during trusted guarded execution must return Busy.
+/// This is an isolated integration harness, not yet wired to the production UI.
+pub struct ExclusiveMotionSession {
+    session: std::cell::RefCell<Session>,
+    project_id: String,
+    session_id: String,
+}
+impl ExclusiveMotionSession {
+    pub fn new(session: Session, project_id: String, session_id: String) -> Result<Self,String> {
+        // An integration host must derive these from trusted owner context;
+        // external/renderer data must NEVER supply the identity.
+        if project_id.is_empty() || session_id.is_empty() ||
+            project_id.len()>1024 || session_id.len()>128 ||
+            project_id.chars().any(char::is_control) ||
+            session_id.chars().any(char::is_control) {
+            return Err("invalid owned project or native session identity".into());
+        }
+        Ok(Self{session:std::cell::RefCell::new(session),project_id,session_id})
+    }
+    /// Original manual UI edits are admitted through the SAME exclusive owner.
+    /// The AI side holds a mutable borrow from SQLite admission to receipt.
+    pub fn manual_command(&self,cmd:&str,params:Value)->Result<Value,String>{
+        let mut s=self.session.try_borrow_mut().map_err(|_|"native owner busy: guarded operation active".to_string())?;
+        s.execute_checked(cmd,params).map_err(|e|e.to_string())
+    }
+    /// An entire trusted operation (reserve, consent, execute, recovery) must
+    /// use one session lease; this closure is the scope of exclusive admission.
+    pub fn with_native_owner<T>(&self,f:impl FnOnce(&mut EffectcraftNativeOwner<'_>)->T)->Result<T,String>{
+        let mut s=self.session.try_borrow_mut().map_err(|_|"native owner busy: guarded operation active".to_string())?;
+        let mut owner=EffectcraftNativeOwner::new(&mut s,self.project_id.clone(),self.session_id.clone())?;
+        Ok(f(&mut owner))
+    }
+    /// Inspector uses the same live native Session and cannot run concurrently
+    /// with an in-flight guarded edit. No model-supplied project selector.
+    pub fn native_inventory(&self)->Result<Value,String>{
+        let s=self.session.try_borrow().map_err(|_|"native owner busy: guarded operation active".to_string())?;
+        Ok(native_model_inventory(&s))
+    }
+    pub fn revision(&self)->Result<u64,String>{
+        let s=self.session.try_borrow().map_err(|_|"native owner busy: guarded operation active".to_string())?;
+        Ok(s.revision)
+    }
+}
+
 pub struct EffectcraftNativeOwner<'a> {
     session: &'a mut Session,
     project_id: String,
@@ -347,6 +393,108 @@ mod tests{
         assert_eq!(h.execute(wire(&p,0,0)).unwrap_err(),GuardError::DuplicateOrUncertain);
         drop(h);drop(owner);
         assert!(s.project.items.is_empty());
+    }
+
+    #[test]
+    fn shared_native_owner_sees_original_manual_edits_and_live_ids(){
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        assert_eq!(gate.revision().unwrap(),0);
+        let manual=gate.manual_command("comp.new",json!({"name":"Owner Created",
+            "width":800,"height":450,"frameRate":30.0,"duration":5.0})).unwrap();
+        let comp=manual["comp"].as_u64().unwrap();
+        assert!(gate.revision().unwrap()>0);
+        assert!(gate.native_inventory().unwrap()["compIds"].as_array().unwrap().contains(&json!(comp)));
+        gate.with_native_owner(|owner|{
+            let snapshot=owner.snapshot().unwrap();
+            assert!(matches!(snapshot.version,Version::MotionRevision(n) if n>0));
+            assert_eq!(snapshot.project_id,"native-test.ecproj");
+        }).unwrap();
+    }
+
+    #[test]
+    fn manual_commands_and_native_inventory_refuse_reentrant_ai_owner_lease(){
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        gate.with_native_owner(|owner|{
+            assert_eq!(owner.current_revision(),0);
+            let blocked=gate.manual_command("comp.new",json!({"name":"Race"})).unwrap_err();
+            assert!(blocked.contains("native owner busy"));
+            assert!(gate.native_inventory().unwrap_err().contains("native owner busy"));
+            assert!(gate.with_native_owner(|_|()).unwrap_err().contains("native owner busy"));
+        }).unwrap();
+        assert_eq!(gate.revision().unwrap(),0);
+        assert!(gate.native_inventory().is_ok(),"after releasing guarded lease, inspector can resume");
+    }
+
+    #[test]
+    fn single_owner_lock_survives_real_sqlite_consent_reentrancy_attempt(){
+        struct Reentrant<'a>{gate:&'a ExclusiveMotionSession,blocked:bool,calls:usize}
+        impl OwnerConsent for Reentrant<'_>{
+            fn grant(&mut self,_scope:&Scope)->bool{
+                self.calls+=1;
+                self.blocked=self.gate.manual_command("comp.new",json!({
+                    "name":"Unapproved Manual During Consent"
+                })).unwrap_err().contains("native owner busy");
+                true
+            }
+        }
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let tmp=TestDb::new();
+        let mut db=tmp.open();
+        let (p,reserve,consent,bind)=plan(0,vec![json!({
+            "type":"motion.createComposition","name":"SQLite Owner",
+            "width":400,"height":250,"fps":30.0,"durationSeconds":4.0
+        })]);
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            host.reserve(&reserve).unwrap();
+        }).unwrap();
+        let mut approval=Reentrant{gate:&gate,blocked:false,calls:0};
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            let granted=host.request_consent(&consent,&mut approval).unwrap();
+            assert_eq!(granted["granted"],true);
+            assert_eq!(approval.calls,1);
+            assert!(approval.blocked);
+            let receipt=host.execute(wire(&p,0,0)).unwrap();
+            assert_eq!(receipt["nativeVerified"],true);
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["verified"]));
+        }).unwrap();
+        assert_eq!(gate.revision().unwrap(),1);
+        let ids=gate.native_inventory().unwrap()["compIds"].as_array().unwrap().clone();
+        assert_eq!(ids.len(),1,"native session must contain only the guarded edit");
+        assert!(gate.manual_command("comp.new",json!({"name":"Manual After Receipt"})).is_ok());
+        assert_eq!(gate.native_inventory().unwrap()["compIds"].as_array().unwrap().len(),2);
+        let replay=gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            host.execute(wire(&p,0,0))
+        }).unwrap();
+        assert!(replay.is_err(),"SQLite must reject attempted replay even after later manual edits");
+    }
+
+    #[test]
+    fn original_manual_change_between_reserved_plan_and_consent_rejects_once(){
+        let tmp=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let (_p,reserve,consent,_bound)=plan(0,vec![json!({
+            "type":"motion.createComposition","name":"Cannot Execute",
+            "width":320,"height":200,"fps":30.0,"durationSeconds":4.0
+        })]);
+        let mut db=tmp.open();
+        gate.with_native_owner(|owner|{
+            GuardedHost{ledger:&mut db,owner}.reserve(&reserve).unwrap();
+        }).unwrap();
+        gate.manual_command("comp.new",json!({"name":"Real Manual Edit"})).unwrap();
+        let mut prompt=TestOwnerConsent{count:0,yes:true};
+        let result=gate.with_native_owner(|owner|{
+            GuardedHost{ledger:&mut db,owner}.request_consent(&consent,&mut prompt)
+        }).unwrap();
+        assert_eq!(result.unwrap_err(),GuardError::StaleProject);
+        assert_eq!(prompt.count,0);
+        assert_eq!(gate.revision().unwrap(),1);
     }
 
     #[test]
