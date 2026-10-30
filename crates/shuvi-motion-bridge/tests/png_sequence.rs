@@ -33,8 +33,14 @@ fn renders_actual_png_sequence_with_native_disk_verified_manifest(){
     assert_eq!(v["ok"],true);
     assert_eq!(v["source"],"native-effectcraft");
     assert_eq!(v["frames"],5);
-    assert_eq!(receipt.directory,dir.join("real_frames"),
-        "verified frames were not published at the exact owner destination");
+    // Windows can report the SAME directory through a short DOS path (RUNNER~1)
+    // and the canonical extended-length path (\\\\?\\C:\\Users\\runneradmin).
+    // Compare filesystem identity, never unnormalized path display strings.
+    assert_eq!(
+        fs::canonicalize(&receipt.directory).unwrap(),
+        fs::canonicalize(dir.join("real_frames")).unwrap(),
+        "native sequence was not published at the exact owner destination"
+    );
     let names=fs::read_dir(&dir).unwrap()
         .map(|e|e.unwrap().file_name().to_string_lossy().to_string())
         .collect::<Vec<_>>();
