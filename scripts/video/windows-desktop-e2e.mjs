@@ -170,6 +170,22 @@ try{
   await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
   note("redo","Verified independent CLI session restored same FilmCraft project clip");
 
+  // Real read-only FilmCraft clip inspector and reveal must not write project.
+  const beforeInspect=readFileSync(project);
+  await page.locator(".v-lanes .v-clip").first().click();
+  const detail=await page.locator('[data-v="clipInspector"]').textContent();
+  if(!detail?.includes("Clip #")||!detail.includes("Source In")||!detail.includes("Effects"))
+    throw Error("Native FilmCraft clip inspector omitted source/effects metadata");
+  await page.locator('[data-inspect-action="reveal"]').click();
+  if(!readFileSync(project).equals(beforeInspect))
+    throw Error("Reveal selected clip mutated saved FilmCraft .fcproj");
+  if(!await page.locator('[data-inspect-action="seekClip"]').isEnabled())
+    throw Error("Real clip frame navigation not enabled");
+  if(await page.locator('[data-v="markerSelect"] option').count()!==1)
+    throw Error("Fixture without markers invented a fake sequence marker");
+  note("clip-inspector","Real FilmCraft clip metadata and reveal inspected without project write");
+
+
   // Zoom/Pan must be purely visual and reflect saved native FilmCraft clip geometry.
   const preZoomProject=readFileSync(project);
   await page.locator('[data-v="timelineZoom"]').selectOption("4");
