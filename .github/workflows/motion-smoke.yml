@@ -1,0 +1,117 @@
+name: Shuvi 2 Motion native engine + persistence
+
+on:
+  push:
+    branches:
+      - feature/shuvi2-motion-studio
+  pull_request:
+    paths:
+      - 'crates/shuvi-motion-bridge/**'
+      - 'docs/motion/**'
+      - '.github/workflows/motion-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  motion-engine-windows:
+    name: Real EffectCraft comp.new on Windows
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout pinned EffectCraft submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install upstream-required Rust 1.95
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache pinned EffectCraft native engine build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/shuvi-motion-bridge
+          key: motion-engine-windows
+      - name: Verify source pin
+        shell: pwsh
+        run: |
+          $actual = git -C vendor/effectcraft rev-parse HEAD
+          $expected = 'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'
+          if ($actual -ne $expected) { throw "EffectCraft pin mismatch: $actual" }
+      - name: Assert patched PDF parser resolves to upstream reviewed commit
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --format-version 1 --manifest-path crates/shuvi-motion-bridge/Cargo.toml | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $syntax = @($metadata.packages | Where-Object { $_.name -eq 'hayro-syntax' })
+          if ($syntax.Count -ne 1) { throw "Expected exactly one hayro-syntax package; found $($syntax.Count)" }
+          $source = $syntax[0].source
+          $pin = '92d392cff132eaf53e13afff77f38b5c11b73aa0'
+          if (-not $source -or -not $source.Contains('storytold/craft-libs') -or -not $source.Contains($pin)) {
+            throw "Guarded upstream hayro-syntax patch missing: $source"
+          }
+          Write-Host "PASS: guarded hayro-syntax comes from reviewed upstream source"
+      - name: Test actual EffectCraft engine bridge
+        run: cargo test --manifest-path crates/shuvi-motion-bridge/Cargo.toml --all-targets
+      - name: Execute headless real composition smoke
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-smoke
+      - name: Verify actual native save and reopen across sessions
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-persistence-smoke
+      - name: Verify native scene rendering and project reopen
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-editor-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Verify real effect and mask rendering with native disk reopen
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-effects-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Verify native advanced mask feather expansion opacity and reopened PNG
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-advanced-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Upload native project and preview frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-proof
+          path: proof/motion/
+          if-no-files-found: error
+          retention-days: 14
+
+  motion-desktop-e2e-windows:
+    name: Real Windows WebView2 mouse-click-to-native-editor E2E
+    needs: motion-engine-windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout pinned native engines
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install native Rust toolchain
+        uses: dtolnay/rust-toolchain@1.95.0
+      - name: Cache real Tauri EffectCraft Windows desktop build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: motion-webview2-windows
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install desktop/frontend packages
+        run: npm install --no-audit --no-fund
+      - name: Build actual Shuvi 2 Windows WebView2 binary
+        run: |
+          npm run build
+          cargo build --manifest-path src-tauri/Cargo.toml --bin shuvi2
+      - name: Click actual Windows Motion UI and verify native PNG/project on disk
+        shell: pwsh
+        run: ./scripts/motion/run-windows-e2e.ps1
+      - name: Upload real desktop screenshot and E2E receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi-motion-windows-webview2-e2e
+          path: proof/motion-desktop/
+          if-no-files-found: warn
+          retention-days: 14

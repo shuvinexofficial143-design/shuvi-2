@@ -2,6 +2,7 @@ use serde::Serialize;
 
 mod subtitles;
 mod video;
+mod motion;
 
 // Source-pinned does NOT imply installed, compiled, loaded, or operational.
 #[derive(Serialize)]
@@ -110,7 +111,8 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot, video_history_status, video_history_restore, video_history_reconcile])
+        .manage(motion::MotionHost::new())
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot, video_history_status, video_history_restore, video_history_reconcile, motion::motion_command])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

@@ -20,3 +20,11 @@ serde_json = "1"
 sha2 = "0.10"
 # V08: native dialogs; users choose files themselves instead of trusting guessed paths.
 tauri-plugin-dialog = "2"
+
+# In-process EffectCraft with upstream-reviewed parser pins
+shuvi-motion-bridge = { path = "../crates/shuvi-motion-bridge" }
+base64 = "0.22"
+
+[patch.crates-io]
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", version = "=0.3.0" }

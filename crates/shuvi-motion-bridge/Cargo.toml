@@ -1,0 +1,26 @@
+[package]
+name = "shuvi-motion-bridge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Typed, headless EffectCraft integration for Shuvi 2 Motion Studio"
+
+[dependencies]
+# Uses the repository's already-reviewed source pin. The upstream binary/UI is not launched.
+effectcraft-engine = { path = "../../vendor/effectcraft/crates/engine" }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+
+# The upstream EffectCraft workspace uses these exact patches for its guarded
+# craft-pdf parser. Cargo ignores a *dependency's* [patch.crates-io] section:
+# since this is our independent workspace root we must re-declare the same
+# reviewed upstream pins here, otherwise crates.io hayro-syntax lacks
+# DecodeLimits/new_with_password_and_limits and the Windows build fails.
+# See vendor/effectcraft/Cargo.toml [patch.crates-io]; do not update pins ad hoc.
+[patch.crates-io]
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", version = "=0.3.0" }
