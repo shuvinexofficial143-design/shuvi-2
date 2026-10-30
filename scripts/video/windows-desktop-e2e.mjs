@@ -277,16 +277,34 @@ try{
   if(dims[0]===0||dims[1]===0)throw Error("Real frame did not decode in native WebView");
   note("preview","Actual decoded FilmCraft PNG "+dims.join("×"));
 
+  // Click an actual time ruler, wait for FilmCraft to return a newly rendered
+  // frame from the saved project, not merely a changed input/DOM label.
+  const beforeRuler=readFileSync(project);
+  const ruler=page.locator('[data-v="timeRuler"]');
+  const rulerBox=await ruler.boundingBox();
+  if(!rulerBox||rulerBox.width<100)throw Error("Actual Video Timeline time ruler not visible");
+  await ruler.click({position:{x:rulerBox.width/2,y:rulerBox.height/2}});
+  await page.waitForFunction(()=>{
+    const status=document.querySelector('.v-editor [data-v="status"]')?.textContent??"";
+    const time=document.querySelector('.v-editor [data-v="seconds"]')?.value??"";
+    return status.includes("Verified real FilmCraft frame")&&
+      status.includes("00:00:00.500")&&Number(time)===0.5;
+  },null,{timeout:180000});
+  if(!readFileSync(project).equals(beforeRuler))
+    throw Error("Read-only FilmCraft ruler seek mutated native project file");
+  note("ruler-seek","Real clicked timeline ruler rendered FilmCraft frame at half second");
+
+
   const slider=page.locator('[data-v="scrub"]');
   await slider.evaluate(el=>{
-    el.value="0.5";
+    el.value="0.75";
     el.dispatchEvent(new Event("input",{bubbles:true}));
   });
   await page.waitForFunction(()=>{
     const msg=document.querySelector('.v-editor [data-v="status"]')?.textContent??"";
-    return msg.includes("Verified real FilmCraft frame") && msg.includes("00:00:00.500");
+    return msg.includes("Verified real FilmCraft frame") && msg.includes("00:00:00.750");
   },null,{timeout:180000});
-  note("scrub","Real FilmCraft frame seek 0.5s completed through UI, not just queued");
+  note("scrub","Real FilmCraft frame seek 0.75s completed through UI, not just queued");
 
   // Avoid an empty audio track forcing a codec mode; video stream is still real.
   await page.locator('[data-v="audio"]').uncheck();

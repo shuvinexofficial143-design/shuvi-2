@@ -34,3 +34,10 @@ test("invalid ruler geometry or frame metadata never triggers preview",()=>{
   assert.deepEqual(rulerTicks(null),[]);
   assert.equal(percentOnRuler(NaN,v),null);
 });
+
+test("fractional saved sequence duration allows its final valid sample",()=>{
+  const v=timelineViewport(0.95,1,0);
+  assert.equal(rulerSeekTime(100,{left:0,width:100},v,24),22/24);
+  const short=timelineViewport(1/30,1,0);
+  assert.equal(rulerSeekTime(100,{left:0,width:100},short,30),0);
+});

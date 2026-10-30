@@ -791,7 +791,13 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     const fps=sequenceFps(snapshot.sequence);
     const button=e<HTMLButtonElement>("timeRuler");
     const bounds=button.getBoundingClientRect();
-    const time=rulerSeekTime(event.clientX,{left:bounds.left,width:bounds.width},viewport,fps??NaN);
+    // Keyboard-generated button click has clientX=0; use the current
+    // playhead instead of unexpectedly jumping to timeline zero.
+    const px=event.detail===0 && viewport
+      ? bounds.left+Math.max(0,Math.min(1,
+          (Number(value("seconds"))-viewport.start)/viewport.duration))*bounds.width
+      : event.clientX;
+    const time=rulerSeekTime(px,{left:bounds.left,width:bounds.width},viewport,fps??NaN);
     if(time===null){inform("FilmCraft ruler seek unavailable: invalid FPS or position",true);return;}
     stopSampledPlayback(true);
     e<HTMLInputElement>("seconds").value=String(time);

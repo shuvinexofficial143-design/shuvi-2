@@ -25,7 +25,7 @@ export function rulerSeekTime(clientX,rect,viewport,fps){
   const ratio=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
   const time=viewport.start+ratio*viewport.duration;
   // A FilmCraft frame starts before end-of-sequence, never at EOF.
-  const last=Math.max(0,Math.floor(viewport.total*fps-1e-8)-1);
+  const last=Math.max(0,Math.ceil(viewport.total*fps-1e-9)-1);
   const frame=Math.max(0,Math.min(last,Math.round(time*fps)));
   return frame/fps;
 }
