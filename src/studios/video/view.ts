@@ -22,6 +22,7 @@ import { exportVideoMp4 } from "./export";
 import { inspectVideoHistory, restoreVideoHistory, reconcileVideoHistory, type VideoHistoryStatus } from "./history";
 import { videoKeyboardCommand } from "./keyboard.mjs";
 import { mediaItems, timelineClips, sequenceDuration, sequenceFps, formatTimecode, localWindowsPath, requireNumber, type EditorClip } from "./model.mjs";
+import {mediaBinView,mediaBinKind} from "./media-bin.mjs";
 
 /** The FilmCraft UI is owned by Video Studio. No Motion Studio DOM is removed. */
 export function mountVideoStudio(): { setActive(active:boolean):void; proposeChatText(text:string):Promise<string> } {
@@ -35,7 +36,11 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   const panel=document.createElement("section");
   panel.className="v-editor";
   panel.innerHTML=String.raw`
-    <div class="v-head"><strong>FilmCraft · Native Video Studio</strong><span data-v="health">Open a project</span></div>
+    <div class="v-head v-project-head">
+      <div><span class="v-eyebrow">SHUVI / VIDEO WORKSPACE</span>
+        <strong>FilmCraft Video Editor</strong></div>
+      <span data-v="health">Open a project</span>
+    </div>
     <div class="v-paths">
       <label>Selected folder (absolute path)<input data-v="root" placeholder="C:\Videos\Project"></label>
       <label>FilmCraft project (.fcproj)<input data-v="project" placeholder="C:\Videos\Project\edit.fcproj"></label>
@@ -51,8 +56,18 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     </div>
     <div class="v-actions"><button data-action="probe">Verify Engine</button><button data-action="open">Open / Refresh</button><button data-action="import">Import Media</button><button data-action="sequence">Create Sequence</button><button data-action="preview">Render Frame</button><button data-action="export">Export MP4</button></div>
     <div class="v-middle">
-      <div class="v-monitor"><img data-v="image" alt="Real FilmCraft Program frame" hidden><span data-v="empty">Frame preview pending · click Render Frame after placing footage</span></div>
-      <div class="v-options">
+      <section class="v-media-library" aria-label="Actual FilmCraft imported media">
+        <div class="v-pane-heading"><strong>Media Bin</strong><span data-v="mediaCount">0 imported items</span></div>
+        <label>Search imported media<input data-v="mediaFilter" type="search" autocomplete="off" placeholder="Find by name, type or ID"></label>
+        <div class="v-media-list" data-v="mediaList" aria-label="Imported FilmCraft media items"></div>
+        <small>Items come from the saved FilmCraft project; select to use Place Media.</small>
+      </section>
+      <section class="v-program" aria-label="Native FilmCraft program monitor">
+        <div class="v-pane-heading"><strong>Program Monitor</strong><span data-v="monitorLabel">Native PNG renderer</span></div>
+        <div class="v-monitor"><img data-v="image" alt="Real FilmCraft Program frame" hidden><span data-v="empty">Frame preview pending · click Render Frame after placing footage</span></div>
+      </section>
+      <section class="v-options" aria-label="FilmCraft inspector and export settings">
+        <div class="v-pane-heading"><strong>Controls</strong><span>Native project</span></div>
         <label>Imported media<select data-v="media"><option value="">Import first</option></select></label>
         <label>Chat command source<select data-v="chatMode">
           <option value="local">Local English / हिंदी commands (no AI)</option>
@@ -87,14 +102,14 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         <label>Trim edge<select data-v="edge"><option value="out">Out</option><option value="in">In</option></select></label>
         <label class="v-inline"><input data-v="ripple" type="checkbox"> Ripple edit</label>
         <small data-v="meta">No real FilmCraft project loaded</small>
-      </div>
+      </section>
     </div>
     <div class="v-message" data-v="status" role="status" aria-live="polite">Use real files under the selected folder. No demo media is generated.</div>
   `;
   const lane=document.createElement("section");
   lane.className="v-lanes";
   lane.innerHTML=String.raw`
-    <div class="v-head"><strong>Native Timeline</strong><span data-v="duration">00:00:00.000</span></div>
+    <div class="v-head v-timeline-heading"><div><span class="v-eyebrow">REAL .FCPROJ</span><strong>Editing Timeline</strong></div><span data-v="duration">00:00:00.000</span></div>
     <div class="v-timeline-nav">
       <label>Timeline Zoom<select data-v="timelineZoom">
         <option value="1">1× · Full sequence</option>
@@ -232,6 +247,44 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     }
     if(itemId!==null&&media.some(m=>m.itemId===itemId))select.value=String(itemId);
     else itemId=null;
+
+    // Media Bin derives exclusively from the FilmCraft project inspection.
+    // Use textContent for names from external files, never user-controlled HTML.
+    const bin=e<HTMLElement>("mediaList");
+    bin.replaceChildren();
+    const shown=mediaBinView(media,value("mediaFilter"));
+    e<HTMLElement>("mediaCount").textContent=shown.matching+" / "+shown.total+" real items";
+    if(shown.items.length===0){
+      const empty=document.createElement("p");
+      empty.className="v-bin-empty";
+      empty.textContent=shown.total===0?"Import a real video or audio file to populate this bin.":
+        "No imported media matches the current filter.";
+      bin.append(empty);
+    }
+    for(const m of shown.items){
+      const button=document.createElement("button");
+      button.type="button";
+      button.className="v-media-item"+(m.itemId===itemId?" v-media-selected":"");
+      button.dataset.mediaId=String(m.itemId);
+      button.setAttribute("aria-pressed",String(m.itemId===itemId));
+      const kind=document.createElement("span");
+      kind.className="v-media-kind";
+      kind.textContent=mediaBinKind(m);
+      const detail=document.createElement("span");
+      detail.className="v-media-description";
+      const name=document.createElement("strong");name.textContent=m.name;
+      const id=document.createElement("small");id.textContent="#"+m.itemId+" · "+m.type;
+      detail.append(name,id);button.append(kind,detail);
+      button.disabled=busy||!active;
+      button.addEventListener("click",()=>{
+        if(busy||!active)return;
+        itemId=m.itemId;
+        draw();
+        inform("Selected FilmCraft media #"+m.itemId+" · ready for Place Media");
+      });
+      bin.append(button);
+    }
+
     e<HTMLElement>("meta").textContent=snapshot?
       "Project SHA "+snapshot.projectSha256.slice(0,12)+" · "+media.length+" media items · "+clips.length+" clips":
       "No project loaded";
@@ -429,6 +482,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         ||(action==="recover"&&!history?.recoverableDirection);
     });
     panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input,select").forEach(control=>{control.disabled=busy;});
+    panel.querySelectorAll<HTMLButtonElement>(".v-media-item").forEach(control=>{control.disabled=busy||!active;});
     lane.querySelectorAll<HTMLButtonElement>(".v-clip").forEach(control=>{control.disabled=busy;});
   }
   async function load():Promise<VideoProjectSnapshot>{
@@ -866,7 +920,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   e<HTMLSelectElement>("media").addEventListener("change",()=>{
     const id=Number(e<HTMLSelectElement>("media").value);
     itemId=Number.isSafeInteger(id)&&id>0?id:null;
+    draw();
   });
+  e<HTMLInputElement>("mediaFilter").addEventListener("input",()=>draw());
   window.addEventListener("keydown",(event)=>{
     if(!active||busy||event.defaultPrevented)return;
     const target=event.target instanceof HTMLElement ? event.target : null;

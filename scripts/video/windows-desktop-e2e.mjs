@@ -212,6 +212,24 @@ try{
   await page.locator('[data-v="height"]').fill("64");
   await page.locator('[data-v="fps"]').fill("12");
   await clickAction("import","Imported real media",180000);
+
+  // Native media bin has exactly the FilmCraft-imported item, not a mock card.
+  const mediaRow=page.locator(".v-media-list .v-media-item").first();
+  await mediaRow.waitFor({state:"visible",timeout:15000});
+  if(await page.locator(".v-media-list .v-media-item").count()!==1)
+    throw Error("Native media bin did not contain exactly the imported fixture");
+  if(!(await page.locator('[data-v="mediaCount"]').textContent())?.includes("1 / 1"))
+    throw Error("Media Bin count is not sourced from real FilmCraft project");
+  const beforeBinSelect=readFileSync(project);
+  await page.locator('[data-v="mediaFilter"]').fill("no-match-media");
+  if(await page.locator(".v-media-list .v-media-item").count()!==0)
+    throw Error("Searching native Media Bin should hide non-matching imported media");
+  await page.locator('[data-v="mediaFilter"]').fill("");
+  await mediaRow.click();
+  if(!readFileSync(project).equals(beforeBinSelect))
+    throw Error("Selecting imported media in native Media Bin wrote to .fcproj");
+  note("media-bin","Real inspected imported media found, searched and selected without project edit");
+
   if(!existsSync(project)||statSync(project).size<=0)throw Error("Import did not save real .fcproj");
   note("import-file","Actual FilmCraft project on disk: "+statSync(project).size+" bytes");
 

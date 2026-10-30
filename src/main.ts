@@ -12,10 +12,27 @@ const prompt = document.querySelector<HTMLTextAreaElement>("#prompt")!;
 
 let selectedStudio: "video" | "motion" = "video";
 const videoStudio = mountVideoStudio();
+const phase=document.querySelector<HTMLElement>(".top-note .phase");
+const topNote=document.querySelector<HTMLElement>(".top-note");
+const railFooter=document.querySelector<HTMLElement>(".rail-bottom");
+const chatStatus=document.querySelector<HTMLElement>(".chat-heading .offline");
+const chatSubmit=document.querySelector<HTMLButtonElement>('#chat-form button[type="submit"]');
 // Video is the default tab; hide the M0 placeholder immediately.
 videoStudio.setActive(true);
 let engines: EngineStatus[] = [];
 
+/** Presentation-only shell labels. Never mark AI or native engine healthy without a real command. */
+function updateShellForStudio():void {
+  const video=selectedStudio==="video";
+  if(phase)phase.textContent=video?"FilmCraft · Native Video":"M0 · Foundation";
+  if(topNote)topNote.firstChild!.textContent=video?"Windows Video Editor ":"AI Creative Studio ";
+  if(railFooter)railFooter.textContent=video?
+    "FilmCraft project editing / live OpenAI requires explicit approval":"Source pinned · Runtime not built";
+  if(chatStatus)chatStatus.textContent=video?"Local + optional AI":"Not connected";
+  if(chatSubmit)chatSubmit.textContent=video?"Propose edit for review →":"Save local draft →";
+  document.querySelector(".workspace")?.classList.toggle("video-workspace",video);
+  document.querySelector(".chat")?.classList.toggle("video-chat",video);
+}
 function showHealth(): void {
   if (selectedStudio === "video") {
     health.textContent = "FilmCraft · click Verify Engine for real runtime check";
@@ -36,6 +53,7 @@ document.querySelectorAll<HTMLButtonElement>("button[data-studio]").forEach((but
     title.textContent = next === "video" ? "Video Studio" : "Motion Studio";
     document.querySelectorAll("button[data-studio]").forEach((b) => b.classList.toggle("active", b === button));
     videoStudio.setActive(next === "video");
+    updateShellForStudio();
     showHealth();
   });
 });
@@ -94,4 +112,5 @@ async function initialize(): Promise<void> {
   }
   showHealth();
 }
+updateShellForStudio();
 void initialize();
