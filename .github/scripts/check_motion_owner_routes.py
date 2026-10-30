@@ -81,7 +81,7 @@ def main():
             count = src.count(GATE)
             # Test modules intentionally use raw Session methods to create
             # fixtures. Only shipping code may be rejected as a bypass.
-            runtime_part = re.split(r"(?m)^\\s*#\\[cfg\\(test\\)\\]\\s*\\n\\s*mod\\s+tests\\b", src, maxsplit=1)[0]
+            runtime_part = re.split(r"(?m)^\s*#\[cfg\(test\)\]\s*\n\s*mod\s+tests\b", src, maxsplit=1)[0]
             if "app.session.execute(" in runtime_part or "app.session.execute_checked(" in runtime_part:
                 errors.append(f"Direct native execute reintroduced in shipping code: {file}")
         if count < expected:
