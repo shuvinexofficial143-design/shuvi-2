@@ -45,6 +45,7 @@ impl FilmcraftApp {
             dialog: recovery.then_some(Dialog::Recovery),
             updates_rt: Default::default(),
             file_dialogs: Default::default(),
+            shuvi_ai: Default::default(),
             native_dialog: None,
             auto: Default::default(),
             ime_replacement_epoch: 0,

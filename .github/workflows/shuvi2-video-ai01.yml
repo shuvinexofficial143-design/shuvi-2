@@ -41,12 +41,16 @@ jobs:
             "original-editors/Shuvi2-Video/apps/filmcraft/src/main.rs",
             "original-editors/Shuvi2-Video/crates/ui-egui/src/lib.rs",
             "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_readonly.rs",
+            "original-editors/Shuvi2-Video/crates/ui-egui/src/panels/shuvi_ai.rs",
             "original-editors/Shuvi2-Video/NOTICE",
             "original-editors/Shuvi2-Video/SHUVI_SOURCE_ORIGIN.txt"
           )) { if (!(Test-Path $f)) { throw "Source/attribution missing: $f" } }
       - name: Real Session registry, readback, edit, undo and disk roundtrip tests
         shell: pwsh
         run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-engine --test shuvi_native_contract -- --nocapture
+      - name: Verify real native Shuvi AI egui panel dock and UI safety tests
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-ui-egui shuvi_ai -- --nocapture
       - name: Check Original FilmCraft GUI is still compilable
         shell: pwsh
         run: cargo check --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft

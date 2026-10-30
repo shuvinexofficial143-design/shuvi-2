@@ -41,10 +41,11 @@ pub enum PanelKind {
     ReferenceMonitor,
     Timecode,
     ProjectNotes,
+    ShuviAi,
 }
 
 impl PanelKind {
-    pub const ALL: [PanelKind; 28] = [
+    pub const ALL: [PanelKind; 29] = [
         PanelKind::Project,
         PanelKind::MediaBrowser,
         PanelKind::Libraries,
@@ -73,6 +74,7 @@ impl PanelKind {
         PanelKind::ReferenceMonitor,
         PanelKind::Timecode,
         PanelKind::ProjectNotes,
+        PanelKind::ShuviAi,
     ];
     pub fn title(self) -> &'static str {
         match self {
@@ -104,6 +106,7 @@ impl PanelKind {
             PanelKind::ReferenceMonitor => "Reference Monitor",
             PanelKind::Timecode => "Timecode",
             PanelKind::ProjectNotes => "Project Notes",
+            PanelKind::ShuviAi => "Shuvi AI",
         }
     }
     pub fn id(self) -> String {
@@ -493,7 +496,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
             hsplit(
                 Ratio(0.72),
                 hsplit(Ratio(0.5), tabs(&[Source, EffectControls, AudioClipMixer, Metadata], 0), tabs(&[Program], 0)),
-                tabs(&[Properties, EssentialGraphics, Text], 0),
+                tabs(&[Properties, EssentialGraphics, Text, ShuviAi], 3),
             ),
             hsplit(Ratio(0.29), tabs(&[Project, MediaBrowser, Libraries, Info, Effects, Markers, History], 0), bottom_editing()),
         ),
@@ -973,5 +976,30 @@ mod tests {
             second: Box::new(effects.root),
         };
         assert_eq!(read(&split), (None, vec![]));
+    }
+}
+
+#[cfg(test)]
+mod shuvi_ai_dock_tests {
+    use super::*;
+
+    #[test]
+    fn shuvi_ai_uses_original_dock_registry_and_right_side() {
+        assert_eq!(PanelKind::from_name("Shuvi AI"), Some(PanelKind::ShuviAi));
+        assert!(PanelKind::ALL.contains(&PanelKind::ShuviAi));
+        let editing = workspace("Editing");
+        assert!(editing.is_docked(PanelKind::ShuviAi));
+        assert!(editing.is_docked(PanelKind::Properties));
+        assert!(editing.is_docked(PanelKind::Program));
+        assert!(editing.is_docked(PanelKind::Timeline));
+        assert!(editing.is_visible(PanelKind::ShuviAi));
+    }
+    #[test]
+    fn all_original_workspace_layouts_still_have_timeline_and_program() {
+        for name in ["Editing", "Assembly", "Color", "Effects", "Audio", "Captions and Graphics", "All Panels"] {
+            let layout = workspace(name);
+            assert!(layout.contains(&PanelKind::Program), "{name}");
+            assert!(layout.contains(&PanelKind::Timeline), "{name}");
+        }
     }
 }

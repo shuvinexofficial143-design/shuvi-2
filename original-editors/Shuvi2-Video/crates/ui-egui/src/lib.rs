@@ -180,6 +180,8 @@ pub struct FilmcraftApp {
     pub dialog: Option<Dialog>,
     pub(crate) updates_rt: updates_ui::Runtime,
     pub file_dialogs: panels::file_dialogs::FileDialogState,
+    /// Original egui dock state: local draft and native Session evidence only.
+    pub shuvi_ai: panels::shuvi_ai::SidebarState,
     /// The native file dialog the host is showing ([`Self::pick`]).
     native_dialog: Option<native_dialogs::PendingDialog>,
     pub auto: automation::Registry,
