@@ -30,6 +30,7 @@ MIGRATED = {
     "panels/viewer_text.rs": 1,
     "panels/settings.rs": 1,
     "app/frame.rs": 1,
+    "dock_ui.rs": 1,
     # M-AI15: direct runtime routes migrated, including real viewer gestures,
     # menu bypasses, masks, dialogs and layer-style command paths.
     "header.rs": 10,
@@ -59,7 +60,18 @@ MIGRATED = {
     "menus/frontend.rs": 2,
 }
 GATE = "app.motion_owner_gate.manual_menu_command(&mut app.session, "
-assert sum(MIGRATED.values()) == 200
+# Exceptions are exact source calls, not a broad read-only permission.
+# Every engine query below is asserted non-journaled by native Rust tests.
+READ_ONLY_QUERIES = {
+    "control.rs": '"command.list"',
+    "panels/delete_items.rs": '"project.usage"',
+    "panels/media_panels.rs": '"item.metadata"',
+    "panels/path_vr_panels.rs": '"comp.vr.environments"',
+    # NativeMotionProbe enforces !spec.journal and checks project/revision,
+    # undo history and journal identity after every inspection.
+    "shuvi_ai.rs": "self.session.execute_checked(id, params)",
+}
+assert sum(MIGRATED.values()) == 201
 
 def main():
     ap = argparse.ArgumentParser()
@@ -110,6 +122,7 @@ def main():
     # the current manual gate covers all editor mutating paths.
     unresolved = []
     runtime = []
+    read_only = []
     test_only = []
     for path in sorted(UI.rglob("*.rs")):
         rel = path.relative_to(UI).as_posix()
@@ -118,7 +131,7 @@ def main():
         content = path.read_text(encoding="utf-8")
         # Distinguish actual runtime source from independent Rust test code;
         # test-only occurrences must not inflate unresolved shipping routes.
-        mod_tests = re.search(r"(?m)^\s*#\[cfg\(test\)\]\s*\n\s*mod\s+tests\b", content)
+        mod_tests = re.search(r"(?m)^\s*#\[cfg\(test\)\]\s*(?:#\[[^\n]*\]\s*)*mod\s+[A-Za-z0-9_]*tests\b", content)
         first_test_line = content[:mod_tests.start()].count("\n") + 1 if mod_tests else None
         test_file = path.name == "tests.rs" or "tests" in path.relative_to(UI).parts
         for no, line in enumerate(content.splitlines(), 1):
@@ -134,18 +147,21 @@ def main():
                 unresolved.append(finding)
                 if test_file or (first_test_line is not None and no >= first_test_line):
                     test_only.append(finding)
+                elif rel in READ_ONLY_QUERIES and READ_ONLY_QUERIES[rel] in stripped:
+                    read_only.append(finding)
                 else:
                     runtime.append(finding)
     # All source strings are auditable and no run artifact includes credentials.
     evidence = {
         "schemaVersion": 1,
-        "workstream": "Shuvi 2.0.2 Motion M-AI15",
+        "workstream": "Shuvi 2.0.2 Motion M-AI15 query-classified",
         "sourceCommit": os.getenv("GITHUB_SHA", "local"),
-        "guardedManualCommandMinimum": 200,
+        "guardedManualCommandMinimum": 201,
         "guardedManualCommandMeasured": sum(measured.values()),
         "guardedSources": measured,
         "remainingDirectSessionCalls": unresolved,
         "unresolvedRuntimeSourceCalls": runtime,
+        "verifiedReadOnlyQueryExceptions": read_only,
         "unresolvedTestOnlyCalls": test_only,
         "completeDesktopMutationLock": False,
         "productionAiEditingEnabled": False,
@@ -158,8 +174,11 @@ def main():
     print(f"Owner gate static audit: {sum(measured.values())} routed manual commands in {len(measured)} original UI files")
     print(f"Unresolved possible direct Session calls: {len(unresolved)} (NOT claimed secured)")
     print(f"  runtime source candidate calls: {len(runtime)}")
+    print(f"  explicit non-journaled queries: {len(read_only)}")
     print(f"  test-only calls (not shipping): {len(test_only)}")
     print("Evidence SHA256:", hashlib.sha256(dest.read_bytes()).hexdigest())
+    if runtime:
+        errors.append(f"{len(runtime)} unexpected direct native runtime source calls remain")
     for item in errors:
         print("ERROR:", item)
     if errors:

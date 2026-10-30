@@ -287,6 +287,16 @@ mod tests {
     }
 
     #[test]
+    fn explicitly_unwrapped_native_queries_are_not_journaled_writes() {
+        for cmd in ["command.list", "project.usage", "item.metadata",
+            "comp.vr.environments"] {
+            let spec=effectcraft_engine::commands::find(cmd)
+                .unwrap_or_else(|| panic!("missing native query: {cmd}"));
+            assert!(!spec.journal, "a read-only audit exemption must never permit a native write: {cmd}");
+        }
+    }
+
+    #[test]
     fn provider_cannot_acquire_guarded_owner_even_when_idle() {
         let gate = MotionOwnerGate::default();
         assert!(gate.ai_edit_not_integrated().is_err());

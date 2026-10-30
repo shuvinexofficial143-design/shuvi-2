@@ -35,8 +35,9 @@ jobs:
           data=json.loads(Path('motion-owner-route-audit.json').read_text())
           assert data['productionAiEditingEnabled'] is False
           assert data['completeDesktopMutationLock'] is False
-          assert data['guardedManualCommandMeasured'] >= 200
+          assert data['guardedManualCommandMeasured'] >= 201
           print("Outstanding runtime source candidates:",len(data["unresolvedRuntimeSourceCalls"]))
+          print("Verified read-only queries:",len(data["verifiedReadOnlyQueryExceptions"]))
           print("Test-only direct Session fixtures:",len(data["unresolvedTestOnlyCalls"]))
           PY
       - name: Publish source-linked audit of guarded and unresolved native mutation routes
