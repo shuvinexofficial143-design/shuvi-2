@@ -80,6 +80,7 @@ if ((Get-Item -LiteralPath $zip).Length -lt 5000000) { throw 'Native ZIP implaus
 
 # Independently verify the archive instead of trusting Compress-Archive success.
 Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.ZipFile
 $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $actual = @($archive.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) } | ForEach-Object { $_.FullName })
