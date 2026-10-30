@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion Native Owner Route Audit (M-AI14)
+name: Shuvi 2 Motion Native Owner Route Audit (M-AI15)
 on:
   push:
     branches:
@@ -35,14 +35,14 @@ jobs:
           data=json.loads(Path('motion-owner-route-audit.json').read_text())
           assert data['productionAiEditingEnabled'] is False
           assert data['completeDesktopMutationLock'] is False
-          assert data['guardedManualCommandMeasured'] >= 106
+          assert data['guardedManualCommandMeasured'] >= 200
           print("Outstanding runtime source candidates:",len(data["unresolvedRuntimeSourceCalls"]))
           print("Test-only direct Session fixtures:",len(data["unresolvedTestOnlyCalls"]))
           PY
       - name: Publish source-linked audit of guarded and unresolved native mutation routes
         uses: actions/upload-artifact@v4
         with:
-          name: Shuvi2-Motion-MAI14-OwnerGate-SourceAudit
+          name: Shuvi2-Motion-MAI15-OwnerGate-SourceAudit
           path: motion-owner-route-audit.json
           retention-days: 21
           if-no-files-found: error

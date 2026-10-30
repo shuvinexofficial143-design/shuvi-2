@@ -30,9 +30,36 @@ MIGRATED = {
     "panels/viewer_text.rs": 1,
     "panels/settings.rs": 1,
     "app/frame.rs": 1,
+    # M-AI15: direct runtime routes migrated, including real viewer gestures,
+    # menu bypasses, masks, dialogs and layer-style command paths.
+    "header.rs": 10,
+    "panels/viewer/tools.rs": 8,
+    "menus/invoke.rs": 7,
+    "panels/dialogs.rs": 17,
+    "panels/viewer_overlays.rs": 6,
+    "panels/learn.rs": 4,
+    "panels/viewer/shapes.rs": 4,
+    "panels/tracker.rs": 3,
+    "panels/dialogs_3d.rs": 2,
+    "panels/effect_controls/common.rs": 2,
+    "panels/expr_bar.rs": 2,
+    "panels/home.rs": 4,
+    "panels/object_matte_tool.rs": 2,
+    "panels/viewer/view.rs": 2,
+    "panels.rs": 2,
+    "panels/effects_presets.rs": 1,
+    "panels/footage_panel.rs": 1,
+    "panels/misc.rs": 1,
+    "panels/panel_kit.rs": 1,
+    "panels/precomp.rs": 2,
+    "panels/primitive_dialog.rs": 1,
+    "panels/rq_templates.rs": 1,
+    "panels/shortcut_editor.rs": 5,
+    "panels/layer_styles_dialog.rs": 4,
+    "menus/frontend.rs": 2,
 }
 GATE = "app.motion_owner_gate.manual_menu_command(&mut app.session, "
-assert sum(MIGRATED.values()) == 106
+assert sum(MIGRATED.values()) == 200
 
 def main():
     ap = argparse.ArgumentParser()
@@ -68,6 +95,9 @@ def main():
         "real desktop AI disabled": (UI / "shuvi_owner_gate.rs", "production AI editing disabled"),
         "original owner permit remains private": (UI / "shuvi_motion_owner.rs", "pub(crate) struct OwnerPermit { _private: () }"),
         "original AI approval UI remains disabled": (UI / "panels/shuvi_ai.rs", 'ui.add_enabled(false, egui::Button::new("Approve & execute — not integrated"))'),
+        "layer style snapshot manual owner gate": (UI / "panels/layer_styles_dialog.rs", "gate.manual_transaction(|| {"),
+        "layer style checkpoint restored only inside gate": (UI / "panels/layer_styles_dialog.rs", "session.project = checkpoint.project;"),
+        "original owner native snapshot gate implementation": (UI / "shuvi_owner_gate.rs", "pub(crate) fn manual_transaction<T>("),
     }
     for name, (file, needle) in entry_checks.items():
         if not file.is_file() or needle not in file.read_text(encoding="utf-8"):
@@ -106,9 +136,9 @@ def main():
     # All source strings are auditable and no run artifact includes credentials.
     evidence = {
         "schemaVersion": 1,
-        "workstream": "Shuvi 2.0.2 Motion M-AI14",
+        "workstream": "Shuvi 2.0.2 Motion M-AI15",
         "sourceCommit": os.getenv("GITHUB_SHA", "local"),
-        "guardedManualCommandMinimum": 106,
+        "guardedManualCommandMinimum": 200,
         "guardedManualCommandMeasured": sum(measured.values()),
         "guardedSources": measured,
         "remainingDirectSessionCalls": unresolved,
