@@ -1,0 +1,250 @@
+//! A06: isolated SQLite WAL FULL synchronous authoritative task ledger.
+//! Not registered in Tauri. Integrator must lock the SAME native editor owner
+//! for both AI and manual editing across the entire admission/apply/readback.
+//! The SQLite file/path is host-owned and MUST live in an OS-private directory.
+use crate::guard::{Action,GuardError,NativeOwner,OwnerConsent,Receipt,Scope,Snapshot,Version};
+use rusqlite::{params,Connection,OptionalExtension,TransactionBehavior};
+use sha2::{Digest,Sha256};
+use std::{fs,path::Path,time::Duration};
+
+fn sql_error(_:rusqlite::Error)->GuardError{GuardError::Io}
+fn digest<T:serde::Serialize>(data:&T)->Result<String,GuardError>{
+    let bytes=serde_json::to_vec(data).map_err(|_|GuardError::Invalid)?;
+    Ok(format!("{:x}",Sha256::digest(bytes)))
+}
+fn valid_sha(s:&str)->bool{
+    s.len()==64 && s.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))
+}
+fn id(s:&str)->bool{
+    s.len()>=8&&s.len()<=64&&
+    s.bytes().all(|x|x.is_ascii_alphanumeric()||x==b'-'||x==b'_')
+}
+fn changed(before:&Snapshot,after:&Snapshot)->bool {
+    if before.editor!=after.editor||before.project_id!=after.project_id||
+        before.session_id!=after.session_id{return false;}
+    match (&before.version,&after.version){
+        (Version::VideoSha256(a),Version::VideoSha256(b))=>a!=b,
+        (Version::MotionRevision(a),Version::MotionRevision(b))=>b>a,
+        _=>false
+    }
+}
+#[derive(Debug,PartialEq,Eq,Clone,Copy)]
+pub enum CancelOutcome { BeforeFirstEdit, BetweenVerifiedSteps }
+
+pub struct TransactionalLedger { conn:Connection }
+impl TransactionalLedger {
+    /// Caller selects an absolute .sqlite3 path inside an existing private folder.
+    /// Never forward a model/WebView-supplied path. Directory and file symlinks
+    /// are rejected; owner is still responsible for private Windows ACLs.
+    pub fn open(path:&Path)->Result<Self,GuardError>{
+        if !path.is_absolute()||path.extension().and_then(|x|x.to_str())!=Some("sqlite3"){
+            return Err(GuardError::Invalid);
+        }
+        let parent=path.parent().ok_or(GuardError::Invalid)?;
+        let meta=fs::symlink_metadata(parent).map_err(|_|GuardError::Invalid)?;
+        if !meta.is_dir()||meta.file_type().is_symlink(){return Err(GuardError::Invalid);}
+        let canonical=parent.canonicalize().map_err(|_|GuardError::Invalid)?;
+        if !canonical.is_dir(){return Err(GuardError::Invalid);}
+        if let Ok(m)=fs::symlink_metadata(path){
+            if m.file_type().is_symlink()||!m.is_file(){return Err(GuardError::Invalid);}
+        }
+        let full=canonical.join(path.file_name().ok_or(GuardError::Invalid)?);
+        let conn=Connection::open(full).map_err(sql_error)?;
+        conn.busy_timeout(Duration::from_secs(5)).map_err(sql_error)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;
+            PRAGMA synchronous=FULL;
+            PRAGMA foreign_keys=ON;
+            PRAGMA trusted_schema=OFF;").map_err(sql_error)?;
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS ai_tasks (
+              task_id TEXT PRIMARY KEY NOT NULL,
+              plan_hash TEXT NOT NULL,
+              scope_json TEXT NOT NULL,
+              approval TEXT NOT NULL DEFAULT 'pending'
+                CHECK(approval IN ('pending','requested','approved','denied')),
+              cancelled INTEGER NOT NULL DEFAULT 0 CHECK(cancelled IN (0,1))
+            );
+            CREATE TABLE IF NOT EXISTS ai_steps (
+              task_id TEXT NOT NULL REFERENCES ai_tasks(task_id),
+              step_index INTEGER NOT NULL CHECK(step_index>=0 AND step_index<12),
+              state TEXT NOT NULL CHECK(state IN ('intent','verified')),
+              step_key TEXT NOT NULL,
+              receipt_json TEXT,
+              PRIMARY KEY(task_id,step_index)
+            );
+        ").map_err(sql_error)?;
+        Ok(Self{conn})
+    }
+    /// The caller MUST have independently checked the complete typed JS plan
+    /// hash using A05 ReserveWire. Native owner binding is re-checked here.
+    pub fn reserve(&mut self,scope:&Scope,owner:&mut dyn NativeOwner)
+      ->Result<(),GuardError>{
+        if !scope.is_valid(){return Err(GuardError::Invalid);}
+        let current=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if current!=scope.snapshot{return Err(GuardError::StaleProject);}
+        let bytes=serde_json::to_string(scope).map_err(|_|GuardError::Invalid)?;
+        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        // INSERT OR IGNORE means duplicate tasks are rejected without
+        // overwriting prior approval/receipt state.
+        let count=tx.execute("INSERT OR IGNORE INTO ai_tasks(task_id,plan_hash,scope_json)
+                              VALUES (?1,?2,?3)",
+                         params![scope.task_id,scope.plan_hash,bytes]).map_err(sql_error)?;
+        if count!=1{return Err(GuardError::AlreadyExists);}
+        tx.commit().map_err(sql_error)?;
+        Ok(())
+    }
+    fn load(&self,task_id:&str)->Result<(Scope,String,bool),GuardError>{
+        if !id(task_id){return Err(GuardError::Invalid);}
+        let record:(String,String,i64)=self.conn.query_row(
+            "SELECT scope_json,approval,cancelled FROM ai_tasks WHERE task_id=?1",
+            params![task_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))
+                .optional().map_err(sql_error)?.ok_or(GuardError::Invalid)?;
+        let scope:Scope=serde_json::from_str(&record.0).map_err(|_|GuardError::Io)?;
+        if !scope.is_valid()||scope.task_id!=task_id{return Err(GuardError::Invalid);}
+        Ok((scope,record.1,record.2!=0))
+    }
+    pub fn approve(&mut self,id:&str,consent:&mut dyn OwnerConsent)
+      ->Result<bool,GuardError>{
+        let (scope,approval,cancelled)=self.load(id)?;
+        if cancelled{return Err(GuardError::DuplicateOrUncertain);}
+        if approval!="pending"{return Err(GuardError::AlreadyExists);}
+        // Commit a durable one-shot consent claim BEFORE any UI interaction.
+        // A process crash, timeout or rejected click must never re-prompt.
+        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let count=tx.execute(
+            "UPDATE ai_tasks SET approval='requested'
+             WHERE task_id=?1 AND approval='pending' AND cancelled=0",
+            params![id]).map_err(sql_error)?;
+        if count!=1{return Err(GuardError::AlreadyExists);}
+        tx.commit().map_err(sql_error)?;
+        let accepted=consent.grant(&scope);
+        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let count=tx.execute(
+            "UPDATE ai_tasks SET approval=?2
+             WHERE task_id=?1 AND approval='requested' AND cancelled=0",
+            params![id,if accepted {"approved"}else{"denied"}]).map_err(sql_error)?;
+        // Cancellation in another connection during a UI prompt is final.
+        if count!=1{return Err(GuardError::DuplicateOrUncertain);}
+        tx.commit().map_err(sql_error)?;
+        Ok(accepted)
+    }
+    /// Atomic boundary with intent admission, suitable for Stop requests.
+    /// If any native intent is outstanding, cancellation refuses because an
+    /// external engine action may already be mutating the project.
+    pub fn cancel(&mut self,id:&str)->Result<CancelOutcome,GuardError>{
+        let (scope,_,_)=self.load(id)?;
+        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let total:i64=tx.query_row(
+            "SELECT COUNT(*) FROM ai_steps WHERE task_id=?1",params![id],
+            |r|r.get(0)).map_err(sql_error)?;
+        let verified:i64=tx.query_row(
+            "SELECT COUNT(*) FROM ai_steps WHERE task_id=?1 AND state='verified'",
+            params![id],|r|r.get(0)).map_err(sql_error)?;
+        if total!=verified || verified as usize==scope.actions.len(){
+            return Err(GuardError::DuplicateOrUncertain);
+        }
+        let updated=tx.execute(
+            "UPDATE ai_tasks SET cancelled=1 WHERE task_id=?1 AND cancelled=0",
+            params![id]).map_err(sql_error)?;
+        if updated!=1{return Err(GuardError::AlreadyExists);}
+        tx.commit().map_err(sql_error)?;
+        Ok(if verified==0 {CancelOutcome::BeforeFirstEdit}
+           else {CancelOutcome::BetweenVerifiedSteps})
+    }
+    /// Each native step is independently admitted in one SQLite IMMEDIATE
+    /// transaction before native mutation. The host MUST serialize all manual
+    /// and AI edits under the same actual owner lock.
+    pub fn execute_bound<O:NativeOwner>(
+        &mut self,id:&str,index:usize,expected:&Snapshot,action:&Action,owner:&mut O
+    )->Result<Receipt,GuardError>{
+        let (scope,approval,cancelled)=self.load(id)?;
+        if cancelled{return Err(GuardError::DuplicateOrUncertain);}
+        if approval!="approved"{return Err(GuardError::NotApproved);}
+        if index>=scope.actions.len(){return Err(GuardError::OutOfOrder);}
+        if scope.actions.get(index)!=Some(action){return Err(GuardError::Invalid);}
+        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let existing:i64=tx.query_row("SELECT COUNT(*) FROM ai_steps WHERE task_id=?1",
+            params![id],|r|r.get(0)).map_err(sql_error)?;
+        let verified:i64=tx.query_row(
+            "SELECT COUNT(*) FROM ai_steps WHERE task_id=?1 AND state='verified'",
+            params![id],|r|r.get(0)).map_err(sql_error)?;
+        if existing!=verified{return Err(GuardError::DuplicateOrUncertain);}
+        if index as i64 !=verified{return Err(GuardError::OutOfOrder);}
+        let last=if index==0{scope.snapshot.clone()}else{
+            let data:String=tx.query_row(
+                "SELECT receipt_json FROM ai_steps
+                 WHERE task_id=?1 AND step_index=?2 AND state='verified'",
+                params![id,index-1],|r|r.get(0)).map_err(sql_error)?;
+            let receipt:Receipt=serde_json::from_str(&data).map_err(|_|GuardError::Io)?;
+            if receipt.task_id!=id||receipt.index!=index-1||!receipt.native_verified{
+                return Err(GuardError::DuplicateOrUncertain);
+            }
+            receipt.after
+        };
+        if *expected!=last{return Err(GuardError::StaleProject);}
+        // Native owner is locked by integration from this point until receipt.
+        let before=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if before!=last{return Err(GuardError::StaleProject);}
+        if owner.preflight_action(action).ok()!=Some(true){return Err(GuardError::Invalid);}
+        if owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?!=before{
+            return Err(GuardError::StaleProject);
+        }
+        let key=digest(&(scope.plan_hash.as_str(),index,action))?;
+        tx.execute(
+            "INSERT INTO ai_steps(task_id,step_index,state,step_key)
+             VALUES (?1,?2,'intent',?3)",params![id,index,key]).map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        // Any failure below is UNCERTAIN and cannot be replayed automatically.
+        owner.apply(action).map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        let after=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if !changed(&before,&after){return Err(GuardError::NativeOutcomeUncertain);}
+        if owner.verify_action(action).ok()!=Some(true){
+            return Err(GuardError::NativeOutcomeUncertain);
+        }
+        let proof=owner.object_proof_sha256(action)
+            .map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if !valid_sha(&proof){return Err(GuardError::NativeOutcomeUncertain);}
+        let receipt=Receipt{task_id:id.to_owned(),index,key,before,after,
+            native_verified:true,object_proof_sha256:proof};
+        let payload=serde_json::to_string(&receipt).map_err(|_|GuardError::Io)?;
+        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let changed=tx.execute(
+            "UPDATE ai_steps SET state='verified',receipt_json=?3
+             WHERE task_id=?1 AND step_index=?2 AND state='intent'",
+            params![id,index,payload]).map_err(sql_error)?;
+        if changed!=1{return Err(GuardError::DuplicateOrUncertain);}
+        tx.commit().map_err(sql_error)?;
+        Ok(receipt)
+    }
+    pub fn recovery(&self,id:&str)->Result<Vec<&'static str>,GuardError>{
+        let (scope,_,cancelled)=self.load(id)?;
+        let mut result=vec!["not_started";scope.actions.len()];
+        let mut statement=self.conn.prepare(
+            "SELECT step_index,state FROM ai_steps WHERE task_id=?1 ORDER BY step_index")
+            .map_err(sql_error)?;
+        let rows=statement.query_map(params![id],|r|
+            Ok((r.get::<_,usize>(0)?,r.get::<_,String>(1)?))).map_err(sql_error)?;
+        for row in rows{
+            let (i,state)=row.map_err(sql_error)?;
+            if i>=result.len(){return Err(GuardError::Invalid);}
+            result[i]=if state=="verified"{"verified"}else{"uncertain"};
+        }
+        if cancelled {
+            for state in &mut result{
+                if *state=="not_started"{*state="cancelled";}
+            }
+        }
+        Ok(result)
+    }
+    pub fn integrity_check(&self)->Result<(),GuardError>{
+        let response:String=self.conn.query_row("PRAGMA quick_check",
+            [],|row|row.get(0)).map_err(sql_error)?;
+        if response=="ok"{Ok(())}else{Err(GuardError::Io)}
+    }
+}
