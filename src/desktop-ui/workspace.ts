@@ -467,7 +467,16 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         const r=await ctrl.saveMotion(s("motionRoot"),s("motionFile"));
         verifiedMotionDisk={workspace:s("motionRoot"),basename:s("motionFile")};return r;
       }
-      case "motion-text":return ctrl.editMotion({action:"addText",compId:comp(),name:"Shuvi Title",text:s("text"),x:120,y:120,size:48});
+      case "motion-text":{
+        const receipt=await ctrl.editMotion({action:"addText",compId:comp(),
+          name:"Shuvi Title",text:s("text"),x:120,y:120,size:48});
+        if(!Number.isSafeInteger(receipt?.id))throw Error("Native text layer receipt is missing");
+        selectedLayer=receipt.id;
+        // Force native layer button selection after the verified create/readback.
+        seenLayers="";
+        await ctrl.inspectMotionLayer(receipt.id);
+        return receipt;
+      }
       case "motion-edit":{
         if(selectedLayer===null)throw Error("Select a real native text layer");return ctrl.editMotion({action:"editText",compId:comp(),layerId:selectedLayer,text:s("text")});
       }
@@ -501,8 +510,14 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         if(!s("shapeName")||!Number.isFinite(n("shapeW"))||!Number.isFinite(n("shapeH"))||
           n("shapeW")<=0||n("shapeH")<=0)throw Error("Invalid native shape dimensions");
         if(!["rect","ellipse","rounded","star","polygon"].includes(s("shapeKind")))throw Error("Unknown native shape");
-        return ctrl.editMotion({action:"addShape",compId:comp(),name:s("shapeName"),kind:s("shapeKind"),
+        const receipt=await ctrl.editMotion({action:"addShape",compId:comp(),name:s("shapeName"),kind:s("shapeKind"),
           x:120,y:120,width:n("shapeW"),height:n("shapeH"),fill:s("shapeFill")});
+        if(!Number.isSafeInteger(receipt?.id))throw Error("Native shape layer receipt is missing");
+        selectedLayer=receipt.id;
+        // Force native layer button selection after the verified create/readback.
+        seenLayers="";
+        await ctrl.inspectMotionLayer(receipt.id);
+        return receipt;
       }
       case "motion-add-effect":return ctrl.editMotion({action:"addEffect",compId:comp(),layerId:layer(),effect:s("effectKind")});
       case "motion-set-effect":{

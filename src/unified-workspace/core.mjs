@@ -6,6 +6,7 @@ import {nativeFps,verifyNativeMove,nativeTrackGuard} from "./timeline.mjs";
 import {checkedAiVideoActions} from "./ai-plan.mjs";
 import {nativeClipInspector,splitPreflight,verifyNativeSplit} from "./video-inspector.mjs";
 import {trimPreflight,deletePreflight,verifyNativeTrim,verifyNativeDelete} from "./video-mutations.mjs";
+import {verifyMotionEdit} from "./motion-proof.mjs";
 export class WorkspaceError extends Error {
   constructor(code, message) { super(message); this.name = "WorkspaceError"; this.code = code; }
 }
@@ -375,34 +376,37 @@ export function createWorkspaceController(native) {
       const before=await native.motion({action:"status"});
       if(before.projectRevision!==m.revision)
         {set({needsReload:true,recoveryStudio:"motion"});fail("REVISION_CONFLICT","EffectCraft revision changed outside this workspace");}
-      let receipt,after,layers;
+      let receipt,after,layers,inspector=null;
       try {
         receipt=await native.motion(request);
         after=await native.motion({action:"status"});
         layers=await native.motion({action:"listLayers",compId:m.composition.id});
-      } catch(error){set({needsReload:true,recoveryStudio:"motion"});throw error;}
-      if(!Array.isArray(layers)||!Number.isSafeInteger(after?.projectRevision)
-        ||after.projectRevision<=before.projectRevision) {
-        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
-        fail("INVALID_RECEIPT","EffectCraft edit has no verified revision advance");
-      }
-      const current=m.inspector;
-      const updatedLayer=current&&layers.find(layer=>layer.id===current.layer.id);
-      let inspector=updatedLayer?{...current,layer:updatedLayer,revision:after.projectRevision}:null;
-      const changesInspectorData=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
-      if(inspector&&changesInspectorData) {
-        try{
-          const effects=await native.motion({action:"listEffects",compId:m.composition.id,layerId:updatedLayer.id});
-          const masks=await native.motion({action:"listMasks",compId:m.composition.id,layerId:updatedLayer.id});
-          const stable=await native.motion({action:"status"});
-          if(!Array.isArray(effects)||!Array.isArray(masks)||
-            stable?.projectRevision!==after.projectRevision)
-            fail("REVISION_CONFLICT","Motion effect/mask readback drifted after native write");
-          inspector={...inspector,effects,masks};
-        }catch(error){
-          set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
-          throw error;
+        if(!Array.isArray(layers)||!Number.isSafeInteger(after?.projectRevision)||
+          after.projectRevision<=before.projectRevision)
+          fail("INVALID_RECEIPT","EffectCraft edit has no verified native revision advance");
+        const current=m.inspector;
+        const candidate=current&&layers.find(layer=>layer.id===current.layer.id);
+        inspector=candidate?{...current,layer:candidate,revision:after.projectRevision}:null;
+        const needsNativeInstances=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
+        if(needsNativeInstances){
+          const owner=layers.find(layer=>layer.id===request.layerId);
+          if(!owner)fail("INVALID_RECEIPT","Motion native edit target layer is absent");
+          const effects=await native.motion({action:"listEffects",compId:m.composition.id,layerId:request.layerId});
+          const masks=await native.motion({action:"listMasks",compId:m.composition.id,layerId:request.layerId});
+          if(!Array.isArray(effects)||!Array.isArray(masks))
+            fail("INVALID_RECEIPT","Native effect/mask lists are incomplete");
+          inspector={layer:owner,effects,masks,revision:after.projectRevision};
         }
+        const stable=await native.motion({action:"status"});
+        if(stable?.projectRevision!==after.projectRevision)
+          fail("REVISION_CONFLICT","Motion project changed during post-write native readback");
+        const proof=verifyMotionEdit({
+          request,receipt,beforeLayers:m.layers,afterLayers:layers,inspector
+        });
+        if(!proof.ok)fail("INVALID_RECEIPT",proof.reason);
+      }catch(error){
+        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
+        throw error;
       }
       set({motion:{...m,revision:after.projectRevision,layers,frame:null,dirty:!!after.dirty,inspector}});
       return receipt;
