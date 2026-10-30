@@ -228,3 +228,57 @@ fn native_wire_refuses_action_substitution_even_with_approved_task(){
     assert_eq!(engine.calls,0);
     assert_eq!(l.recover(&p.task_id).unwrap()[0],"not_started");
 }
+
+#[test]
+fn actual_native_reservation_rehashes_full_plan_then_reserves_once(){
+    use shuvi_ai_provider::plan::{ReserveWire,independently_hash};
+    use serde_json::json;
+    let p=motion();
+    let plan=json!({
+       "taskId":p.task_id,"instruction":"मेरे वीडियो में एक Title जोड़ें",
+       "snapshot":{"engine":"motion","projectId":"workspace:scene.ecproj",
+         "sessionId":"effect-owner-1","version":4},
+       "actions":[
+         {"type":"motion.addText","compId":2,"name":"Title","text":"नमस्ते","x":12,"y":20,"size":44},
+         {"type":"motion.setTransform","compId":2,"layerId":7,"kind":"opacity",
+           "x":null,"y":null,"value":50}
+       ]
+    });
+    let hash=independently_hash(&plan).unwrap();
+    let reservation=ReserveWire{task_id:p.task_id.clone(),plan_hash:hash.clone(),
+        project:plan["snapshot"].clone(),plan:plan.clone()};
+    let dir=TempDir::new();let ledger=Ledger::new(&dir.0).unwrap();let mut engine=owner(&p);
+    let returned=reservation.reserve(&ledger,&mut engine).unwrap();
+    assert_eq!(returned,hash);assert_eq!(engine.calls,0);
+    assert_eq!(ledger.recover(&p.task_id).unwrap(),vec!["not_started","not_started"]);
+    assert_eq!(reservation.reserve(&ledger,&mut engine).unwrap_err(),GuardError::AlreadyExists);
+    let reopened=Ledger::new(&dir.0).unwrap();
+    assert_eq!(reopened.recover(&p.task_id).unwrap().len(),2);
+}
+#[test]
+fn altered_model_plan_cannot_use_previous_digest_and_changed_owner_cannot_reserve(){
+    use shuvi_ai_provider::plan::{ReserveWire,independently_hash};
+    use serde_json::json;
+    let p=motion();
+    let plan=json!({
+       "taskId":p.task_id,"instruction":"Create title",
+       "snapshot":{"engine":"motion","projectId":"workspace:scene.ecproj",
+         "sessionId":"effect-owner-1","version":4},
+       "actions":[{"type":"motion.addText","compId":2,"name":"Title",
+        "text":"नमस्ते","x":12,"y":20,"size":44}]
+    });
+    let mut changed=plan.clone();changed["actions"][0]["text"]=json!("INJECTED");
+    let request=ReserveWire{task_id:p.task_id.clone(),
+        plan_hash:independently_hash(&plan).unwrap(),
+        project:plan["snapshot"].clone(),plan:changed};
+    let dir=TempDir::new();let ledger=Ledger::new(&dir.0).unwrap();let mut engine=owner(&p);
+    assert_eq!(request.reserve(&ledger,&mut engine).unwrap_err(),GuardError::Invalid);
+    assert_eq!(engine.calls,0);
+    let valid=ReserveWire{task_id:p.task_id.clone(),
+        plan_hash:independently_hash(&plan).unwrap(),
+        project:plan["snapshot"].clone(),plan};
+    engine.current.version=Version::MotionRevision(55);
+    assert_eq!(valid.reserve(&ledger,&mut engine).unwrap_err(),GuardError::StaleProject);
+    assert_eq!(engine.calls,0);
+    assert!(ledger.recover(&p.task_id).is_err());
+}
