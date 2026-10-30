@@ -48,18 +48,6 @@ jobs:
             "original-editors/Shuvi2-Motion/ATTRIBUTION.md"
           )) { if (!(Test-Path $p)) { throw "Missing source or legal notice: $p" } }
           if (!(Select-String -Path original-editors/Shuvi2-Motion/crates/ui-egui/src/lib.rs -SimpleMatch "pub mod shuvi_ai;")) { throw "Native module not wired" }
-      - name: Run native same-session adapter regression tests
-        shell: pwsh
-        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_ai::tests -- --nocapture
-      - name: Test native egui Shuvi AI panel states
-        shell: pwsh
-        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib panels::shuvi_ai::tests -- --nocapture
-      - name: Test dockable original panel/workspace integration
-        shell: pwsh
-        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib dock::tests -- --nocapture
-      - name: Test real native guarded motion mutation adapter
-        shell: pwsh
-        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_motion_owner::tests -- --nocapture
       - name: Check out exact authoritative 2.0.3 AI Director source (temporary, NOT merged)
         uses: actions/checkout@v4
         with:
@@ -83,6 +71,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Cannot resolve isolated native PDF dependencies" }
           $match = $tree | Select-String 'hayro-syntax v0.7.2.*github.com/storytold/craft-libs'
           if (!$match) { throw "The original EffectCraft patched hayro-syntax dependency was NOT selected" }
+      - name: Run native same-session adapter regression tests
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_ai::tests -- --nocapture
+      - name: Test native egui Shuvi AI panel states
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib panels::shuvi_ai::tests -- --nocapture
+      - name: Test dockable original panel/workspace integration
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib dock::tests -- --nocapture
+      - name: Test real native guarded motion mutation adapter
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_motion_owner::tests -- --nocapture
       - name: Test real EffectCraft Session through 2.0.3 SQLite guarded native host
         shell: pwsh
         run: cargo test --manifest-path original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml -- --nocapture
