@@ -3,6 +3,7 @@
  * Alternate unified route uses U03 native Tauri IPC but no second studio mount.
  * Provider/AI guarded editing is not authorized by selecting a UI mode.
  */
+export {}; // Required for TypeScript ESNext top-level await module semantics.
 const unified = new URLSearchParams(window.location.search).get("workspace") === "unified";
 if (unified) {
   const navigation = document.createElement("nav");

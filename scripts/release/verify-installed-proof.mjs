@@ -16,7 +16,11 @@ export function validateReceipts({install, video, motion}, sha) {
   assert.equal(install.installExitCode,0);
   assert.equal(install.installedProcessLaunched,true);
   assert.deepEqual(install.enginePins,PINS,'Native engine pins differ');
-  for(const key of ['installerSha256','installedBinarySha256','installedSidecarSha256']) assert.match(install[key]??'',SHA,key);
+  for(const key of ['installerSha256','builtBinarySha256','installedBinarySha256','stagedSidecarSha256','installedSidecarSha256']) assert.match(install[key]??'',SHA,key);
+  assert.equal(install.binaryHashMatched,true,'NSIS-installed executable was not byte-identical to built EXE');
+  assert.equal(install.sidecarHashMatched,true,'Installed FilmCraft sidecar was not byte-identical to staged engine');
+  assert.equal(install.installedBinarySha256,install.builtBinarySha256,'Installed executable hash does not match compiled EXE');
+  assert.equal(install.installedSidecarSha256,install.stagedSidecarSha256,'Installed FilmCraft hash does not match built sidecar');
   for (const [name,receipt] of Object.entries({video,motion})) {
     assert.equal(receipt.ok,true,`${name} did not pass`);
     assert.equal(receipt.sha,sha,`${name} proof belongs to a different commit`);

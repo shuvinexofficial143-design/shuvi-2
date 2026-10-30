@@ -42,7 +42,12 @@ try {
     $receipt.installedSidecarSha256 = (Get-FileHash $sidecar[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $builtHash = (Get-FileHash 'src-tauri/target/release/shuvi2.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
     $stagedHash = (Get-FileHash 'src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($receipt.installedBinarySha256 -ne $builtHash -or $receipt.installedSidecarSha256 -ne $stagedHash) { throw 'Installed bytes differ from built app/sidecar' }
+    $receipt.builtBinarySha256 = $builtHash
+    $receipt.stagedSidecarSha256 = $stagedHash
+    $receipt.binaryHashMatched = ($receipt.installedBinarySha256 -eq $builtHash)
+    $receipt.sidecarHashMatched = ($receipt.installedSidecarSha256 -eq $stagedHash)
+    if (-not $receipt.binaryHashMatched) { throw "Installed EXE SHA mismatch: built=$builtHash installed=$($receipt.installedBinarySha256). Release BLOCKED; do not bypass executable integrity check." }
+    if (-not $receipt.sidecarHashMatched) { throw "Installed sidecar SHA mismatch: staged=$stagedHash installed=$($receipt.installedSidecarSha256). Release BLOCKED." }
     $proc = Start-Process -FilePath $binary[0].FullName -WorkingDirectory $binary[0].DirectoryName -PassThru
     Start-Sleep -Seconds 5
     $proc.Refresh()

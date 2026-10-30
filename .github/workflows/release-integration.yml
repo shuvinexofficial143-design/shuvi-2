@@ -69,7 +69,11 @@ jobs:
       - name: Build real unsigned NSIS installer with BOTH native studios
         shell: pwsh
         run: |
-          npm run tauri -- build --config src-tauri/tauri.video.conf.json
+          # One Windows NSIS bundle only: do not let Tauri mutate the compiled EXE
+          # when packaging; installed bytes MUST still match the built EXE hash.
+          $helpText = npm run tauri -- build --help | Out-String
+          if ($LASTEXITCODE -ne 0 -or -not $helpText.Contains('--no-binary-patching')) { throw 'Pinned Tauri CLI cannot build without executable patching' }
+          npm run tauri -- build --no-binary-patching --config src-tauri/tauri.video.conf.json
           if ($LASTEXITCODE -ne 0) { throw 'Integrated Windows package failed' }
           $files = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File)
           if ($files.Count -ne 1 -or $files[0].Length -lt 100000) { throw 'NSIS installer missing or too small' }

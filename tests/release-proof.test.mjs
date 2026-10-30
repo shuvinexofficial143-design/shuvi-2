@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
 import {validateReceipts,verifyFiles} from '../scripts/release/verify-installed-proof.mjs';
 import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -12,7 +13,9 @@ function fixture() {
   const shared={ok:true,sha,driver:'tauri-driver',application:'/installed/shuvi2.exe',applicationSha256:hash,
     coldRestartVerified:true,noOverwriteVerified:true,steps:['synthetic-check']};
   return {install:{ok:true,checkpoint:sha,installExitCode:0,installedProcessLaunched:true,
-    installedBinaryPath:shared.application,installedBinarySha256:hash,installedSidecarSha256:hash,installerSha256:hash,
+    installedBinaryPath:shared.application,builtBinarySha256:hash,installedBinarySha256:hash,
+    stagedSidecarSha256:hash,installedSidecarSha256:hash,installerSha256:hash,
+    binaryHashMatched:true,sidecarHashMatched:true,
     enginePins:{filmcraft:'c49efe070fab862df6c21d61a503605eb6f07105',effectcraft:'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'}},
     video:{...shared,outputSha256:hash,projectSha256:hash,outputBytes:500,previewWidth:64,previewHeight:64,
       outputProbe:{duration:120,video:{codec:'h264',width:64,height:64}}},
@@ -34,6 +37,10 @@ for(const [label,change] of [
   ['missing no overwrite',f=>delete f.video.noOverwriteVerified],
   ['non-H264 output',f=>f.video.outputProbe.video.codec='vp9'],
   ['changed engine pin',f=>f.install.enginePins.effectcraft='c'.repeat(40)],
+  ['different compiled EXE',f=>f.install.builtBinarySha256='c'.repeat(64)],
+  ['different staged sidecar',f=>f.install.stagedSidecarSha256='c'.repeat(64)],
+  ['failed executable integrity assertion',f=>f.install.binaryHashMatched=false],
+  ['failed sidecar integrity assertion',f=>f.install.sidecarHashMatched=false],
   ['empty steps',f=>f.video.steps=[]]
 ]) test(`release proof rejects ${label}`,()=>{const f=fixture();change(f);assert.throws(()=>validateReceipts(f,sha));});
 test('both GUI programs parse before any expensive Windows build',()=>{
@@ -61,4 +68,14 @@ test('evidence verifier rejects altered media and missing screenshots on physica
     await writeFile(file,'tampered');
     await assert.rejects(()=>verifyFiles(f,root,root),/Evidence bytes changed/);
   } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test('CI must refuse silent Tauri binary patching and retain strict installed hash gate',()=>{
+  const workflow=readFileSync(new URL('../.github/workflows/release-integration.yml',import.meta.url),'utf8');
+  const install=readFileSync(new URL('../scripts/release/windows-installed-smoke.ps1',import.meta.url),'utf8');
+  assert.match(workflow,/--no-binary-patching/);
+  assert.match(workflow,/Pinned Tauri CLI cannot build without executable patching/);
+  assert.match(install,/binaryHashMatched/);
+  assert.match(install,/sidecarHashMatched/);
+  assert.match(install,/Release BLOCKED/);
 });
