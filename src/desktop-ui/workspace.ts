@@ -7,6 +7,7 @@ import {workspaceKeyCommand} from "../unified-workspace/keyboard.mjs";
 import {createProjectSessionStore} from "../unified-workspace/session.mjs";
 import {describeApprovalState} from "../unified-workspace/approval.mjs";
 import {keyframeReadback} from "../unified-workspace/keyframes.mjs";
+import {nativeDiagnosticText} from "../unified-workspace/diagnostics.mjs";
 import "./workspace.css";
 
 export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=nativeWorkspaceBridge){
@@ -22,6 +23,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<label>Selected folder<input data-field="root" placeholder="C:\\Projects\\Film"></label>',
     '<label>FilmCraft .fcproj<input data-field="project"></label>',
     '<button data-act="video-open">Open / refresh</button>',
+    '<button data-act="video-verify">Verify disk checksum (read-only)</button>',
     '<button data-act="video-new">Create sequence</button>',
     '<label>Media source<input data-field="source"></label>',
     '<button data-act="video-import">Import real media</button>',
@@ -30,6 +32,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<button data-act="video-place">Place on timeline</button></section>',
     '<section data-panel="motion" hidden>',
     '<button data-act="motion-status">Check EffectCraft engine</button>',
+    '<button data-act="motion-verify">Verify worker revision (read-only)</button>',
     '<label>Composition<input data-field="compName" value="Shuvi Composition"></label>',
     '<div class="su-pair"><label>Width<input type="number" data-field="width" value="1280"></label>',
     '<label>Height<input type="number" data-field="height" value="720"></label></div>',
@@ -113,7 +116,12 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<button data-act="motion-export">Export PNG</button></section>',
     '<div class="su-progress" role="status"><span data-ui="progress">Idle</span>',
     '<button data-act="stop" disabled>Stop (request)</button></div>',
-    '<div class="su-error" data-ui="error" role="alert" hidden></div></main>',
+    '<div class="su-error" data-ui="error" role="alert" hidden></div>',
+    '<details class="su-diagnostics"><summary>Native evidence & recovery diagnostics</summary>',
+    '<p>Evidence reflects this UI session only. No Windows installer or AI task guard verification is claimed.</p>',
+    '<div class="su-buttons"><button data-act="diagnostic-copy">Copy native evidence JSON</button></div>',
+    '<pre data-ui="diagnostic-report" aria-live="off">No native verification yet</pre>',
+    '</details></main>',
     '<aside class="su-chat"><h2>Shuvi AI Chat</h2>',
     '<label>Chat panel width<input data-field="chatWidth" type="range" min="240" max="420" step="10" value="310" aria-label="Adjust chat panel width"></label>',
     '<small>AI Director not connected — drafts only</small>',
@@ -143,6 +151,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
   const s=(name:string)=>f(name).value.trim();
   const n=(name:string)=>Number(s(name));
   let selectedClip:number|null=null,selectedLayer:number|null=null,seenVideo:string|null=null,seenLayers:string|null=null;
+  let seenVideoGeneration=-1,seenMotionGeneration=-1;
   let priorFrameKey="",objectUrl:string|null=null,seenChat=-1,seenInspectorKey="",disposed=false;
   let drag:{pointerId:number;clipId:number;startX:number;track:string;start:number;duration:number;sha:string;lane:HTMLElement}|null=null;
   let skipClipClick=false;
@@ -187,6 +196,15 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     node('[data-ui="revision"]').textContent=state.studio==="video"?(state.video?"SHA "+state.video.snapshot.projectSha256.slice(0,12):"No native project"):
       state.motion.composition?"Composition "+state.motion.composition.id+" · revision "+state.motion.revision:"No native composition";
     node('[data-ui="progress"]').textContent=state.progress;
+    node('[data-ui="diagnostic-report"]').textContent=nativeDiagnosticText(state);
+    if(state.videoGeneration!==seenVideoGeneration){
+      seenVideoGeneration=state.videoGeneration;
+      selectedClip=null;seenVideo=null;
+    }
+    if(state.motionGeneration!==seenMotionGeneration){
+      seenMotionGeneration=state.motionGeneration;
+      selectedLayer=null;seenLayers=null;seenInspectorKey="";
+    }
     const remembered=projectBookmarks?.load();
     node('[data-ui="bookmark"]').textContent=bookmarkMessage||
       (remembered?
@@ -199,7 +217,10 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const key=button.dataset.act??"";
       if(key==="stop")button.disabled=!state.busy;
       else if(key==="approve"||key==="reject")button.disabled=state.busy;
-      else button.disabled=state.busy||(state.needsReload&&state.recoveryStudio===state.studio&&!["video-open","motion-status","motion-open"].includes(key));
+      else button.disabled=state.busy||
+        (state.needsReload&&state.recoveryStudio===state.studio&&!["video-open","motion-status","motion-open","diagnostic-copy","bookmark-forget"].includes(key))||
+        (key==="video-verify"&&!state.video)||
+        (key==="motion-verify"&&!state.motion.ready);
     });
     const videoKey=state.video?state.video.projectPath+":"+state.video.snapshot.projectSha256:null;
     if(videoKey!==seenVideo){
@@ -337,6 +358,11 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     switch(key){
       case "stop":return ctrl.stop();
       case "video-open":return ctrl.refreshVideo(s("root"),s("project"));
+      case "video-verify":return ctrl.verifyVideoSnapshot();
+      case "diagnostic-copy":{
+        if(!navigator.clipboard?.writeText)throw Error("System clipboard is unavailable in this host");
+        return navigator.clipboard.writeText(nativeDiagnosticText(ctrl.getState()));
+      }
       case "bookmark-remember":{
         if(!projectBookmarks)throw Error("On-device project bookmarks are unavailable");
         const state=ctrl.getState();
@@ -395,6 +421,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       case "video-preview":return ctrl.renderVideo(n("videoTime"));
       case "video-export":return ctrl.exportVideo(s("output"));
       case "motion-status":return ctrl.motionStatus();
+      case "motion-verify":return ctrl.verifyMotionSnapshot();
       case "motion-create":{
         const r=await ctrl.createComposition({name:s("compName"),width:n("width"),height:n("height"),fps:n("fps"),durationSeconds:n("duration")});
         verifiedMotionDisk=null;return r;

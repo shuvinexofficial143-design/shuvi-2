@@ -59,3 +59,10 @@
   .su .su-chat{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}
 }
 @media(max-width:650px){.su .su-columns{display:flex;flex-direction:column}}
+
+/* U05: native diagnostic evidence is session-local and plainly labeled. */
+.su .su-diagnostics{margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:9px;background:#121c2a}
+.su .su-diagnostics summary{font-weight:650;cursor:pointer}
+.su .su-diagnostics p{color:var(--muted);font-size:12px}
+.su .su-diagnostics pre{max-height:290px;overflow:auto;border:1px solid var(--line);padding:12px;border-radius:6px;background:#0a101a;font-size:11px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.su button[data-act="video-verify"],.su button[data-act="motion-verify"]{margin-top:7px}
