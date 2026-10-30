@@ -12,6 +12,9 @@ type Effect = { uid:number;id:string;name:string;enabled:boolean };
 type Mask = { uid:number;name:string;closed:boolean;vertices:[number,number][] };
 type NativeEffectParameter = { uid:number;parameter:string;value:number;minimum:number;maximum:number;source:string };
 type NativeMaskSettings = { uid:number;feather:[number,number];expansion:number;opacity:number };
+type NativeHistory = { canUndo:boolean;canRedo:boolean;undoDepth:number;redoDepth:number;
+  nextUndo:string|null;nextRedo:string|null;revision:number;dirty:boolean };
+type NativeHistoryReceipt = { action:string;label:string;projectChanged:boolean;after:NativeHistory };
 const preview = document.querySelector<HTMLElement>(".preview")!;
 const timeline = document.querySelector<HTMLElement>(".timeline")!;
 const health = document.querySelector<HTMLElement>("#engine-health")!;
@@ -207,6 +210,18 @@ async function refreshSelectedNativeProperties():Promise<void>{
     node<HTMLElement>("#motion-mask-state").textContent="Select a mask";
   }
 }
+async function refreshNativeHistory():Promise<void>{
+  const generation=uiGeneration;
+  const state=await request<NativeHistory>({action:"inspectHistory"});
+  if(!mounted||generation!==uiGeneration)return;
+  const undo=node<HTMLButtonElement>("#motion-undo");
+  const redo=node<HTMLButtonElement>("#motion-redo");
+  undo.disabled=!state.canUndo;redo.disabled=!state.canRedo;
+  undo.title=state.canUndo?"Undo: "+state.nextUndo:"Nothing to undo";
+  redo.title=state.canRedo?"Redo: "+state.nextRedo:"Nothing to redo";
+  node<HTMLElement>("#motion-history-status").textContent=
+    "Native history "+state.undoDepth+"/"+state.redoDepth+(state.dirty?" · unsaved":" · saved");
+}
 async function afterEdit():Promise<void> {
   if(!mounted)return;
   await listLayers();
@@ -214,6 +229,29 @@ async function afterEdit():Promise<void> {
   await refreshEffectMaskControls();
   if(!mounted)return;
   await renderFrame();
+  if(!mounted)return;
+  await refreshNativeHistory();
+}
+async function historyEdit(action:"undo"|"redo"):Promise<void>{
+  const receipt=await request<NativeHistoryReceipt>({action});
+  if(!receipt.projectChanged)throw new Error("Native history did not change the project");
+  if(activeComp){
+    try {
+      await request<Comp>({action:"inspectComposition",compId:activeComp.id});
+    }catch{
+      // Undo may genuinely remove the first composition. Do not show a stale canvas.
+      activeComp=null;activeLayer=null;activeEffect=null;activeMask=null;
+      node<HTMLImageElement>("#motion-native-frame").removeAttribute("src");
+      node<HTMLElement>("#motion-frame-info").textContent="No native composition after "+action;
+      node<HTMLElement>("#motion-layer-list").textContent="No active composition";
+      await refreshNativeHistory();
+      return;
+    }
+    activeLayer=null;activeEffect=null;activeMask=null;
+    await afterEdit();
+  }else{
+    await refreshNativeHistory();
+  }
 }
 function bindClick(selector:string,label:string,action:()=>Promise<void>):void {
   node<HTMLButtonElement>(selector).addEventListener("click",()=>void execute(label,action));
@@ -224,6 +262,11 @@ function paintUi():void {
   <section class="motion-pane" aria-label="EffectCraft motion editor">
     <div class="motion-toolbar">
       <strong>EffectCraft · Native Motion Editor</strong>
+      <div class="motion-history">
+        <button type="button" id="motion-undo" disabled aria-label="Undo native motion edit">Undo</button>
+        <button type="button" id="motion-redo" disabled aria-label="Redo native motion edit">Redo</button>
+        <span id="motion-history-status">Native history loading…</span>
+      </div>
       <span id="motion-status" role="status" aria-live="polite">Connecting to Windows engine…</span>
     </div>
     <div class="motion-preview"><img id="motion-native-frame" alt="No native composition frame yet"/>
@@ -313,6 +356,8 @@ function paintUi():void {
   </section>`;
 }
 function bind():void {
+  bindClick("#motion-undo","Undoing native edit",()=>historyEdit("undo"));
+  bindClick("#motion-redo","Redoing native edit",()=>historyEdit("redo"));
   bindClick("#motion-create","Creating composition",async()=>{
     const comp=await request<Comp>({action:"createComposition",name:value("#motion-name"),
       width:number("#motion-width"),height:number("#motion-height"),
@@ -493,6 +538,7 @@ async function mount():Promise<void> {
     health.textContent="Native EffectCraft linked";
     info("Native Windows engine connected");
     if(activeComp)await afterEdit();
+    else await refreshNativeHistory();
   } catch(error) {
     if(mounted){health.textContent="Motion engine unavailable";info(String(error),true);}
   }
