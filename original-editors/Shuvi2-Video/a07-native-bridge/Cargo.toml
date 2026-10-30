@@ -14,7 +14,8 @@ filmcraft-engine = { path = "../crates/engine" }
 filmcraft-project = { path = "../crates/project" }
 filmcraft-time = { path = "../crates/time" }
 filmcraft-edit = { path = "../crates/edit" }
-shuvi-ai-provider = { path = "../../../a07-canonical/src-tauri/src/ai_director" }
+# Exact checked-in canonical A07 source, verified against pinned upstream SHA in CI.
+shuvi-ai-provider = { path = "../integrations/canonical-a07" }
 serde_json = "1"
 sha2 = "0.10"
 

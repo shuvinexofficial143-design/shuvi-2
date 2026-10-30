@@ -111,6 +111,30 @@ jobs:
           path: a07-canonical
           persist-credentials: false
           submodules: false
+      - name: Verify exact checked-in A07 source against pinned canonical Git commit
+        shell: pwsh
+        run: |
+          $old = "a07-canonical/src-tauri/src/ai_director"
+          $local = "original-editors/Shuvi2-Video/integrations/canonical-a07"
+          foreach ($file in @(
+            "src/lib.rs", "src/guard.rs", "src/host.rs", "src/ipc.rs",
+            "src/plan.rs", "src/transactional.rs", "src/windows_vault.rs",
+            "tests/native_guard.rs", "tests/native_host.rs",
+            "tests/recovery_integrity.rs", "tests/transactional_ledger.rs"
+          )) {
+            $expected = Join-Path $old $file
+            $actual = Join-Path $local $file
+            if (!(Test-Path $actual)) { throw "Vendored canonical A07 source missing: $file" }
+            $a = (Get-FileHash $expected -Algorithm SHA256).Hash
+            $b = (Get-FileHash $actual -Algorithm SHA256).Hash
+            if ($a -ne $b) { throw "Pinned canonical A07 source mismatch: $file" }
+          }
+          $original = (Get-Content "$old/Cargo.toml" -Raw).TrimEnd()
+          $vendored = (Get-Content "$local/Cargo.toml" -Raw).TrimEnd()
+          if (!$vendored.StartsWith($original) -or !$vendored.EndsWith("[workspace]")) {
+            throw "Vendored canonical A07 Cargo manifest unexpected change"
+          }
+          Write-Host "PASS: all 11 canonical Rust source/test files are SHA256-identical to pinned source"
       - name: Check canonical A07 vault, HTTPS provider, guarded host and SQLite receipts exist
         shell: pwsh
         run: |
@@ -123,9 +147,9 @@ jobs:
           if (!(Select-String -Path a07-canonical/src-tauri/src/ai_director/src/windows_vault.rs -SimpleMatch "Shuvi2/OpenAI")) { throw "Vault target contract drift" }
           if (!(Select-String -Path a07-canonical/src-tauri/src/ai_director/src/lib.rs -SimpleMatch "https://api.openai.com/v1/chat/completions")) { throw "Canonical HTTPS provider contract drift" }
           if (!(Select-String -Path a07-canonical/src-tauri/src/ai_director/src/host.rs -SimpleMatch "unintegrated_capabilities")) { throw "A07 fail-closed capability contract absent" }
-      - name: Test canonical provider, vault and SQLite native ledger as separate source crate
+      - name: Test checked-in canonical A07 provider, vault, and SQLite ledger (original tests)
         shell: pwsh
-        run: cargo test --manifest-path a07-canonical/src-tauri/src/ai_director/Cargo.toml -- --nocapture
+        run: cargo test --manifest-path original-editors/Shuvi2-Video/integrations/canonical-a07/Cargo.toml -- --nocapture
       - name: Test exact canonical A07 SQLite GuardedHost against ORIGINAL FilmCraft native Session
         shell: pwsh
         run: cargo test --manifest-path original-editors/Shuvi2-Video/a07-native-bridge/Cargo.toml -- --nocapture
