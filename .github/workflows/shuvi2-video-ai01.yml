@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI14 Reentrant UI and Logic Pass Native Admission
+name: Shuvi 2 Video - AI15 Full Eframe Lifecycle Native Admission
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai14
+  group: shuvi2-video-ai15
   cancel-in-progress: false
 
 jobs:
@@ -58,6 +58,9 @@ jobs:
       - name: Test native FilmcraftApp command admission and busy protection
         shell: pwsh
         run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-ui-egui shuvi_manual_admission -- --nocapture
+      - name: Verify original eframe lifecycle native owner and controlled shutdown
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft-ui-egui lifecycle_owner -- --nocapture
       - name: Check Original FilmCraft GUI is still compilable
         shell: pwsh
         run: cargo check --locked --manifest-path original-editors/Shuvi2-Video/Cargo.toml --package filmcraft

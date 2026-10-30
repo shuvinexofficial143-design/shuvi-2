@@ -443,10 +443,12 @@ impl eframe::App for FilmcraftApp {
         self.native_window_focused = Some(raw_input.focused);
         capture::note_raw_geometry(self, ctx, raw_input);
         // Native keyboard/mouse events arrive BEFORE the actual ui() pass.
-        // Drop both unconsumed original hardware events and already queued
-        // synthetic input when a different owner holds the editor. Never
-        // replay stale keystrokes or clicks after an AI/native transaction.
-        if let Some(reason) = self.shuvi_manual_admission.blocked_reason() {
+        // Own the ENTIRE raw input rewrite while it handles original hardware
+        // events and queued synthetic controls. The old check-only path had a
+        // TOCTOU gap: another thread could claim after the check.
+        let _native_owner = match self.shuvi_manual_admission.try_claim() {
+            Ok(owner) => owner,
+            Err(reason) => {
             drop_native_input(raw_input);
             self.synthetic.clear();
             self.synthetic_pending_step = None;
@@ -455,8 +457,9 @@ impl eframe::App for FilmcraftApp {
             for reply in self.input_waiters.drain(..) {
                 let _ = reply.send(json!({"ok":false,"error":reason}));
             }
-            return;
-        }
+                return;
+            }
+        };
         #[cfg(target_os = "macos")]
         if !self.control_input_only {
             synthesize_mac_ctrl_click(&mut self.mac_ctrl_click_armed, raw_input);
@@ -512,6 +515,13 @@ impl eframe::App for FilmcraftApp {
     /// Eframe's hidden logic callback: run the logic pass, sync the IME target context, then
     /// suspend reset state because a logic-only callback is never a UI pass.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // The original outer logic callback also mutates native IME session
+        // context AFTER logic_inner returns. Keep one reentrant owner across
+        // both original operations, not two independent admissions.
+        let _native_owner=match self.shuvi_manual_admission.try_claim() {
+            Ok(owner)=>owner,
+            Err(reason)=>{self.ui.status=reason.into();return;}
+        };
         self.logic_inner(ctx);
         self.finish_ime_reset_logic(ctx);
     }
@@ -519,19 +529,40 @@ impl eframe::App for FilmcraftApp {
     /// Cancel outstanding screenshots with one error reply each, end per-viewport IME reset
     /// state, and shut the session down so its recovery journal is flushed or removed.
     fn on_exit(&mut self) {
-        // Late screenshot callbacks now find a dropped slot and write nothing; clients get one error.
+        // Important: Session::shutdown sends the latest project state and
+        // closes persistence. It may NOT run while a concurrent native owner
+        // has an uncertain edit; nor after owner poison.
+        let native_owner=self.shuvi_manual_admission.try_claim();
+        // Original UI cleanup does not itself mutate the FilmCraft project.
         capture::cancel_all(self);
         for viewport in self.ime_viewports.drain(..) {
             self.ime_reset.end_viewport(viewport);
         }
-        // Flush the recovery journal and stop the auto-save worker; a session with nothing unsaved
-        // removes its journal, one with unsaved changes keeps it for the next launch.
-        self.session.shutdown();
+        match native_owner {
+            Ok(_lease) => self.session.shutdown(),
+            Err(reason) => {
+                // Do not announce a successful Save/Close and do not perform
+                // unsafe project persistence. Keep recovery journal untouched.
+                self.ui.status=reason.into();
+                eprintln!("SHUVI_NATIVE_SHUTDOWN_WITHHELD: {reason}");
+            }
+        }
     }
 
     /// Eframe's UI entry: begin this pass's IME reset state, suspend custom controls when no
     /// eligible editor owns input, draw `ui_inner`, then run end-of-pass IME reconciliation.
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // IME begin/suspend/end may inspect and mutate current edit targets
+        // outside ui_inner. Keep the same owner for the ENTIRE outer eframe
+        // callback; ui_inner and nested menus reenter on this UI thread.
+        let _native_owner=match self.shuvi_manual_admission.try_claim() {
+            Ok(owner)=>owner,
+            Err(reason)=>{
+                self.ui.status=reason.into();
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+                return;
+            }
+        };
         let ctx = ui.ctx().clone();
         self.ime_reset.begin_pass(&ctx);
         self.ime_drawn_editor = None;
@@ -587,6 +618,33 @@ mod lifecycle_synthetic_tests {
         let mut clean=egui::RawInput::default();
         eframe::App::raw_input_hook(&mut app,&ctx,&mut clean);
         assert!(clean.events.is_empty());
+    }
+
+    #[test]
+    fn lifecycle_owner_busy_blocks_exit_shutdown_instead_of_persisting_uncertain_project() {
+        use std::sync::{Arc,Barrier};
+        let mut app=FilmcraftApp::new(Session::default());
+        let gate=app.shuvi_manual_admission.clone();
+        let both=Arc::new(Barrier::new(2));
+        let worker_sync=Arc::clone(&both);
+        let worker=std::thread::spawn(move||{
+            let _lease=gate.try_claim().unwrap();
+            worker_sync.wait();
+            worker_sync.wait();
+        });
+        both.wait();
+        eframe::App::on_exit(&mut app);
+        assert_eq!(app.ui.status,"SHUVI_NATIVE_OWNER_BUSY");
+        both.wait();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn lifecycle_owner_poison_blocks_exit_shutdown_without_clean_state_claim() {
+        let mut app=FilmcraftApp::new(Session::default());
+        app.shuvi_manual_admission.poison();
+        eframe::App::on_exit(&mut app);
+        assert_eq!(app.ui.status,"SHUVI_NATIVE_OWNER_POISONED");
     }
 
     /// Extract the pointer-moved positions from a raw event batch, for synthetic-input tests.
