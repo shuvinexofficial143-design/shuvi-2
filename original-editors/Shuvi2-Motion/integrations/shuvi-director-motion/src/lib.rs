@@ -786,6 +786,18 @@ mod tests{
             assert!(matches!(layer.source,LayerSource::Shape));
             assert!(layer.props.group("contents").unwrap().groups().count()>0);
         }).unwrap();
+        // Original native project serialization must preserve approved shape.
+        let destination=tmp.0.join("shape-persisted.ecproj");
+        gate.manual_command("file.saveAs",json!({"path":destination.to_str().unwrap()})).unwrap();
+        let saved=fs::read(&destination).unwrap();
+        let saved_sha=format!("{:x}",Sha256::digest(&saved));
+        let mut reopened=Session::new();
+        reopened.execute_checked("file.open",json!({"path":destination.to_str().unwrap()})).unwrap();
+        let actual=reopened.project.comp(ItemId(comp)).unwrap().layers.iter()
+            .find(|l|l.name=="Verified Box").unwrap();
+        assert!(matches!(actual.source,LayerSource::Shape));
+        assert!(actual.props.group("contents").unwrap().groups().count()>0);
+        assert_eq!(format!("{:x}",Sha256::digest(fs::read(&destination).unwrap())),saved_sha);
     }
 
     #[test]
@@ -833,6 +845,19 @@ mod tests{
         let inventory=gate.native_inventory().unwrap();
         assert_eq!(inventory["effectIds"].as_array().unwrap().len(),1);
         assert_eq!(inventory["maskIds"].as_array().unwrap().len(),0);
+        // Independently reopen actual serialized EffectCraft project file.
+        let destination=tmp.0.join("effect-persisted.ecproj");
+        gate.manual_command("file.saveAs",json!({"path":destination.to_str().unwrap()})).unwrap();
+        let saved=fs::read(&destination).unwrap();
+        let disk_sha=format!("{:x}",Sha256::digest(&saved));
+        let mut reopened=Session::new();
+        reopened.execute_checked("file.open",json!({"path":destination.to_str().unwrap()})).unwrap();
+        let l=reopened.project.comp(ItemId(comp)).unwrap().layer(LayerId(layer)).unwrap();
+        assert!(l.effects().unwrap().groups().any(|fx|fx.match_id=="ec.blur.gaussian"));
+        assert!(matches!(&l.props.prop("transform/position").unwrap().value,
+            effectcraft_engine::keyframe::Value::Vec3(v)
+                if (v[0]-100.0).abs()<1e-5&&(v[1]-80.0).abs()<1e-5));
+        assert_eq!(format!("{:x}",Sha256::digest(fs::read(&destination).unwrap())),disk_sha);
     }
 
     #[test]
