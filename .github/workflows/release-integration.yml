@@ -67,6 +67,10 @@ jobs:
         shell: pwsh
         timeout-minutes: 4
         run: ./scripts/video/desktop-launch-smoke.ps1
+      - name: Silently install the actual Windows NSIS package and launch installed EXE
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./scripts/release/windows-installed-smoke.ps1
       - name: Try real Windows Video WebView2 FilmCraft E2E
         shell: pwsh
         timeout-minutes: 15
@@ -90,6 +94,7 @@ jobs:
           name: shuvi2-integration-e2e-evidence
           path: |
             src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/release/installed-smoke.json
             src-tauri/target/video-desktop-e2e.json
             src-tauri/target/video-desktop-e2e.png
             proof/motion-desktop/
