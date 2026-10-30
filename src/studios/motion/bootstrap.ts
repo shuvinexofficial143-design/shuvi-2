@@ -10,6 +10,8 @@ type Comp = { id:number;name:string;width:number;height:number;fps:number;durati
 type Layer = { id:number;name:string;kind:string;opacity:number;rotation:number;keyframes:number };
 type Effect = { uid:number;id:string;name:string;enabled:boolean };
 type Mask = { uid:number;name:string;closed:boolean;vertices:[number,number][] };
+type NativeEffectParameter = { uid:number;parameter:string;value:number;minimum:number;maximum:number;source:string };
+type NativeMaskSettings = { uid:number;feather:[number,number];expansion:number;opacity:number };
 const preview = document.querySelector<HTMLElement>(".preview")!;
 const timeline = document.querySelector<HTMLElement>(".timeline")!;
 const health = document.querySelector<HTMLElement>("#engine-health")!;
@@ -139,6 +141,42 @@ async function refreshEffectMaskControls():Promise<void>{
     button.addEventListener("click",()=>{activeMask=mask;void refreshEffectMaskControls();});
     masksEl.append(button);
   }
+  await refreshSelectedNativeProperties();
+}
+function selectedEffectKind(effect:Effect):string {
+  return effect.id==="ec.blur.gaussian"?"gaussianBlur":"brightnessContrast";
+}
+async function refreshSelectedNativeProperties():Promise<void>{
+  if(!activeComp||!activeLayer)return;
+  const compId=activeComp.id,layerId=activeLayer.id;
+  if(activeEffect){
+    const kind=selectedEffectKind(activeEffect);
+    const choice=node<HTMLSelectElement>("#motion-fx-param");
+    const valid=kind==="gaussianBlur"?["blurriness"]:["brightness","contrast"];
+    for(const item of Array.from(choice.options))item.disabled=!valid.includes(item.value);
+    if(!valid.includes(choice.value))choice.value=valid[0];
+    const param=await request<NativeEffectParameter>({action:"inspectEffectParameter",
+      compId,layerId,uid:activeEffect.uid,effect:kind,parameter:choice.value});
+    if(param.source!=="native-effectcraft")throw new Error("Effect parameter was not read from native engine");
+    const input=node<HTMLInputElement>("#motion-fx-value");
+    input.value=String(param.value);
+    input.min=String(param.minimum);input.max=String(param.maximum);
+    node<HTMLElement>("#motion-fx-state").textContent=
+      param.parameter+": "+param.value+" (native)";
+  }else{
+    node<HTMLElement>("#motion-fx-state").textContent="Select an effect";
+  }
+  if(activeMask){
+    const state=await request<NativeMaskSettings>({action:"getMaskSettings",
+      compId,layerId,uid:activeMask.uid});
+    node<HTMLInputElement>("#motion-feather").value=String(state.feather[0]);
+    node<HTMLInputElement>("#motion-expansion").value=String(state.expansion);
+    node<HTMLInputElement>("#motion-mask-opacity").value=String(state.opacity);
+    node<HTMLElement>("#motion-mask-state").textContent=
+      "Native mask #"+state.uid+" · "+activeMask.vertices.length+" points";
+  }else{
+    node<HTMLElement>("#motion-mask-state").textContent="Select a mask";
+  }
 }
 async function afterEdit():Promise<void> {
   await listLayers();
@@ -212,6 +250,7 @@ function paintUi():void {
      <button id="motion-set-effect">Set selected effect parameter</button>
      <button id="motion-toggle-effect">Enable/disable</button>
      <button id="motion-remove-effect">Remove effect</button>
+     <span id="motion-fx-state">Select an effect</span>
    </div>
    <div id="motion-effect-list" class="motion-layers">Select a layer</div>
    <div class="motion-fields">
@@ -223,6 +262,11 @@ function paintUi():void {
      <label>Y <input id="motion-mask-y" type="number" value="-45"/></label>
      <button id="motion-edit-mask">Edit mask vertex</button>
      <button id="motion-remove-mask">Remove mask</button>
+     <label>Feather px <input id="motion-feather" type="number" min="0" max="250" value="0"/></label>
+     <label>Expansion px <input id="motion-expansion" type="number" min="-250" max="250" value="0"/></label>
+     <label>Mask Opacity % <input id="motion-mask-opacity" type="number" min="0" max="100" value="100"/></label>
+     <button id="motion-apply-mask-settings">Apply native mask settings</button>
+     <span id="motion-mask-state">Select a mask</span>
    </div>
    <div id="motion-mask-list" class="motion-layers">Select a layer</div>
    <div class="motion-fields">
@@ -340,6 +384,26 @@ function bind():void {
     if(!activeMask)throw new Error("Select a mask first");
     await request({action:"removeMask",compId:c.id,layerId:l.id,uid:activeMask.uid});
     activeMask=null;await afterEdit();
+  });
+  node<HTMLSelectElement>("#motion-fx-param").addEventListener("change",()=>{
+    void execute("Loading EffectCraft parameter",refreshSelectedNativeProperties);
+  });
+  bindClick("#motion-apply-mask-settings","Editing native mask settings",async()=>{
+    const c=ensureComp(),l=ensureLayer();
+    if(!activeMask)throw new Error("Select a mask to edit its settings");
+    const uid=activeMask.uid;
+    const settings=[
+      {property:"feather",value:number("#motion-feather")},
+      {property:"expansion",value:number("#motion-expansion")},
+      {property:"opacity",value:number("#motion-mask-opacity")}
+    ];
+    for(const setting of settings){
+      if(!Number.isFinite(setting.value))throw new Error("Invalid mask numeric value");
+    }
+    for(const setting of settings){
+      await request({action:"setMaskProperty",compId:c.id,layerId:l.id,uid,...setting});
+    }
+    await afterEdit();
   });
   bindClick("#motion-render","Rendering native preview",renderFrame);
   node<HTMLInputElement>("#motion-time").addEventListener("input",(event)=>{
