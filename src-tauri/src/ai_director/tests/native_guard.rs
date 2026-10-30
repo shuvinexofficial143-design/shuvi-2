@@ -16,9 +16,12 @@ struct Consent{accept:bool,calls:usize}
 impl OwnerConsent for Consent{
     fn grant(&mut self,_:&Scope)->bool{self.calls+=1;self.accept}
 }
-struct FakeOwner {current:Snapshot,calls:usize,fail_after:bool,no_change:bool,verify:bool}
+struct FakeOwner {current:Snapshot,calls:usize,fail_after:bool,no_change:bool,verify:bool,preflight:bool}
 impl NativeOwner for FakeOwner {
     fn snapshot(&mut self)->Result<Snapshot,String>{Ok(self.current.clone())}
+    fn preflight_action(&mut self,_action:&Action)->Result<bool,String>{
+        Ok(self.preflight)
+    }
     fn apply(&mut self,_action:&Action)->Result<(),String>{
         self.calls+=1;
         if !self.no_change {
@@ -57,7 +60,7 @@ fn video()->Scope {
     }
 }
 fn owner(p:&Scope)->FakeOwner{
-    FakeOwner{current:p.snapshot.clone(),calls:0,fail_after:false,no_change:false,verify:true}
+    FakeOwner{current:p.snapshot.clone(),calls:0,fail_after:false,no_change:false,verify:true,preflight:true}
 }
 #[test]
 fn real_disk_reservation_survives_reopen_and_rejects_duplicate(){
@@ -281,4 +284,18 @@ fn altered_model_plan_cannot_use_previous_digest_and_changed_owner_cannot_reserv
     assert_eq!(valid.reserve(&ledger,&mut engine).unwrap_err(),GuardError::StaleProject);
     assert_eq!(engine.calls,0);
     assert!(ledger.recover(&p.task_id).is_err());
+}
+
+#[test]
+fn missing_or_untrusted_native_object_id_fails_before_mutation_or_intent(){
+    let dir=TempDir::new();let l=Ledger::new(&dir.0).unwrap();let p=motion();
+    l.reserve(&p).unwrap();l.approve(&p.task_id,&mut Consent{accept:true,calls:0}).unwrap();
+    let mut engine=owner(&p);engine.preflight=false;
+    assert_eq!(l.execute(&p.task_id,0,&mut engine).unwrap_err(),GuardError::Invalid);
+    assert_eq!(engine.calls,0);
+    assert_eq!(l.recover(&p.task_id).unwrap()[0],"not_started");
+    engine.preflight=true;
+    let result=l.execute(&p.task_id,0,&mut engine).unwrap();
+    assert!(result.native_verified);
+    assert_eq!(engine.calls,1);
 }
