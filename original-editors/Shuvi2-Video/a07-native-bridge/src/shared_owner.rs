@@ -5,6 +5,7 @@
 use std::sync::{Mutex, MutexGuard, TryLockError};
 use filmcraft_engine::{Session, shuvi_ai_readonly};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use shuvi_ai_provider::{
     guard::{GuardError, NativeOwner, Snapshot},
     host::GuardedHost,
@@ -27,6 +28,7 @@ pub enum AdmissionError {
 pub struct NativeVideoAdmission {
     owned: Mutex<Session>,
     project_id: String,
+    /// Trusted per-application session seed, never a renderer-provided ID.
     session_id: String,
 }
 impl NativeVideoAdmission {
@@ -68,11 +70,36 @@ impl NativeVideoAdmission {
             .map_err(|e|AdmissionError::Native(e.to_string()))
     }
 
+
+    /// Derive the canonical A07 identity from the *current* trusted native
+    /// document context. SaveAs, Open, New, tab/sequence switches must not
+    /// inherit a prior approval merely because project bytes match.
+    /// The trusted base session ID is a per-running-app unique host secret
+    /// identifier, not the API key or anything visible to a model.
+    fn current_session_id(&self, session: &Session) -> String {
+        let mut sha = Sha256::new();
+        sha.update(b"SHUVI-FILMCRAFT-A11-NATIVE-CONTEXT");
+        sha.update((self.session_id.len() as u64).to_le_bytes());
+        sha.update(self.session_id.as_bytes());
+        sha.update(session.document_epoch.to_le_bytes());
+        sha.update(session.state.active_sequence.map(|id|id.0).unwrap_or(0).to_le_bytes());
+        match &session.path {
+            Some(path) => {
+                sha.update([1]);
+                sha.update((path.len() as u64).to_le_bytes());
+                sha.update(path.as_bytes());
+            }
+            None => sha.update([0]),
+        }
+        format!("s-{:x}",sha.finalize())
+    }
+
     /// Native A07 snapshot. It is a project/session VERSION, NOT consent.
     pub fn a07_snapshot(&self) -> Result<Snapshot, AdmissionError> {
         let mut owner=self.acquire()?;
+        let bound_id=self.current_session_id(&owner);
         let mut bridge=VideoOwner::new(
-            &mut owner, self.project_id.clone(), self.session_id.clone()
+            &mut owner, self.project_id.clone(), bound_id
         ).map_err(AdmissionError::Native)?;
         bridge.snapshot().map_err(AdmissionError::Native)
     }
@@ -88,8 +115,9 @@ impl NativeVideoAdmission {
         execute:impl FnOnce(&mut GuardedHost<'_,VideoOwner<'_>>)->Result<R,GuardError>,
     ) -> Result<R,AdmissionError> {
         let mut owner=self.acquire()?;
+        let bound_id=self.current_session_id(&owner);
         let mut bridge=VideoOwner::new(
-            &mut owner, self.project_id.clone(), self.session_id.clone()
+            &mut owner, self.project_id.clone(), bound_id
         ).map_err(AdmissionError::Native)?;
         let mut guarded=GuardedHost {ledger,owner:&mut bridge};
         execute(&mut guarded).map_err(AdmissionError::A07)

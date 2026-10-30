@@ -22,3 +22,8 @@ This gate is tested inside the standalone a07-native-bridge package, which is NO
 
 ## Remaining integration
 The integration owner must refactor the real egui editor app's current Session field and ALL manual action paths to use this single gate before attaching canonical A07 and native approval dialog, preserving original keyboard/mouse/undo/save semantics. Audit code paths, then implement proper trusted in-process OwnerConsent and persist receipts with project-specific protected SQLite database. Only then enable any AI mutation UI.
+
+## Additional V-AI11 identity hardening
+The gate now hashes its private host-supplied session seed plus the original FilmCraft `document_epoch`, selected native sequence ID, and project path into a bounded ASCII A07 session ID (s- plus 64 hexadecimal characters). The hash is stable for the current document but rotates across Open/New/Demo/SaveAs and native sequence changes. Neither a renderer nor AI provider can choose it. Regression tests reserve one canonical SQLite plan, reopen the original FilmCraft demo, and prove a stale request cannot even show the test OwnerConsent prompt; the ledger remains not_started. A second test confirms the derived ID is stable during read-only operations and changes when the document is reopened. The project_id is still trusted integration metadata, not validated from renderer fields.
+
+This is an isolated native gate only; the actual egui FilmcraftApp still directly owns `pub session: Session` and has not yet been migrated to this gate.

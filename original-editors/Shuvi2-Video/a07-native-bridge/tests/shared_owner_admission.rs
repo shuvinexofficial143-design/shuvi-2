@@ -141,3 +141,44 @@ fn native_gate_fails_closed_on_missing_editor_and_invalid_identity(){
     let empty=Session::default();
     assert!(NativeVideoAdmission::new(empty,"a".into(),"short".into()).is_err());
 }
+
+#[test]
+fn native_a07_session_id_rotates_on_document_reopen_even_when_app_instance_is_same(){
+    let gate=gate();
+    let original=gate.a07_snapshot().unwrap();
+    assert!(original.session_id.starts_with("s-"));
+    assert_eq!(original.session_id.len(),66);
+    let again=gate.a07_snapshot().unwrap();
+    assert_eq!(again,original);
+    // This is a real original FilmCraft File > Demo operation. It replaces
+    // the native document while remaining inside the same Windows app.
+    gate.manual_command("file.openDemoProject",json!({})).unwrap();
+    let changed=gate.a07_snapshot().unwrap();
+    assert_ne!(changed.session_id,original.session_id);
+    assert_eq!(changed.project_id,original.project_id);
+}
+
+#[test]
+fn old_sqlite_video_reservation_cannot_open_owner_prompt_after_native_document_reopen(){
+    let gate=gate();
+    let temp=Tmp::new();
+    let (_,reserve,approve,binding)=plan(&gate,"sharedownertask03");
+    let mut ledger=temp.open();
+    gate.with_guarded_a07(&mut ledger, |host|{
+        host.reserve(&reserve)?;
+        Ok(())
+    }).unwrap();
+    // Native app reopens same example project; even if project content happens
+    // to be byte-for-byte identical, the context-bound Session ID rotated.
+    gate.manual_command("file.openDemoProject",json!({})).unwrap();
+    let updated=gate.a07_snapshot().unwrap();
+    let mut clicks=Consent{clicks:0,grant:true};
+    let result=gate.with_guarded_a07(&mut ledger,|host|{
+        host.request_consent(&approve,&mut clicks)
+    });
+    assert!(matches!(result,Err(AdmissionError::A07(GuardError::StaleProject))));
+    assert_eq!(clicks.clicks,0);
+    assert_ne!(updated.session_id,reserve.plan["snapshot"]["sessionId"].as_str().unwrap());
+    assert_eq!(ledger.recovery_bound(&binding.task_id,&binding.plan_hash).unwrap(),
+        vec!["not_started"]);
+}
