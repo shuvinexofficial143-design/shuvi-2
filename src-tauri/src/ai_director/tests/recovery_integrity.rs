@@ -71,7 +71,8 @@ fn refuses_to_recover_and_continue(sql:&str){
     d.mutate(sql);
     assert_eq!(db.recovery(&p.task_id).unwrap_err(),GuardError::DuplicateOrUncertain);
     assert_eq!(db.cancel(&p.task_id).unwrap_err(),GuardError::DuplicateOrUncertain);
-    assert_eq!(db.execute_bound(&p.task_id,1,&owner.state,&p.actions[1],&mut owner)
+    let expected=owner.state.clone();
+    assert_eq!(db.execute_bound(&p.task_id,1,&expected,&p.actions[1],&mut owner)
        .unwrap_err(),GuardError::DuplicateOrUncertain);
     assert_eq!(owner.mutations,1);
 }
@@ -118,10 +119,11 @@ fn forged_task_name_in_receipt_is_detected(){
 }
 #[test]
 fn changing_separate_task_plan_hash_column_rejects_binding(){
-    let (d,db,p,mut owner)=initial(1);
+    let (d,mut db,p,mut owner)=initial(1);
     d.mutate("UPDATE ai_tasks SET plan_hash='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'");
     assert_eq!(db.recovery(&p.task_id).unwrap_err(),GuardError::DuplicateOrUncertain);
-    assert_eq!(db.execute_bound(&p.task_id,1,&owner.state,&p.actions[1],&mut owner)
+    let expected=owner.state.clone();
+    assert_eq!(db.execute_bound(&p.task_id,1,&expected,&p.actions[1],&mut owner)
         .unwrap_err(),GuardError::DuplicateOrUncertain);
     assert_eq!(owner.mutations,1);
 }
