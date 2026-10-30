@@ -131,6 +131,15 @@ impl TransactionalLedger {
         tx.commit().map_err(sql_error)?;
         Ok(accepted)
     }
+    /// Used by the native owner consent UI before displaying the stored plan.
+    /// Rejects a WebView-supplied hash without opening a second approval prompt.
+    pub fn verify_binding(&self,task_id:&str,plan_hash:&str)
+      ->Result<(),GuardError>{
+        if !valid_sha(plan_hash){return Err(GuardError::Invalid);}
+        let (scope,_,_)=self.load(task_id)?;
+        if scope.plan_hash!=plan_hash{return Err(GuardError::Invalid);}
+        Ok(())
+    }
     /// The actual Tauri Stop/Recovery IPC must bind both the task ID and
     /// native persisted plan digest; never trust a bare frontend task ID.
     pub fn cancel_bound(&mut self,id:&str,plan_hash:&str)
