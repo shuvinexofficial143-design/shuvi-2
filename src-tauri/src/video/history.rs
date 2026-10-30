@@ -254,7 +254,7 @@ mod tests{
         let project=root.0.join("test.fcproj");
         let old=b"old project";let new=b"new project";
         fs::write(&project,old).unwrap();
-        snapshot(&project,old,&super::sha256_bytes(old)).unwrap();
+        snapshot(&project,old,&super::super::sha256_bytes(old)).unwrap();
         fs::write(&project,new).unwrap();
         record_edit(&project,old,new).unwrap();
         let stats=status_unlocked(&project).unwrap();
@@ -273,10 +273,10 @@ mod tests{
         fs::write(&media,include_bytes!("../../../tests/video/blue-64x64-12fps.mp4")).unwrap();
         let project=root.0.join("edit.fcproj");
         let imported=super::super::media::import_media(base.clone(),project.to_string_lossy().into_owned(),media.to_string_lossy().into_owned()).unwrap();
-        let edited=super::timeline::apply(super::timeline::TimelineRequest {
+        let edited=super::super::timeline::apply(super::super::timeline::TimelineRequest {
             selected_root:base.clone(),project_path:project.to_string_lossy().into_owned(),
             expected_revision:imported.project_revision.unwrap(),expected_project_sha256:imported.project_sha256.clone(),
-            actions:vec![super::timeline::TimelineAction::CreateSequence{name:"History".into(),width:64,height:64,fps:12}],
+            actions:vec![super::super::timeline::TimelineAction::CreateSequence{name:"History".into(),width:64,height:64,fps:12}],
         }).unwrap();
         let state=status(base.clone(),project.to_string_lossy().into_owned()).unwrap();
         assert_eq!(state.project_sha256,edited.project_sha256);
