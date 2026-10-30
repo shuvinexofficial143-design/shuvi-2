@@ -5,6 +5,7 @@ pub mod guard;
 pub mod ipc;
 pub mod plan;
 pub mod transactional;
+pub mod host;
 pub mod windows_vault;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
