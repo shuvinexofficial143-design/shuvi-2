@@ -125,7 +125,9 @@ test("M10 WebView2 E2E actually launches Shuvi Tauri exe and performs mouse clic
   assert.ok(windowsRunner.includes("cargo install tauri-driver --locked"));
   assert.ok(windowsRunner.includes("msedgedriver-tool"));
   assert.ok(motionCi.includes("motion-desktop-e2e-windows:"));
-  assert.ok(motionCi.includes("cargo build --manifest-path src-tauri/Cargo.toml --bin shuvi2"));
+  assert.ok(motionCi.includes("npm run tauri -- build --ci --no-bundle"));
+  assert.ok(motionCi.includes("src-tauri/target/release/shuvi2.exe"));
+  assert.ok(motionCi.includes("node --check tests/motion/desktop-e2e.mjs"));
   assert.ok(motionCi.includes("needs: motion-engine-windows"));
   assert.ok(motionCi.includes("shuvi-motion-windows-webview2-e2e"));
 });
@@ -186,4 +188,16 @@ test("native owner Ctrl+Z / Ctrl+Shift+Z are scoped away from editing text input
   assert.ok(ts.includes("if(button.disabled)return;"));
   assert.ok(ts.includes("lastHistoryCompId"));
   assert.ok(ts.includes('action:"inspectComposition"'));
+});
+
+test("M13 preflight rejects malformed async WebDriver scripts before production GUI build",()=>{
+  assert.doesNotMatch(desktopE2e,/async=>/);
+  assert.ok(desktopE2e.includes('waitFor("persisted shape layer",async()=>'));
+  assert.ok(desktopE2e.includes('waitFor("reopened native layer list",async()=>'));
+  assert.ok(desktopE2e.includes('waitFor("persisted shape after full process restart",async()=>'));
+  assert.ok(windowsRunner.includes('node --check tests/motion/desktop-e2e.mjs'));
+  assert.ok(windowsRunner.includes('src-tauri/target/release/shuvi2.exe'));
+  const prefix=motionCi.indexOf("Preflight validate desktop WebDriver JavaScript");
+  const build=motionCi.indexOf("Build actual Tauri Windows binary with embedded production UI");
+  assert.ok(prefix!==-1&&build>prefix,"syntax preflight must precede production compile");
 });
