@@ -209,3 +209,24 @@ fn stopped_between_verified_steps_keeps_first_native_receipt(){
     assert_eq!(host.execute(wire(&plan,1,3)).unwrap_err(),GuardError::DuplicateOrUncertain);
     assert_eq!(host.owner.edits,1);
 }
+
+#[test]
+fn owner_project_or_session_change_blocks_consent_before_any_prompt(){
+    let t=Tmp::new();let mut db=t.db();
+    let (_plan,reserve,consent,_bind,mut editor)=setup();
+    let mut host=GuardedHost{ledger:&mut db,owner:&mut editor};
+    host.reserve(&reserve).unwrap();
+    let mut trusted_ui=ui(true);
+    host.owner.state.session_id="other-native-session".into();
+    assert_eq!(host.request_consent(&consent,&mut trusted_ui).unwrap_err(),
+        GuardError::StaleProject);
+    assert_eq!(trusted_ui.shown,0);
+    host.owner.state.session_id="native-session-0123".into();
+    host.owner.state.version=Version::MotionRevision(7);
+    assert_eq!(host.request_consent(&consent,&mut trusted_ui).unwrap_err(),
+        GuardError::StaleProject);
+    assert_eq!(trusted_ui.shown,0);
+    host.owner.state.version=Version::MotionRevision(2);
+    assert_eq!(host.request_consent(&consent,&mut trusted_ui).unwrap()["granted"],true);
+    assert_eq!(trusted_ui.shown,1);
+}
