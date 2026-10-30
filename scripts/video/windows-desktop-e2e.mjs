@@ -170,6 +170,17 @@ try{
   await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
   note("redo","Verified independent CLI session restored same FilmCraft project clip");
 
+  // Offline Hindi parser, no API key and no paid model call.
+  await page.locator(".v-lanes .v-clip").first().click();
+  const previous=readFileSync(project);
+  await page.locator("#prompt").fill("चयनित क्लिप हटाओ");
+  await page.locator("#chat-form").evaluate(form=>form.requestSubmit());
+  await page.locator('[data-v="chatReview"]').waitFor({state:"visible",timeout:10000});
+  await page.locator('[data-chat-approve="no"]').click();
+  if(!readFileSync(project).equals(previous))throw Error("Rejected Hindi command changed native project");
+  note("hindi-reject","Native .fcproj bytes unchanged after rejected Hindi command");
+
+
   // Chat is a deterministic parser, NOT an LLM. It requires explicit approval.
   await page.locator(".v-lanes .v-clip").first().click();
   await page.locator("#prompt").fill("split selected at 0.5");

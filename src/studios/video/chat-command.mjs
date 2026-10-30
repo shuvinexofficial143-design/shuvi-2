@@ -6,7 +6,27 @@ export function parseVideoChat(input,ctx){
   if(typeof input!=="string"||input.length>280||!ctx||
     !/^[a-f0-9]{64}$/.test(ctx.projectSha256??""))
     return {ok:false,message:"Open a verified project and enter a short instruction."};
-  const text=input.trim().toLowerCase().replace(/\s+/g," ");
+  const source=input.trim().toLowerCase().replace(/\s+/g," ");
+  // Intentionally narrow, anchored Hindi commands. Unknown colloquial requests
+  // are refused instead of guessed. They use the SAME native allowlist below.
+  function canonicalHindi(s) {
+    let m;
+    if(s==="पिछला बदलाव वापस करो")return "undo";
+    if(s==="बदलाव दोबारा करो")return "redo";
+    if(s==="चयनित क्लिप हटाओ")return "delete selected";
+    if((m=/^चयनित क्लिप को (\d+(?:\.\d{1,6})?) सेकंड पर काटो$/.exec(s)))
+      return "split selected at "+m[1];
+    if((m=/^क्लिप #([1-9]\d*) को (\d+(?:\.\d{1,6})?) सेकंड पर काटो$/.exec(s)))
+      return "split #"+m[1]+" at "+m[2];
+    if((m=/^चयनित क्लिप को ([va](?:[1-9]|1[0-6])) ट्रैक पर (\d+(?:\.\d{1,6})?) सेकंड पर ले जाओ$/.exec(s)))
+      return "move selected to "+m[1]+" at "+m[2];
+    if((m=/^चयनित मीडिया को ([va](?:[1-9]|1[0-6])) ट्रैक पर (\d+(?:\.\d{1,6})?) सेकंड पर लगाओ$/.exec(s)))
+      return "place selected on "+m[1]+" at "+m[2];
+    if((m=/^चयनित क्लिप के (शुरू|अंत) से (-?\d+) फ्रेम ट्रिम करो$/.exec(s)))
+      return "trim selected "+(m[1]==="शुरू"?"in":"out")+" "+m[2]+" frames";
+    return s;
+  }
+  const text=canonicalHindi(source);
   const bad=(message)=>({ok:false,message});
   const ok=(action,summary)=>({ok:true,action,summary,
     expectedProjectSha256:ctx.projectSha256,selectedRoot:ctx.selectedRoot,projectPath:ctx.projectPath});

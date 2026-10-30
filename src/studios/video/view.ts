@@ -46,7 +46,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       <div class="v-options">
         <label>Imported media<select data-v="media"><option value="">Import first</option></select></label>
         <label>Chat command source<select data-v="chatMode">
-          <option value="local">Local typed commands (no AI)</option>
+          <option value="local">Local English / हिंदी commands (no AI)</option>
           <option value="openai">OpenAI real model (review required)</option>
         </select></label>
         <label>OpenAI API key (optional if OPENAI_API_KEY set)
