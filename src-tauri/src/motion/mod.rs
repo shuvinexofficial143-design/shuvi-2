@@ -431,6 +431,31 @@ mod tests{
         assert_eq!(host.execute(MotionRequest::ListLayers{comp_id:c}).unwrap()[0]["id"],layer["id"]);
     }
     #[test]
+    fn typed_png_sequence_ipc_exports_real_frames_and_refuses_owner_clobber(){
+        let root=std::env::temp_dir().join(format!("shuvi-m15-ipc-{}-{}",
+            std::process::id(),std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        let host=MotionHost::new();
+        let comp=host.execute(MotionRequest::CreateComposition{
+            name:"Tauri Native PNG Sequence".into(),width:320,height:180,fps:30.0,duration_seconds:2.0
+        }).unwrap()["id"].as_u64().unwrap();
+        host.execute(MotionRequest::AddShape{
+            comp_id:comp,name:"Sequence shape".into(),kind:"rect".into(),x:160.0,y:90.0,
+            width:180.0,height:90.0,fill:"#bb4499".into()
+        }).unwrap();
+        let request=||MotionRequest::ExportPngSequence{
+            workspace:root.to_string_lossy().into_owned(),folder:"owner_sequence".into(),
+            comp_id:comp,start:0.0,frames:3,fps:30.0,max_side:320,transparent:true
+        };
+        let receipt=host.execute(request()).unwrap();
+        assert_eq!(receipt["source"],"native-effectcraft");
+        assert_eq!(receipt["frames"],3);
+        assert_eq!(receipt["verifiedFromDisk"],true);
+        assert!(root.join("owner_sequence").join("frame_0002.png").is_file());
+        assert!(host.execute(request()).is_err());
+    }
+    #[test]
     fn expired_queued_command_never_executes_a_hidden_native_edit(){
         let mut bridge=MotionBridge::new();
         let prior=bridge.revision();
