@@ -92,7 +92,11 @@ jobs:
   motion-desktop-e2e-windows:
     name: Real Windows WebView2 mouse-click-to-native-editor E2E
     needs: motion-engine-windows
-    runs-on: windows-latest
+    # Newer elevated Windows 2025 runner images + WebView2 150+ can prevent
+    # msedgedriver session creation: https://github.com/actions/runner-images/issues/14738
+    # Pin only the ACTUAL WebView2 UI E2E job to the reported working image.
+    # Native compile/packaging jobs keep independent windows-latest coverage.
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - name: Checkout pinned native engines
