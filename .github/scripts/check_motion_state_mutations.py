@@ -47,6 +47,22 @@ def main():
                 errors.append("Missing owner transaction: "+rel+": "+needle)
             else:
                 anchored[rel]+=1
+    # M-AI17: playback and asynchronous prefetch must not bypass app owner
+    # even if no journaled native engine command runs on that frame.
+    playback_routes = {}
+    for rel, count in {"app/playback.rs":3, "app/prefetch.rs":6}.items():
+        src=runtime((ROOT/rel).read_text())
+        seen=src.count("self.set_owner_playback_time(")
+        playback_routes[rel]=seen
+        if seen != count or "self.session.set_time(" in src:
+            errors.append(f"unguarded native playback time update in {rel}: routed {seen}/{count}")
+    owner_src=runtime((ROOT/"shuvi_owner_gate.rs").read_text())
+    if "pub(crate) fn set_owner_playback_time(" not in owner_src or "self.motion_owner_gate.manual_transaction(|| {" not in owner_src:
+        errors.append("native playback clock owner transaction helper missing")
+    project_src=runtime((ROOT/"panels/project.rs").read_text())
+    if "app.session.state.project_selection.clear();" not in project_src or \
+       "app.motion_owner_gate.manual_transaction(|| {\n            app.session.state.project_selection.clear();" not in project_src:
+        errors.append("original project marquee clear lost its native owner transaction")
     findings=[]
     raw=[]
     inline_gated=[]
@@ -80,6 +96,7 @@ def main():
     evidence={
         "schemaVersion":1,"sourceCommit":os.getenv("GITHUB_SHA","local"),
         "reviewedNativeStateGateAnchors":anchored,
+        "ownerGatedPlaybackClockRoutes":playback_routes,
         "trackedDirectSetterOrStateCandidates":findings,
         "reviewedInlineOwnerTransactionCandidates":inline_gated,
         "furtherStateMutationReviewCandidates":needs_review,
@@ -96,6 +113,7 @@ def main():
     dest=Path(args.out)
     dest.write_text(json.dumps(evidence,indent=2,sort_keys=True)+"\n")
     print("M-AI16 state gate anchors:",sum(anchored.values()))
+    print("M-AI17 owner-gated playback/prefetch calls:",sum(playback_routes.values()))
     print("Direct setter/state/container mutation candidates:",len(findings))
     print("Inline owner transaction candidates:",len(inline_gated))
     print("Further state mutation review candidates:",len(needs_review))
