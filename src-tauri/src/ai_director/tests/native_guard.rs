@@ -299,3 +299,15 @@ fn missing_or_untrusted_native_object_id_fails_before_mutation_or_intent(){
     assert!(result.native_verified);
     assert_eq!(engine.calls,1);
 }
+
+#[test]
+fn native_shape_dimensions_match_model_schema_and_reject_negative_or_fractional(){
+    let dir=TempDir::new();let l=Ledger::new(&dir.0).unwrap();let mut p=motion();
+    p.actions=vec![Action::MotionAddShape{comp_id:2,name:"Rectangle".into(),
+        kind:"rect".into(),x:0.0,y:0.0,width:-100.0,height:80.0,fill:"#112233".into()}];
+    assert_eq!(l.reserve(&p).unwrap_err(),GuardError::Invalid);
+    if let Action::MotionAddShape{width,..}=&mut p.actions[0]{*width=12.5;}
+    assert_eq!(l.reserve(&p).unwrap_err(),GuardError::Invalid);
+    if let Action::MotionAddShape{width,..}=&mut p.actions[0]{*width=120.0;}
+    l.reserve(&p).unwrap();
+}
