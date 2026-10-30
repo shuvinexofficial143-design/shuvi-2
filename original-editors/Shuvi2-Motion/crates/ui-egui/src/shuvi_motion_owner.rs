@@ -188,7 +188,7 @@ mod tests {
         let mut s=Session::new();
         let _=run(&mut s,&new_comp()).unwrap();
         let size=s.journal.len();
-        assert_eq!(apply_native(&mut s,0,&new_comp(),&OwnerPermit::for_test()),Err(MotionError::Stale));
+        assert!(matches!(apply_native(&mut s,0,&new_comp(),&OwnerPermit::for_test()),Err(MotionError::Stale)));
         assert_eq!(s.journal.len(),size);
     }
     #[test]
