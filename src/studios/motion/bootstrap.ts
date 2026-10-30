@@ -366,6 +366,9 @@ function paintUi():void {
      <button id="motion-save">Save .ecproj</button><button id="motion-open">Open .ecproj</button>
      <label>PNG filename <input id="motion-png-filename" value="motion_frame.png"/></label>
      <button id="motion-export-png">Export native PNG frame</button>
+     <label>Sequence folder <input id="motion-sequence-folder" value="motion_frames" maxlength="64"/></label>
+     <label>Frames <input id="motion-sequence-frames" type="number" min="1" max="120" step="1" value="12"/></label>
+     <button id="motion-export-sequence">Export native PNG sequence</button>
    </div>
   </section>`;
 }
@@ -520,6 +523,23 @@ function bind():void {
       throw new Error("PNG export did not verify against native EffectCraft pixels");
     node<HTMLElement>("#motion-frame-info").textContent=
       "PNG saved ("+exported.bytes+" bytes): "+exported.path;
+  });
+  bindClick("#motion-export-sequence","Exporting native PNG sequence",async()=>{
+    const comp=ensureComp();
+    const root=value("#motion-workspace");
+    if(!root)throw new Error("Choose an existing owner workspace folder");
+    const frames=number("#motion-sequence-frames");
+    if(!Number.isInteger(frames)||frames<1||frames>120)
+      throw new Error("PNG sequence must contain 1..120 whole frames");
+    const result=await request<{
+      path:string;frames:number;source:string;verifiedFromDisk:boolean;totalPngBytes:number
+    }>({action:"exportPngSequence",workspace:root,folder:value("#motion-sequence-folder"),
+      compId:comp.id,start:currentTime,frames,fps:comp.fps,maxSide:640,transparent:true});
+    if(result.source!=="native-effectcraft"||!result.verifiedFromDisk
+      ||result.frames!==frames||result.totalPngBytes<=0)
+      throw new Error("PNG sequence was not verified by native EffectCraft");
+    node<HTMLElement>("#motion-frame-info").textContent=
+      "Native "+result.frames+"-frame PNG sequence saved ("+result.totalPngBytes+" bytes): "+result.path;
   });
   bindClick("#motion-save","Saving native project",async()=>{
     const root=value("#motion-workspace");
