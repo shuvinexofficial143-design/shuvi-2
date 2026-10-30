@@ -203,6 +203,19 @@ try{
   await page.locator(".v-editor").waitFor({state:"visible",timeout:15000});
   note("window","Real Windows app and WebView2 Video Studio DOM visible");
 
+  // Regression for visible M0 demo panels: [hidden] alone was overridden by
+  // legacy .screen{display:flex} and .track{display:grid} author CSS.
+  if(await page.locator(".workspace.video-workspace .preview > .screen").isVisible())
+    throw Error("Old 'Live Editor Integration Pending' placeholder still visible in Video mode");
+  if(await page.locator(".workspace.video-workspace .timeline > .track").first().isVisible())
+    throw Error("Old mock timeline track visible beside actual FilmCraft sequence");
+  await page.locator(".workspace.video-workspace .v-program .v-monitor")
+    .waitFor({state:"visible",timeout:10000});
+  if(!(await page.locator(".top-note .phase").textContent())?.includes("FilmCraft"))
+    throw Error("Video Studio shell still labels itself M0 Foundation");
+  note("native-workspace","Verified no visible M0 placeholder or synthetic timeline in Video mode");
+
+
   // Actual user-facing inputs; no direct Tauri invoke bypass, no mock engine.
   await page.locator('[data-v="root"]').fill(folder);
   await page.locator('[data-v="project"]').fill(project);

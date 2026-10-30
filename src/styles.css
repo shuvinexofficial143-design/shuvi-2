@@ -10,3 +10,11 @@
 .workspace.video-workspace .sectionbar{padding:10px 18px;background:#172034}
 .chat.video-chat .chat-form button{background:#6353a4}
 .chat.video-chat .chat-heading .offline{color:#c7e1ff;background:#233b52}
+
+/* Legacy shell DOM uses display:flex/grid. The UA [hidden] selector loses
+ * to those author declarations; force truly native Video-only rendering. */
+.workspace.video-workspace .preview > .screen,
+.workspace.video-workspace .timeline > .timeline-top,
+.workspace.video-workspace .timeline > .track{display:none!important}
+.workspace.video-workspace .preview > .v-editor{display:flex}
+.workspace.video-workspace .timeline > .v-lanes{display:flex}
