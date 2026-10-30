@@ -255,26 +255,36 @@ pub fn select(app: &mut EffectcraftApp, style: &str) {
 
 /// Close the dialog: OK keeps the edits, Cancel undoes everything done since it opened.
 pub fn finish(app: &mut EffectcraftApp, ok: bool) {
-    if let Some(checkpoint) = app.dialog_state.layer_style.checkpoint.take()
-        && !ok
-    {
-        let changed = !std::sync::Arc::ptr_eq(&app.session.project, &checkpoint.project);
-        if changed {
-            // Snapshot only when Cancel has something to restore: opening and cancelling without
-            // edits must not copy the whole TextDoc.
-            let edited = active_editor_snapshot(&app.session);
-            app.session.project = checkpoint.project;
-            app.session.history = checkpoint.history;
-            app.session.sanitize_after_replacement(edited.as_ref());
-            app.session.bump();
-        } else {
-            // No edit was committed, so nothing can have become invalid. In particular, do not
-            // call sanitize_state here: its text-edit cleanup clones the whole TextDoc.
-            app.session.history = checkpoint.history;
+    // Layer Style Cancel restores a whole native Project/History snapshot,
+    // bypassing Session::execute. Admit this *entire* transaction under the
+    // same app-owned manual gate as engine.execute and viewer gestures.
+    // On a busy owner the dialog/checkpoint is preserved, never consumed.
+    let gate = &app.motion_owner_gate;
+    let session = &mut app.session;
+    let state = &mut app.dialog_state;
+    let dialog = &mut app.dialog;
+    let result = gate.manual_transaction(|| {
+        if let Some(checkpoint) = state.layer_style.checkpoint.take()
+            && !ok
+        {
+            let changed = !std::sync::Arc::ptr_eq(&session.project, &checkpoint.project);
+            if changed {
+                let edited = active_editor_snapshot(session);
+                session.project = checkpoint.project;
+                session.history = checkpoint.history;
+                session.sanitize_after_replacement(edited.as_ref());
+                session.bump();
+            } else {
+                session.history = checkpoint.history;
+            }
         }
+        session.history.merge_key = None;
+        *dialog = None;
+        Ok(())
+    });
+    if let Err(e) = result {
+        app.ui.status = e;
     }
-    app.session.history.merge_key = None;
-    app.dialog = None;
 }
 
 #[cfg(test)]
