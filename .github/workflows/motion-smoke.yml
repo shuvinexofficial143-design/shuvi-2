@@ -119,6 +119,9 @@ jobs:
       - name: Click actual Windows Motion UI and verify native PNG/project on disk
         shell: pwsh
         run: ./scripts/motion/run-windows-e2e.ps1 -Application src-tauri/target/release/shuvi2.exe
+      - name: Independently verify actual GUI screenshot and cold-restart artifact before release
+        shell: pwsh
+        run: ./scripts/motion/verify-desktop-proof.ps1
       - name: Upload real desktop screenshot and E2E receipt
         if: always()
         uses: actions/upload-artifact@v4
