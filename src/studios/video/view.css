@@ -8,3 +8,5 @@
 .v-lanes [data-action=undo],.v-lanes [data-action=redo]{border-color:#4b9c87;background:#24483e}.v-lanes [data-v=history]{font-size:10px;overflow-wrap:anywhere;opacity:.86}
 
 .v-lanes [data-action=recover]{border:1px solid #c19d51;background:#4b3b29;color:#ffdda0}.v-lanes [data-action=recover]:disabled{opacity:.35}
+
+.v-chat-review{display:grid;gap:7px;padding:10px;border:1px solid #7383a3;border-radius:8px;background:#18253b}.v-chat-review[hidden]{display:none!important}.v-chat-review strong{font-size:11px}.v-chat-review p{font-size:11px;overflow-wrap:anywhere}

@@ -54,7 +54,7 @@ document.querySelector<HTMLFormElement>("#chat-form")!.addEventListener("submit"
   if (!value) return;
   appendMessage("user", value);
   appendMessage("assistant", selectedStudio === "video"
-    ? "AI provider not connected. This message is a draft only; use the FilmCraft controls in Video Studio for verified manual edits."
+    ? videoStudio.proposeChatText(value)
     : "Draft saved only in this window. No AI provider or motion editing engine is connected; no edit executed.");
   prompt.value = "";
 });
