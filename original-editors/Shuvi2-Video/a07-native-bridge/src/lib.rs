@@ -6,7 +6,7 @@
 //! It cannot be a WebView/model endpoint. Only one closed action is supported.
 use filmcraft_edit::razor_items;
 use filmcraft_engine::{Session, shuvi_ai_readonly};
-use filmcraft_project::ClipId;
+use filmcraft_project::{ClipId, ItemId};
 use filmcraft_time::{Tick, TICKS_PER_SECOND};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -29,6 +29,9 @@ pub struct VideoOwner<'a> {
     session: &'a mut Session,
     project_id: String,
     session_id: String,
+    bound_document_epoch: u64,
+    bound_sequence: Option<ItemId>,
+    bound_path: Option<String>,
     last: Option<AppliedSplit>,
 }
 
@@ -40,32 +43,60 @@ impl<'a> VideoOwner<'a> {
             !session_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
             return Err("INVALID_TRUSTED_NATIVE_IDENTITY".into());
         }
-        Ok(Self { session, project_id, session_id, last: None })
+        if session.state.active_sequence.is_none() {
+            return Err("NO_ACTIVE_NATIVE_SEQUENCE".into());
+        }
+        Ok(Self {
+            bound_document_epoch: session.document_epoch,
+            bound_sequence: session.state.active_sequence,
+            bound_path: session.path.clone(),
+            session, project_id, session_id, last: None,
+        })
+    }
+
+    fn same_native_document(&self) -> bool {
+        self.session.document_epoch == self.bound_document_epoch
+            && self.session.state.active_sequence == self.bound_sequence
+            && self.session.path == self.bound_path
     }
 
     fn checked_target(&self, action: &Action) -> Option<(u64, i64)> {
+        if !self.same_native_document() { return None; }
         let Action::VideoSplit { clip_id, seconds } = action else { return None };
         if *clip_id == 0 || *clip_id > 9_007_199_254_740_991 ||
             !seconds.is_finite() || !(0.0..=21_600.0).contains(seconds) { return None; }
         let seq = self.session.active_sequence()?;
         let tick = self.session.sequence_rate()
             .snap_nearest(Tick((seconds * TICKS_PER_SECOND as f64).round() as i64)).0;
+        let mut matches = 0usize;
         for track in seq.video_tracks.iter().chain(seq.audio_tracks.iter()) {
-            if track.locked { continue; }
-            if track.items.iter().any(|c| c.id.0 == *clip_id && c.start.0 < tick && tick < c.end().0) {
-                return Some((*clip_id, tick));
+            for clip in &track.items {
+                if clip.id.0 != *clip_id { continue; }
+                // A damaged project can reuse a ClipId across tracks. No
+                // selection-based fallback and no edit before ambiguity check.
+                if track.locked || clip.start.0 >= tick || tick >= clip.end().0 {
+                    return None;
+                }
+                matches += 1;
+                if matches > 1 { return None; }
             }
         }
-        None
+        (matches == 1).then_some((*clip_id, tick))
     }
 
     fn sequence(&mut self) -> Result<Value, String> {
+        if !self.same_native_document() {
+            return Err("STALE_NATIVE_DOCUMENT_IDENTITY".into());
+        }
         shuvi_ai_readonly::snapshot(self.session)
             .map_err(|_| "NATIVE_SEQUENCE_READBACK_FAILED".to_string())?
             .sequence.ok_or_else(|| "NO_ACTIVE_NATIVE_SEQUENCE".into())
     }
 
     fn inspect_split(&mut self, action: &Action) -> Result<(u64, Value), String> {
+        if !self.same_native_document() {
+            return Err("STALE_NATIVE_DOCUMENT_IDENTITY".into());
+        }
         // Post-split the original left clip ends AT tick, so checking whether
         // it still strictly contains tick would wrongly reject a successful edit.
         // Compare the canonical action to the captured pre-edit intent instead.
@@ -151,6 +182,9 @@ impl<'a> VideoOwner<'a> {
 
 impl NativeOwner for VideoOwner<'_> {
     fn snapshot(&mut self) -> Result<Snapshot, String> {
+        if !self.same_native_document() {
+            return Err("STALE_NATIVE_DOCUMENT_IDENTITY".into());
+        }
         Ok(Snapshot {
             editor: Editor::Video,
             project_id: self.project_id.clone(),

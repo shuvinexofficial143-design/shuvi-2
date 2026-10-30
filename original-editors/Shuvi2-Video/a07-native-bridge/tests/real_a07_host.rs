@@ -240,3 +240,21 @@ fn unverified_native_split_prevents_second_mutation() {
     let digest=owner.object_proof_sha256(&first).unwrap();
     assert_eq!(digest.len(),64);
 }
+
+#[test]
+fn duplicate_native_clip_ids_on_two_tracks_fail_closed_before_sqlite_intent() {
+    let mut session=make_session();
+    let active=session.state.active_sequence.unwrap();
+    let duplicate=session.active_sequence().unwrap().video_tracks[0].items[0].clone();
+    std::sync::Arc::make_mut(&mut session.project).sequence_mut(active).unwrap()
+        .audio_tracks[0].items.push(duplicate.clone());
+    let mut owner=VideoOwner::new(&mut session,
+        "trusted-filmcraft-project".into(),"native-owner-session-duplicate".into()).unwrap();
+    let before=owner.snapshot().unwrap();
+    let action=shuvi_ai_provider::guard::Action::VideoSplit {
+        clip_id:duplicate.id.0,seconds:2.0
+    };
+    assert!(!owner.preflight_action(&action).unwrap());
+    assert_eq!(owner.apply(&action).unwrap_err(),"NATIVE_ACTION_NOT_ALLOWED");
+    assert_eq!(owner.snapshot().unwrap(),before);
+}
