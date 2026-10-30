@@ -8,6 +8,17 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $project = (Get-Location).Path
 $binary = (Resolve-Path $Application -ErrorAction Stop).Path
+$exe = Get-Item -LiteralPath $binary
+if ($exe.Length -lt 1048576) { throw "Real WebView2 application binary unexpectedly small" }
+Write-Host "WebView2 GUI CI runner: $env:ImageOS / $env:ImageVersion; OS=$([System.Environment]::OSVersion.VersionString)"
+Write-Host "Production Tauri exe size: $($exe.Length) bytes"
+try {
+    $key = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    $webviewVersion = (Get-ItemProperty -Path $key -ErrorAction Stop).pv
+    Write-Host "Installed Windows WebView2 Runtime version: $webviewVersion"
+} catch {
+    Write-Host "WebView2 registry version not readable (driver session must still be verified)"
+}
 $proof = Join-Path $project $Artifacts
 New-Item -ItemType Directory -Path $proof -Force | Out-Null
 # Reject invalid JavaScript before downloading drivers or launching the Windows app.
