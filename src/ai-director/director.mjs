@@ -12,7 +12,7 @@ function checkPorts(adapter, approval, journal) {
     throw new Error("trusted native editor adapter required");
   }
   if (typeof approval?.request !== "function") throw new Error("trusted human approval gateway required");
-  if (typeof journal?.append !== "function") throw new Error("durable audit journal required");
+  if (typeof journal?.append !== "function" || typeof journal?.reserve !== "function") throw new Error("durable audit journal with atomic task reservation required");
 }
 function view(task) {
   return safeClone({
@@ -43,7 +43,9 @@ export class AiDirector {
     const plan = validateDraft({taskId, instruction, snapshot, actions});
     const hash = await digest(plan);
     const task = {plan, hash, status:"prepared", receipts:[], error:null, cancel:false, inFlight:false, intentLogged:false};
-    // Persist record before exposing an approvable plan. Crash must not allow replay.
+    // reserve() must atomically persist this task ID; restart may not re-approve it.
+    const reserved = await this.#journal.reserve({taskId, planHash:hash, project:plan.snapshot});
+    if (reserved !== true) throw new Error("task already reserved in durable journal");
     await this.#journal.append({event:"prepared", taskId, planHash:hash, project:plan.snapshot});
     this.#tasks.set(taskId, task);
     return view(task);
