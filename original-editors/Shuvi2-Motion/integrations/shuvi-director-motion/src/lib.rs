@@ -350,6 +350,36 @@ mod tests{
     }
 
     #[test]
+    fn real_ai_director_provider_accepts_only_native_bounded_inventory(){
+        use shuvi_ai_provider::{NativeModelRequest,build_request};
+        let mut s=Session::new();
+        let comp=from_comp(&mut s);
+        let inventory=native_model_inventory(&s);
+        let actions=["motion.createComposition","motion.addText","motion.editText",
+            "motion.addShape","motion.setTransform","motion.addEffect",
+            "motion.setMaskProperty"].map(str::to_owned).to_vec();
+        let req=NativeModelRequest {
+            model:"gpt-4o-mini".into(),
+            instruction:"Create an animated title".into(),
+            engine:"motion".into(),
+            inventory:inventory.clone(),
+            allowed_actions:actions.clone()
+        };
+        let safe=build_request(&req).unwrap();
+        assert_eq!(safe["model"],"gpt-4o-mini");
+        assert!(safe["messages"][1]["content"].as_str().unwrap().contains(&comp.to_string()));
+        assert!(!safe.to_string().contains("api_key"));
+        assert!(!safe.to_string().contains("filePath"));
+        let mut forged=req;
+        forged.inventory=json!({"compIds":[0],"layerIds":[],
+            "maskIds":[],"effectIds":[]});
+        assert!(build_request(&forged).is_err(),"provider must reject invented zero object id");
+        forged.inventory=inventory;
+        forged.allowed_actions=vec!["motion.deleteEverything".into()];
+        assert!(build_request(&forged).is_err(),"model action allowlist cannot be weakened");
+    }
+
+    #[test]
     fn native_inventory_uses_real_session_ids_without_paths(){
         let mut s=Session::new();
         let comp=from_comp(&mut s);
