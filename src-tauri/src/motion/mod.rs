@@ -36,6 +36,7 @@ pub enum MotionRequest{
     SetMaskVertex { comp_id:u64,layer_id:u64,uid:u64,index:usize,point:[f64;2] },
     RemoveMask { comp_id:u64,layer_id:u64,uid:u64 },
     ExportPng { workspace:String,filename:String,comp_id:u64,time:f64,max_side:u32,transparent:bool },
+    ExportPngSequence { workspace:String,folder:String,comp_id:u64,start:f64,frames:u32,fps:f64,max_side:u32,transparent:bool },
     InspectEffectParameter { comp_id:u64,layer_id:u64,uid:u64,effect:String,parameter:String },
     GetMaskSettings { comp_id:u64,layer_id:u64,uid:u64 },
     SetMaskProperty { comp_id:u64,layer_id:u64,uid:u64,property:String,value:f64 },
@@ -229,6 +230,15 @@ fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
         MotionRequest::RemoveMask{comp_id,layer_id,uid}=>{
             e.remove_mask(comp_id,layer_id,uid)?;
             Ok(json!({"removed":true,"uid":uid}))
+        }
+        MotionRequest::ExportPngSequence{workspace,folder,comp_id,start,frames,fps,max_side,transparent}=>{
+            let r=e.export_png_sequence(Path::new(&workspace),&folder,comp_id,start,frames,fps,max_side,transparent)?;
+            Ok(json!({"path":r.directory.to_string_lossy(),"frames":r.frame_count,
+                "firstTime":r.first_time,"fps":r.fps,"totalPngBytes":r.total_png_bytes,
+                "firstChecksum":r.first_checksum.to_string(),
+                "lastChecksum":r.last_checksum.to_string(),
+                "verifiedFromDisk":r.verified_from_disk,"projectRevision":r.project_revision,
+                "source":"native-effectcraft"}))
         }
         MotionRequest::ExportPng{workspace,filename,comp_id,time,max_side,transparent}=>{
             // Explicit owner-specified existing workspace; bridge refuses clobber/traversal.
