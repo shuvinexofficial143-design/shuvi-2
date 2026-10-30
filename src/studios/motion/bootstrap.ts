@@ -27,6 +27,7 @@ let activeEffect: Effect | null = null;
 let activeMask: Mask | null = null;
 let currentTime = 0;
 let busy = false;
+let pendingPreview = false;
 
 const request = async <T>(payload: RecordJson): Promise<T> =>
   invoke<T>("motion_command", { request: payload });
@@ -55,7 +56,18 @@ async function execute(label:string,work:()=>Promise<void>):Promise<void> {
   } catch (error) {
     if(mounted&&generation===uiGeneration)
       info("FAIL: "+String(error),true);
-  } finally { busy = false; }
+  } finally {
+    busy = false;
+    if(mounted&&pendingPreview){
+      pendingPreview=false;
+      void execute("Rendering latest playhead",renderFrame);
+    }
+  }
+}
+function scheduleNativePreview():void {
+  if(!mounted||!activeComp)return;
+  if(busy){pendingPreview=true;return;}
+  void execute("Rendering latest playhead",renderFrame);
 }
 function ensureComp():Comp {
   if (!activeComp) throw new Error("Create or open a composition first");
@@ -431,12 +443,12 @@ function bind():void {
     }
     await afterEdit();
   });
-  bindClick("#motion-render","Rendering native preview",renderFrame);
+  node<HTMLButtonElement>("#motion-render").addEventListener("click",scheduleNativePreview);
   node<HTMLInputElement>("#motion-time").addEventListener("input",(event)=>{
     currentTime=Number((event.target as HTMLInputElement).value);
     node<HTMLElement>("#motion-time-label").textContent=currentTime.toFixed(2)+" s";
   });
-  node<HTMLInputElement>("#motion-time").addEventListener("change",()=>void execute("Rendering playhead",renderFrame));
+  node<HTMLInputElement>("#motion-time").addEventListener("change",scheduleNativePreview);
   bindClick("#motion-export-png","Exporting native PNG",async()=>{
     const c=ensureComp();
     const root=value("#motion-workspace");
@@ -488,6 +500,7 @@ async function mount():Promise<void> {
 function unmount():void {
   if(!mounted)return;
   uiGeneration++;
+  pendingPreview=false;
   mounted=false;preview.innerHTML=originalPreview;timeline.innerHTML=originalTimeline;
   health.textContent="Source pinned · Engine not built";
 }
