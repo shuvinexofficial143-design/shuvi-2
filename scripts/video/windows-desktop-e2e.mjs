@@ -169,6 +169,23 @@ try{
   await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
   note("redo","Verified independent CLI session restored same FilmCraft project clip");
 
+  // Chat is a deterministic parser, NOT an LLM. It requires explicit approval.
+  await page.locator(".v-lanes .v-clip").first().click();
+  await page.locator("#prompt").fill("split selected at 0.5");
+  await page.locator("#chat-form").evaluate(form=>form.requestSubmit());
+  await page.locator('[data-v="chatReview"]').waitFor({state:"visible",timeout:10000});
+  if(await page.locator(".v-lanes .v-clip").count()!==1)
+    throw Error("Chat proposal executed without user approval");
+  note("chat-proposal","Chat generated typed split proposal without touching real project");
+  await page.locator('[data-chat-approve="yes"]').click();
+  await visibleStatus("Verified approved Chat split",180000);
+  if(await page.locator(".v-lanes .v-clip").count()!==2)
+    throw Error("Approved chat split did not persist two native clips");
+  note("chat-approval","Explicitly approved typed chat action split native FilmCraft clip");
+  await clickAction("undo","Verified persistent FilmCraft undo",120000);
+  if(await page.locator(".v-lanes .v-clip").count()!==1)
+    throw Error("Undo after approved chat edit did not restore timeline");
+
   await page.locator('[data-v="seconds"]').fill("0.25");
   await clickAction("preview","Verified real FilmCraft frame",180000);
   await page.waitForFunction(()=>{
