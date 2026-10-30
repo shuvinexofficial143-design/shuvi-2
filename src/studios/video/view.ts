@@ -7,6 +7,7 @@ import { importVideoMedia } from "./media";
 import { editVideoTimeline, type TimelineAction } from "./timeline";
 import { renderVideoPreview, applyPreviewToImage } from "./preview";
 import { exportVideoMp4 } from "./export";
+import { inspectVideoHistory, restoreVideoHistory, type VideoHistoryStatus } from "./history";
 import { mediaItems, timelineClips, sequenceDuration, sequenceFps, formatTimecode, localWindowsPath, requireNumber, type EditorClip } from "./model.mjs";
 
 /** The FilmCraft UI is owned by Video Studio. No Motion Studio DOM is removed. */
@@ -72,13 +73,15 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     <div class="v-head"><strong>Native Timeline</strong><span data-v="duration">00:00:00.000</span></div>
     <div data-v="tracks" class="v-tracks">Open a project to load FilmCraft sequence tracks.</div>
     <div data-v="selected" class="v-muted">Click a clip to select it.</div>
-    <div class="v-actions"><button data-action="place">Place Media</button><button data-action="split">Split</button><button data-action="trim">Trim</button><button data-action="move">Move</button><button data-action="delete">Delete</button></div>
-    <div class="v-muted">Undo/Redo requires the same native batch; persistent cross-click undo is not available yet.</div>
+    <div class="v-actions"><button data-action="place">Place Media</button><button data-action="split">Split</button><button data-action="trim">Trim</button><button data-action="move">Move</button><button data-action="delete">Delete</button>
+    <button data-action="undo">Undo Last Edit</button><button data-action="redo">Redo Edit</button></div>
+    <div class="v-muted" data-v="history">Cross-session FilmCraft project history is being inspected.</div>
   `;
   preview.append(panel);timeline.append(lane);
   let snapshot:VideoProjectSnapshot|null=null;
   let itemId:number|null=null,clipId:number|null=null;
   let clips:EditorClip[]=[];
+  let history:VideoHistoryStatus|null=null;
   let busy=false,active=true;
   let disposeFrame:(()=>void)|null=null;
   let sampledPlayback=false;
@@ -218,18 +221,28 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         row.append(label,track);tracks.append(row);
       }
     }
+    e<HTMLElement>("history").textContent=history?.diverged
+      ? "History paused: project modified outside Shuvi; refresh and create a new edit branch"
+      : history ? "Saved project history · "+history.position+" / "+history.depth+
+          " · SHA "+history.projectSha256.slice(0,12)
+        : "No saved project editing history yet";
     const selected=clips.find(c=>c.clipId===clipId);
     e<HTMLElement>("selected").textContent=selected?
       "Native clip #"+selected.clipId+" · "+selected.track+" · "+selected.name:
       "Select a real clip by clicking its timeline block";
     panel.querySelectorAll<HTMLButtonElement>("button[data-action],button[data-choose]").forEach(b=>{b.disabled=busy});
-    lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{b.disabled=busy||!snapshot});
+    lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{
+      const action=b.dataset.action;
+      b.disabled=busy||!snapshot||(action==="undo"&&!history?.canUndo)||(action==="redo"&&!history?.canRedo);
+    });
     panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input,select").forEach(control=>{control.disabled=busy;});
     lane.querySelectorAll<HTMLButtonElement>(".v-clip").forEach(control=>{control.disabled=busy;});
   }
   async function load():Promise<VideoProjectSnapshot>{
     const p=paths();const found=await inspectVideoProject(p.selectedRoot,p.projectPath);
-    snapshot=found;clearFrame();draw();return found;
+    const h=await inspectVideoHistory(p.selectedRoot,p.projectPath);
+    if(h.projectSha256!==found.projectSha256)throw Error("Project changed between snapshot and history readback");
+    snapshot=found;history=h;clearFrame();draw();return found;
   }
   function renderCurrentFrame(immediate:boolean):void {
     const req=request();
@@ -279,6 +292,20 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         await edit({type:"place",itemId:id,track,seconds:requireNumber(value("seconds"),0,86400),video:!audio,audio});
       }else if(action==="preview"){
         renderCurrentFrame(true);
+      }else if(action==="undo"||action==="redo"){
+        const req=request();
+        const receipt=await restoreVideoHistory({
+          selectedRoot:req.selectedRoot,
+          projectPath:req.projectPath,
+          expectedProjectSha256:req.expectedProjectSha256,
+          direction:action,
+        });
+        const refreshed=await load();
+        if(refreshed.projectSha256!==receipt.projectSha256)
+          throw Error("Undo/Redo saved state changed; refresh before proceeding");
+        clipId=null;
+        inform("Verified persistent FilmCraft "+action+" · project "+receipt.projectSha256.slice(0,12)+
+          " · previous project backup "+receipt.backupPath);
       }else if(action==="export"){
         const outputPath=value("output");
         if(!localWindowsPath(outputPath)||!outputPath.toLowerCase().endsWith(".mp4"))throw Error("Choose a new absolute .mp4 filename");
@@ -334,7 +361,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         e<HTMLInputElement>("root").value=selected.replace(/[\\/][^\\/]+$/,"");
       }
       if(selected){
-        scrubber.invalidate();clearFrame();
+        history=null;snapshot=null;clipId=null;itemId=null;
+        scrubber.invalidate();clearFrame();draw();
         inform("Selected native path · "+selected+" · no editor operation executed yet");
       }
     }catch(err){inform("Native dialog unavailable: "+String(err),true);}
@@ -386,7 +414,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
   });
   for(const key of ["root","project"]){
     e<HTMLInputElement>(key).addEventListener("change",()=>{
-      scrubber.invalidate();clearFrame();
+      history=null;snapshot=null;clipId=null;itemId=null;
+      scrubber.invalidate();clearFrame();draw();
     });
   }
   e<HTMLSelectElement>("media").addEventListener("change",()=>{

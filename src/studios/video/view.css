@@ -4,3 +4,5 @@
 .v-scrub{display:flex;flex-direction:column;gap:4px;grid-column:1/-1;padding:7px 9px;border-radius:7px;background:#1f293e}.v-scrub input[type=range]{padding:0;accent-color:#ac92ff;cursor:ew-resize}.v-scrub input[type=range]:disabled{cursor:not-allowed;opacity:.45}.v-scrub span{font-size:10px;font-variant-numeric:tabular-nums;color:#bfcfea}
 
 .v-play-tools{display:flex;gap:5px;flex-wrap:wrap}.v-play-tools button{padding:5px 8px;font-size:10px;background:#334160;color:#d9e7ff;border:1px solid #566989;border-radius:5px}.v-play-tools button:disabled{opacity:.38}
+
+.v-lanes [data-action=undo],.v-lanes [data-action=redo]{border-color:#4b9c87;background:#24483e}.v-lanes [data-v=history]{font-size:10px;overflow-wrap:anywhere;opacity:.86}
