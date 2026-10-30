@@ -86,7 +86,7 @@ mod tests{
     #[test]
     fn canonical_sha_is_key_order_independent(){
        let a=candidate();
-       let b:Value=serde_json::from_str(r#"{"instruction":"एक rectangle बनाओ","actions":[{"fill":"#112233","height":60,"width":120,"y":20,"x":12,"kind":"rect","name":"Shape","compId":2,"type":"motion.addShape"}],"snapshot":{"sessionId":"host-session-1","version":4,"projectId":"scene.ecproj","engine":"motion"},"taskId":"task0001"}"#).unwrap();
+       let b:Value=serde_json::from_str(r##"{"instruction":"एक rectangle बनाओ","actions":[{"fill":"#112233","height":60,"width":120,"y":20,"x":12,"kind":"rect","name":"Shape","compId":2,"type":"motion.addShape"}],"snapshot":{"sessionId":"host-session-1","version":4,"projectId":"scene.ecproj","engine":"motion"},"taskId":"task0001"}"##).unwrap();
        assert_eq!(independently_hash(&a).unwrap(),independently_hash(&b).unwrap());
        assert_eq!(independently_hash(&a).unwrap(),
            "3fbba55c9fb67a596487b13f556469770b59b40f4bf29b3fef51afb1a6cf6a40");
