@@ -1,4 +1,5 @@
 import "./view.css";
+import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { probeVideoEngine } from "./engine";
@@ -12,7 +13,7 @@ import { videoKeyboardCommand } from "./keyboard.mjs";
 import { mediaItems, timelineClips, sequenceDuration, sequenceFps, formatTimecode, localWindowsPath, requireNumber, type EditorClip } from "./model.mjs";
 
 /** The FilmCraft UI is owned by Video Studio. No Motion Studio DOM is removed. */
-export function mountVideoStudio(): { setActive(active:boolean):void } {
+export function mountVideoStudio(): { setActive(active:boolean):void; proposeChatText(text:string):string } {
   const preview=document.querySelector<HTMLElement>(".preview");
   const timeline=document.querySelector<HTMLElement>(".timeline");
   if(!preview||!timeline)throw Error("Missing Shuvi Studio mount");
@@ -78,12 +79,19 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     <button data-action="undo">Undo Last Edit</button><button data-action="redo">Redo Edit</button>
     <button data-action="recover">Recover Interrupted History</button></div>
     <div class="v-muted" data-v="history">Cross-session FilmCraft project history is being inspected.</div>
+    <div class="v-chat-review" data-v="chatReview" hidden>
+      <strong>Local typed command (no AI model connected)</strong>
+      <p data-v="chatSummary">No pending command</p>
+      <div class="v-actions"><button type="button" data-chat-approve="yes">Approve & Run on FilmCraft</button>
+      <button type="button" data-chat-approve="no">Reject</button></div>
+    </div>
   `;
   preview.append(panel);timeline.append(lane);
   let snapshot:VideoProjectSnapshot|null=null;
   let itemId:number|null=null,clipId:number|null=null;
   let clips:EditorClip[]=[];
   let history:VideoHistoryStatus|null=null;
+  let pending:VideoChatProposal|null=null;
   let busy=false,active=true;
   let disposeFrame:(()=>void)|null=null;
   let sampledPlayback=false;
@@ -148,6 +156,11 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     if(!s||s.projectPath.toLowerCase()!==p.projectPath.toLowerCase())
       throw Error("Open / Refresh the selected project first");
     return {...p,expectedRevision:s.sessionRevision,expectedProjectSha256:s.projectSha256};
+  }
+  function clearProposal():void{
+    pending=null;
+    e<HTMLElement>("chatReview").hidden=true;
+    e<HTMLElement>("chatSummary").textContent="No pending command";
   }
   function clearFrame():void {
     stopSampledPlayback();
@@ -235,6 +248,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
       "Native clip #"+selected.clipId+" · "+selected.track+" · "+selected.name:
       "Select a real clip by clicking its timeline block";
     panel.querySelectorAll<HTMLButtonElement>("button[data-action],button[data-choose]").forEach(b=>{b.disabled=busy});
+    lane.querySelectorAll<HTMLButtonElement>("button[data-chat-approve]").forEach(b=>{
+      b.disabled=busy||!active||!pending;
+    });
     lane.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>{
       const action=b.dataset.action;
       b.disabled=busy||!snapshot||(action==="undo"&&!history?.canUndo)||(action==="redo"&&!history?.canRedo)
@@ -247,6 +263,7 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     const p=paths();const found=await inspectVideoProject(p.selectedRoot,p.projectPath);
     const h=await inspectVideoHistory(p.selectedRoot,p.projectPath);
     if(h.projectSha256!==found.projectSha256)throw Error("Project changed between snapshot and history readback");
+    if(pending&&pending.expectedProjectSha256!==found.projectSha256)clearProposal();
     snapshot=found;history=h;clearFrame();draw();return found;
   }
   function renderCurrentFrame(immediate:boolean):void {
@@ -262,6 +279,57 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     const after=await load();
     if(after.projectSha256!==response.projectSha256)throw Error("Post-edit state changed unexpectedly; refresh/replan");
     inform("Verified "+action.type+" · backup: "+response.backupPath);
+  }
+  function proposeChatText(text:string):string {
+    if(!active||busy||!snapshot)return "Open a real FilmCraft Video project before proposing a chat command.";
+    const plan=parseVideoChat(text,{
+      selectedRoot:value("root"),projectPath:value("project"),projectSha256:snapshot.projectSha256,
+      clips:clips.map(c=>({clipId:c.clipId,start:c.start,duration:c.duration,kind:c.kind})),
+      media:mediaItems(snapshot.project).map(m=>({itemId:m.itemId})),
+      selectedClipId:clipId,selectedMediaId:itemId
+    });
+    if(!plan.ok){clearProposal();return plan.message;}
+    pending=plan;
+    e<HTMLElement>("chatReview").hidden=false;
+    e<HTMLElement>("chatSummary").textContent=plan.summary+" | SHA "+plan.expectedProjectSha256.slice(0,12);
+    draw();
+    return "Local typed command (not AI): "+plan.summary+
+      ". Click Approve & Run in the Video Timeline; no edit has happened yet.";
+  }
+  async function approveChat():Promise<void>{
+    const plan=pending;
+    if(!plan||busy||!active)return;
+    busy=true;stopSampledPlayback(true);draw();
+    try{
+      await scrubber.pauseAndDrain();
+      const req=request();
+      if(req.expectedProjectSha256!==plan.expectedProjectSha256 ||
+         req.selectedRoot!==plan.selectedRoot || req.projectPath!==plan.projectPath)
+        throw Error("STALE_PROJECT_CONTENT: project changed since chat proposal");
+      if(plan.action.type==="undo"||plan.action.type==="redo"){
+        const state=await inspectVideoHistory(req.selectedRoot,req.projectPath);
+        if(state.projectSha256!==plan.expectedProjectSha256||
+          (plan.action.type==="undo"&&!state.canUndo)||(plan.action.type==="redo"&&!state.canRedo))
+          throw Error("History unavailable or changed since proposal");
+        const result=await restoreVideoHistory({
+          selectedRoot:req.selectedRoot,projectPath:req.projectPath,
+          expectedProjectSha256:req.expectedProjectSha256,direction:plan.action.type
+        });
+        clearProposal();
+        const verified=await load();
+        if(verified.projectSha256!==result.projectSha256)throw Error("History readback mismatch");
+      }else{
+        const result=await editVideoTimeline({...req,actions:[plan.action]});
+        clearProposal();
+        const verified=await load();
+        if(verified.projectSha256!==result.projectSha256)throw Error("Timeline readback mismatch");
+      }
+      inform("Verified approved Chat "+plan.action.type+" · saved native project readback");
+    }catch(err){
+      clearProposal();
+      inform("Chat action not verified: "+String(err),true);
+      try{await load();}catch{}
+    }finally{scrubber.resume();busy=false;draw();}
   }
   async function handle(action:string):Promise<void>{
     if(busy||!active)return;
@@ -380,12 +448,18 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
         e<HTMLInputElement>("root").value=selected.replace(/[\\/][^\\/]+$/,"");
       }
       if(selected){
-        history=null;snapshot=null;clipId=null;itemId=null;
+        clearProposal();history=null;snapshot=null;clipId=null;itemId=null;
         scrubber.invalidate();clearFrame();draw();
         inform("Selected native path · "+selected+" · no editor operation executed yet");
       }
     }catch(err){inform("Native dialog unavailable: "+String(err),true);}
   }
+  lane.querySelectorAll<HTMLButtonElement>("button[data-chat-approve]").forEach(b=>{
+    b.addEventListener("click",()=>{
+      if(b.dataset.chatApprove==="no"){clearProposal();inform("Command rejected; no editing action");draw();}
+      if(b.dataset.chatApprove==="yes")void approveChat();
+    });
+  });
   panel.querySelectorAll<HTMLButtonElement>("button[data-choose]").forEach(b=>
     b.addEventListener("click",()=>{void choose(b.dataset.choose??"");}));
   panel.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach(b=>b.addEventListener("click",()=>{void handle(b.dataset.action??"");}));
@@ -458,9 +532,9 @@ export function mountVideoStudio(): { setActive(active:boolean):void } {
     }
   });
   draw();
-  return {setActive(next:boolean){
+  return {proposeChatText,setActive(next:boolean){
     active=next;
-    if(!next)stopSampledPlayback(true);
+    if(!next){stopSampledPlayback(true);clearProposal();}
     panel.hidden=!next;lane.hidden=!next;
     oldPreview.forEach(n=>{n.hidden=next});
     oldTimeline.forEach(n=>{n.hidden=next});
