@@ -11,6 +11,9 @@ use base64::{engine::general_purpose::STANDARD,Engine as _};
 #[serde(tag="action",rename_all="camelCase",rename_all_fields="camelCase")]
 pub enum MotionRequest{
     Status,
+    InspectHistory,
+    Undo,
+    Redo,
     CreateComposition { name:String,width:u32,height:u32,fps:f64,duration_seconds:f64 },
     ListLayers { comp_id:u64 },
     AddText { comp_id:u64,name:String,text:String,x:f64,y:f64,size:f64 },
@@ -79,6 +82,17 @@ fn admitted_action(engine:&mut MotionBridge,request:MotionRequest,deadline:Insta
     }
     apply(engine,request)
 }
+fn history_json(h:shuvi_motion_bridge::HistorySnapshot)->Value{
+    json!({"canUndo":h.can_undo,"canRedo":h.can_redo,
+        "undoDepth":h.undo_depth,"redoDepth":h.redo_depth,
+        "nextUndo":h.next_undo,"nextRedo":h.next_redo,
+        "revision":h.revision,"dirty":h.dirty})
+}
+fn history_receipt_json(h:shuvi_motion_bridge::HistoryReceipt)->Value{
+    json!({"action":h.action,"label":h.label,
+       "beforeRevision":h.before_revision,"projectChanged":h.project_changed,
+       "after":history_json(h.after)})
+}
 fn prop(name:&str)->Result<Property,String>{
     match name{
         "position"=>Ok(Property::Position),"scale"=>Ok(Property::Scale),
@@ -135,6 +149,9 @@ fn receipt(r:shuvi_motion_bridge::ProjectReceipt)->Value{
 }
 fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
     match request {
+        MotionRequest::InspectHistory=>Ok(history_json(e.inspect_history())),
+        MotionRequest::Undo=>Ok(history_receipt_json(e.undo_native()?)),
+        MotionRequest::Redo=>Ok(history_receipt_json(e.redo_native()?)),
         MotionRequest::Status=>Ok(json!({"ready":true,"engine":"effectcraft",
             "native":true,"projectRevision":e.revision(),"dirty":e.is_dirty()})),
         MotionRequest::CreateComposition{name,width,height,fps,duration_seconds}=>{
@@ -366,6 +383,35 @@ mod tests{
             parameter:"brightness".into()
         }).unwrap();
         assert_eq!(p["value"],0.0);
+    }
+    #[test]
+    fn owner_undo_redo_through_tauri_keeps_exact_native_preview(){
+        let host=MotionHost::new();
+        let c=host.execute(MotionRequest::CreateComposition{
+            name:"Tauri Owner History".into(),width:320,height:180,fps:30.0,duration_seconds:3.0
+        }).unwrap()["id"].as_u64().unwrap();
+        let base=host.execute(MotionRequest::Render{
+            comp_id:c,time:0.0,max_side:320,transparent:true
+        }).unwrap()["checksum"].clone();
+        let layer=host.execute(MotionRequest::AddShape{
+            comp_id:c,name:"Undo shape".into(),kind:"rect".into(),
+            x:160.0,y:90.0,width:170.0,height:100.0,fill:"#ff33aa".into()
+        }).unwrap();
+        let after=host.execute(MotionRequest::Render{
+            comp_id:c,time:0.0,max_side:320,transparent:true
+        }).unwrap()["checksum"].clone();
+        assert_ne!(base,after);
+        assert_eq!(host.execute(MotionRequest::InspectHistory).unwrap()["canUndo"],true);
+        assert_eq!(host.execute(MotionRequest::Undo).unwrap()["projectChanged"],true);
+        assert_eq!(host.execute(MotionRequest::Render{
+            comp_id:c,time:0.0,max_side:320,transparent:true
+        }).unwrap()["checksum"],base);
+        let redo=host.execute(MotionRequest::Redo).unwrap();
+        assert_eq!(redo["projectChanged"],true);
+        assert_eq!(host.execute(MotionRequest::Render{
+            comp_id:c,time:0.0,max_side:320,transparent:true
+        }).unwrap()["checksum"],after);
+        assert_eq!(host.execute(MotionRequest::ListLayers{comp_id:c}).unwrap()[0]["id"],layer["id"]);
     }
     #[test]
     fn expired_queued_command_never_executes_a_hidden_native_edit(){
