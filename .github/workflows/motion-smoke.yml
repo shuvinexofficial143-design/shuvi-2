@@ -108,13 +108,17 @@ jobs:
         run: |
           node --check tests/motion/desktop-e2e.mjs
           npm test
-      - name: Build actual Shuvi 2 Windows WebView2 binary
+      - name: Build actual Tauri Windows binary with embedded production UI
+        run: npm run tauri -- build --ci --no-bundle
+      - name: Verify production GUI binary exists (never test dev-url-only build)
+        shell: pwsh
         run: |
-          npm run build
-          cargo build --manifest-path src-tauri/Cargo.toml --bin shuvi2
+          $binary = "src-tauri/target/release/shuvi2.exe"
+          if (!(Test-Path $binary)) { throw "Production Shuvi WebView2 exe missing: $binary" }
+          Write-Host "PASS: production frontend embedded native Tauri exe: $binary"
       - name: Click actual Windows Motion UI and verify native PNG/project on disk
         shell: pwsh
-        run: ./scripts/motion/run-windows-e2e.ps1
+        run: ./scripts/motion/run-windows-e2e.ps1 -Application src-tauri/target/release/shuvi2.exe
       - name: Upload real desktop screenshot and E2E receipt
         if: always()
         uses: actions/upload-artifact@v4
