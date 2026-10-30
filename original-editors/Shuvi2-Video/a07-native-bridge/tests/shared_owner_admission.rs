@@ -11,15 +11,30 @@ use shuvi_ai_provider::{
     transactional::TransactionalLedger,
 };
 use shuvi_video_a07_native_bridge::shared_owner::{AdmissionError,NativeVideoAdmission};
-use std::{fs,path::PathBuf,time::{SystemTime,UNIX_EPOCH}};
+use std::{fs,path::PathBuf,time::{SystemTime,UNIX_EPOCH},
+    sync::atomic::{AtomicU64,Ordering}};
+
+// Windows SystemTime is not guaranteed to resolve every concurrently
+// created temp directory to distinct nanoseconds. Parallel test teardown
+// MUST never remove another test's canonical SQLite WAL/SHM directory.
+static UNIQUE_DB_DIRECTORY:AtomicU64=AtomicU64::new(1);
 
 struct Tmp(PathBuf);
 impl Tmp {
     fn new()->Self{
         let ns=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let p=std::env::temp_dir().join(format!("a11-shared-owner-{}-{ns}",std::process::id()));
-        fs::create_dir_all(&p).unwrap();
-        Self(p)
+        for _ in 0..32 {
+            let sequence=UNIQUE_DB_DIRECTORY.fetch_add(1,Ordering::Relaxed);
+            let p=std::env::temp_dir().join(format!(
+                "a11-shared-owner-{}-{ns}-{sequence}",std::process::id()
+            ));
+            match fs::create_dir(&p) {
+                Ok(())=>return Self(p),
+                Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists=>continue,
+                Err(error)=>panic!("failed to create test-only temporary SQLite folder: {error}"),
+            }
+        }
+        panic!("could not uniquely allocate the test-only SQLite folder");
     }
     fn open(&self)->TransactionalLedger{
         TransactionalLedger::open(&self.0.join("guard.sqlite3")).unwrap()
@@ -372,4 +387,30 @@ fn admitted_direct_manual_razor_invalidates_pending_a07_plan_before_owner_prompt
     assert_eq!(owner.clicks,0);
     assert_eq!(ledger.recovery_bound(&binding.task_id,&binding.plan_hash).unwrap(),
         vec!["not_started"]);
+}
+
+#[test]
+fn parallel_sqlite_fixtures_use_different_directories_and_do_not_delete_each_other() {
+    use std::sync::{Arc,Barrier};
+    const COUNT:usize=16;
+    let barrier=Arc::new(Barrier::new(COUNT));
+    let mut threads=Vec::new();
+    for _ in 0..COUNT {
+        let b=Arc::clone(&barrier);
+        threads.push(std::thread::spawn(move|| {
+            let fixture=Tmp::new();
+            let path=fixture.0.clone();
+            let ledger=fixture.open();
+            b.wait(); // All 16 SQLite fixtures are alive simultaneously.
+            assert!(path.exists());
+            assert!(ledger.integrity_check().is_ok());
+            path
+        }));
+    }
+    let all:Vec<_>=threads.into_iter().map(|h|h.join().unwrap()).collect();
+    let mut unique=std::collections::HashSet::new();
+    for path in all {
+        assert!(unique.insert(path));
+        assert!(!path.exists(), "temporary SQLite folder must be cleaned up");
+    }
 }
