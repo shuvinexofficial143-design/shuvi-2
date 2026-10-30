@@ -29,6 +29,7 @@ function fixture(){
       }
       if(request.action==="createComposition"){motionRev++;return {id:7,name:request.name,revision:motionRev};}
       if(request.action==="inspectComposition")return {id:7,name:"Native Comp",revision:motionRev};
+      if(request.action==="openProject")return {verifiedFromDisk:true,bytes:256,compositions:[{id:7,name:"Native Comp"}]};
       if(request.action==="listLayers")return structuredClone(layers);
       if(request.action==="listEffects")return structuredClone(effects);
       if(request.action==="listMasks")return structuredClone(masks);
@@ -117,4 +118,28 @@ test("unified U02 controls are actual event handlers, not display-only labels",(
   }
   assert.match(src,/selectedNativeMedia/);
   assert.match(src,/ctrl\.inspectMotionLayer/);
+});
+
+test("opening Motion does not silently clear a stopped Video project's recovery flag",async()=>{
+  const {ctrl,bridge}=fixture();
+  await ctrl.refreshVideo("C:\\Owner","C:\\Owner\\a.fcproj");
+  let complete;
+  bridge.videoTimeline=()=>new Promise(resolve=>{complete=resolve;});
+  const pending=ctrl.applyVideo([{type:"undo"}]);
+  assert.equal(ctrl.stop(),true);
+  complete({projectSha256:sha("1"),commands:[{ok:true}]});
+  await assert.rejects(pending,{code:"STOP_UNVERIFIED"});
+  assert.equal(ctrl.getState().recoveryStudio,"video");
+  await ctrl.openMotion("C:\\Owner","real.ecproj");
+  assert.equal(ctrl.getState().motion.composition.id,7);
+  assert.equal(ctrl.getState().needsReload,true);
+  assert.equal(ctrl.getState().recoveryStudio,"video");
+});
+test("stale FilmCraft preview receipt quarantines the affected native Video studio",async()=>{
+  const {ctrl,bridge}=fixture();
+  await ctrl.refreshVideo("C:\\Owner","C:\\Owner\\a.fcproj");
+  bridge.videoPreview=async()=>({projectSha256:sha("9"),pngBytes:[137,80,78,71]});
+  await assert.rejects(ctrl.renderVideo(0),{code:"REVISION_CONFLICT"});
+  assert.equal(ctrl.getState().recoveryStudio,"video");
+  await assert.rejects(ctrl.renderVideo(0),{code:"RELOAD_REQUIRED"});
 });

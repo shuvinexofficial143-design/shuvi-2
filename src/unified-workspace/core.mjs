@@ -156,9 +156,12 @@ export function createWorkspaceController(native) {
       const receipt=await native.videoPreview({selectedRoot:v.root,projectPath:v.projectPath,
         expectedRevision:v.snapshot.sessionRevision,expectedProjectSha256:v.snapshot.projectSha256,
         seconds,scale});
-      if(receipt?.projectSha256!==v.snapshot.projectSha256
-        || !Array.isArray(receipt?.pngBytes)||receipt.pngBytes.length===0)
-        fail("INVALID_RECEIPT","Real FilmCraft frame unavailable or project changed");
+      if(receipt?.projectSha256!==v.snapshot.projectSha256) {
+        set({needsReload:true,recoveryStudio:"video",videoFrame:null});
+        fail("REVISION_CONFLICT","FilmCraft preview uses a different project SHA; refresh required");
+      }
+      if(!Array.isArray(receipt?.pngBytes)||receipt.pngBytes.length===0)
+        fail("INVALID_RECEIPT","Real FilmCraft frame unavailable");
       set({videoFrame:receipt});
       return receipt;
     });
@@ -282,8 +285,10 @@ export function createWorkspaceController(native) {
         layers=await native.motion({action:"listLayers",compId:m.composition.id});
       } catch(error){set({needsReload:true,recoveryStudio:"motion"});throw error;}
       if(!Array.isArray(layers)||!Number.isSafeInteger(after?.projectRevision)
-        ||after.projectRevision<=before.projectRevision)
+        ||after.projectRevision<=before.projectRevision) {
+        set({needsReload:true,recoveryStudio:"motion",motion:{...m,frame:null,inspector:null}});
         fail("INVALID_RECEIPT","EffectCraft edit has no verified revision advance");
+      }
       const current=m.inspector;
       const updatedLayer=current&&layers.find(layer=>layer.id===current.layer.id);
       const changesInspectorData=/^(addEffect|setEffectParameter|toggleEffect|removeEffect|addPolygonMask|setMaskVertex|removeMask|setMaskProperty)$/.test(request.action);
@@ -324,8 +329,10 @@ export function createWorkspaceController(native) {
       const comp=receipt.compositions[0]??null;
       const status=await native.motion({action:"status"});
       const layers=comp?await native.motion({action:"listLayers",compId:comp.id}):[];
+      if(!Array.isArray(layers)||!Number.isSafeInteger(status?.projectRevision))
+        fail("INVALID_RECEIPT","Native project reopened but composition state was not verified");
       set({motion:{ready:true,revision:status.projectRevision,composition:comp,layers,frame:null,dirty:!!status.dirty,inspector:null},
-        needsReload:false,recoveryStudio:null});
+        ...(state.recoveryStudio==="motion"?{needsReload:false,recoveryStudio:null}:{})});
       return receipt;
     },{recover:true,studio:"motion"});
   }
