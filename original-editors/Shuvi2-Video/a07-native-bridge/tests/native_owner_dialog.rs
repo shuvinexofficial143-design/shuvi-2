@@ -70,3 +70,74 @@ fn invisible_control_chars_and_oversized_scope_fail_closed_before_os_modal(){
     time.actions[0]=Action::VideoSplit{clip_id:17,seconds:f64::NAN};
     assert_eq!(scope_review_text(&time).unwrap_err(),"A07_ACTION_INVALID");
 }
+
+use filmcraft_engine::{Session,shuvi_ai_readonly};
+use serde_json::json;
+use shuvi_ai_provider::{
+    guard::{NativeOwner,OwnerConsent,GuardError},
+    host::{GuardedHost,OwnerConsentRequest},
+    plan::{ReserveWire,independently_hash},
+    transactional::TransactionalLedger,
+};
+use shuvi_video_a07_native_bridge::VideoOwner;
+use std::time::{SystemTime,UNIX_EPOCH};
+
+struct ReadPersistedScopeAndDeny {
+    shown:Option<String>,
+    interactions:usize,
+}
+impl OwnerConsent for ReadPersistedScopeAndDeny {
+    fn grant(&mut self,scope:&Scope)->bool {
+        self.interactions+=1;
+        self.shown=scope_review_text(scope).ok();
+        false // Test-only simulated owner DENIAL. Never open Win32 modal in CI.
+    }
+}
+#[test]
+fn real_sqlite_persisted_video_scope_is_shown_exactly_once_and_denied_without_native_edit() {
+    let mut session=Session::default();
+    session.execute("file.openDemoProject",json!({})).unwrap();
+    let at=2*filmcraft_time::TICKS_PER_SECOND;
+    let clip=session.active_sequence().unwrap().video_tracks[0].items.iter()
+        .find(|c|c.start.0<at && at<c.end().0).unwrap().id.0;
+    let mut owner=VideoOwner::new(&mut session,
+        "native-real-project".into(),"native-session-dialog-01".into()).unwrap();
+    let before=owner.snapshot().unwrap();
+    let Version::VideoSha256(sha)=&before.version else {panic!("not video")};
+    let snapshot=json!({"engine":"video","projectId":before.project_id,
+        "sessionId":before.session_id,"version":sha});
+    let task="consent-review-task-01";
+    let plan=json!({"taskId":task,
+        "instruction":"Split the exact native FilmCraft clip at 2 seconds",
+        "snapshot":snapshot,
+        "actions":[{"type":"video.split","clipId":clip,"seconds":2.0}]
+    });
+    let hash=independently_hash(&plan).unwrap();
+    let reserve=ReserveWire{task_id:task.into(),plan_hash:hash.clone(),
+        project:snapshot,plan};
+    let choice=OwnerConsentRequest{task_id:task.into(),plan_hash:hash.clone()};
+    let base=std::env::temp_dir().join(format!("shuvi-a16-{}-{}",
+        std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir(&base).unwrap();
+    {
+        let mut ledger=TransactionalLedger::open(&base.join("consent.sqlite3")).unwrap();
+        let mut host=GuardedHost{ledger:&mut ledger,owner:&mut owner};
+        host.reserve(&reserve).unwrap();
+        let mut ui=ReadPersistedScopeAndDeny{shown:None,interactions:0};
+        assert_eq!(host.request_consent(&choice,&mut ui).unwrap()["granted"],false);
+        assert_eq!(ui.interactions,1);
+        let text=ui.shown.unwrap();
+        assert!(text.contains("Split the exact native FilmCraft clip at 2 seconds"));
+        assert!(text.contains(&format!("Split clip {clip} at 2 seconds")));
+        assert!(text.contains(task));
+        assert!(text.contains(&hash));
+        assert_eq!(host.owner.snapshot().unwrap(),before);
+        assert_eq!(host.request_consent(&choice,&mut ReadPersistedScopeAndDeny {
+            shown:None,interactions:0
+        }).unwrap_err(),GuardError::AlreadyExists);
+        assert_eq!(ledger.recovery_bound(task,&hash).unwrap(),vec!["not_started"]);
+    }
+    assert_eq!(owner.snapshot().unwrap(),before);
+    drop(owner);
+    std::fs::remove_dir_all(base).unwrap();
+}
