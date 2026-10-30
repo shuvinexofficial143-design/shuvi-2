@@ -8,10 +8,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use shuvi_ai_provider::{
     guard::{GuardError, NativeOwner, Snapshot},
-    host::GuardedHost,
+    host::{GuardedHost,OwnerConsentRequest},
     transactional::TransactionalLedger,
 };
-use crate::VideoOwner;
+use crate::{VideoOwner,native_consent::WindowsNativeOwnerConsent};
 
 #[derive(Debug)]
 pub enum AdmissionError {
@@ -116,6 +116,26 @@ impl NativeVideoAdmission {
             &mut owner, self.project_id.clone(), bound_id
         ).map_err(AdmissionError::Native)?;
         bridge.snapshot().map_err(AdmissionError::Native)
+    }
+
+    /// V-AI16 REAL trusted Win32 consent entry point. This method can ONLY
+    /// be called by native Rust integration, never by a JS/WebView command.
+    /// The stored A07 scope is fetched and compared to the current original
+    /// FilmCraft native owner before an OS YES/NO dialog is opened.
+    ///
+    /// WARNING: this isolated crate is NOT wired into the production egui
+    /// editor; that migration must be completed before live AI editing.
+    pub fn request_windows_native_consent(
+        &self,
+        ledger:&mut TransactionalLedger,
+        task_id:String,
+        plan_hash:String,
+    ) -> Result<Value,AdmissionError> {
+        let request=OwnerConsentRequest{task_id,plan_hash};
+        self.with_guarded_a07(ledger,|host|{
+            let mut ui=WindowsNativeOwnerConsent;
+            host.request_consent(&request,&mut ui)
+        })
     }
 
     /// Reserve, owner consent and all A07 mutations hold the SAME native lock
