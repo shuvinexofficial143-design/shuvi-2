@@ -1320,6 +1320,47 @@ mod tests{
     }
 
     #[test]
+    fn integrated_desktop_handoff_contract_does_not_forge_production_capabilities(){
+        // A JSON manifest is documentation, NEVER the trusted owner authority.
+        // Compare it with the actual pinned 2.0.3 Director's NOT READY contract.
+        let c:Value=serde_json::from_str(include_str!("../integration-contract.json")).unwrap();
+        assert_eq!(c["schemaVersion"],1);
+        assert_eq!(c["runtimeIntegration"],"isolated-test-harness-only");
+        assert_eq!(c["aiDirector"]["pinnedSourceCommit"],
+            "64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4");
+        assert_eq!(c["nativeEditor"]["engine"],"EffectCraft");
+        assert_eq!(c["nativeEditor"]["projectFormat"],".ecproj");
+        assert_eq!(c["editorRelease"]["sqliteBridgeBundled"],false);
+        assert_eq!(c["editorRelease"]["productionAiEditingEnabled"],false);
+        let caps=unintegrated_capabilities();
+        assert_eq!(caps.version,1);
+        let expected=[
+            ("nativeGuarded",caps.native_guarded),
+            ("sameOwnerAsManual",caps.same_owner_as_manual),
+            ("ownerConsent",caps.owner_consent),
+            ("durableIdempotency",caps.durable_idempotency),
+            ("independentObjectReadback",caps.independent_object_readback)
+        ];
+        for (key,actual) in expected {
+            assert!(!actual,"no positive runtime capability without a real integrated owner");
+            assert_eq!(c["runtimeCapabilities"][key],false,
+                "integration handoff must not unlock a production gate");
+        }
+        let supported=c["supportedTypedActions"].as_array().unwrap();
+        let actual=["motion.createComposition","motion.addText","motion.editText",
+            "motion.addShape","motion.setTransform","motion.addEffect",
+            "motion.setMaskProperty"];
+        assert_eq!(supported.len(),actual.len());
+        for (i,name) in actual.iter().enumerate(){
+            assert_eq!(supported[i],*name);
+        }
+        assert_eq!(c["limitedShapeKinds"],json!(["rect","rounded","ellipse"]));
+        assert_eq!(c["effectMap"]["gaussianBlur"],"ec.blur.gaussian");
+        assert_eq!(c["effectMap"]["brightnessContrast"],"ec.color.brightnesscontrast");
+        assert!(c["desktopIntegrationRequirements"].as_array().unwrap().len()>=9);
+    }
+
+    #[test]
     fn native_inventory_uses_real_session_ids_without_paths(){
         let mut s=Session::new();
         let comp=from_comp(&mut s);
