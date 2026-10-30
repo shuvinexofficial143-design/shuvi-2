@@ -3,6 +3,24 @@ import {createWorkspaceController,clipsFromSequence,type WorkspaceNative,type Wo
 import {nativeWorkspaceBridge} from "../unified-workspace/native";
 import "./workspace.css";
 
+function mediaFromNativeProject(project:unknown):{id:number;name:string}[]{
+  const entries:{id:number;name:string}[]=[];const seen=new Set<number>();
+  function walk(bin:unknown):void{
+    if(!bin||typeof bin!=="object")return;
+    const kids=(bin as {children?:unknown}).children;
+    if(!Array.isArray(kids))return;
+    for(const node of kids){
+      if(!node||typeof node!=="object")continue;
+      const item=node as Record<string,unknown>;
+      if(typeof item.item==="number" && Number.isSafeInteger(item.item) && item.item>0){
+        if(!seen.has(item.item)&&!/sequence/i.test(String(item.type??""))){
+          seen.add(item.item);entries.push({id:item.item,name:String(item.name??"Media")});
+        }
+      }else walk(node);
+    }
+  }
+  walk((project as {root?:unknown}|null)?.root);return entries;
+}
 export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=nativeWorkspaceBridge){
   if(root.dataset.shuviWorkspace==="mounted")throw Error("Unified workspace already mounted");
   root.dataset.shuviWorkspace="mounted";
@@ -19,7 +37,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<button data-act="video-new">Create sequence</button>',
     '<label>Media source<input data-field="source"></label>',
     '<button data-act="video-import">Import real media</button>',
-    '<label>Imported media ID<input type="number" min="1" data-field="mediaId"></label>',
+    '<label>Native media library<select data-field="mediaId"><option value="">Open project first</option></select></label>',
     '<label>Track<input data-field="track" value="V1"></label>',
     '<button data-act="video-place">Place on timeline</button></section>',
     '<section data-panel="motion" hidden>',
@@ -78,8 +96,8 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
   const f=(name:string)=>node<HTMLInputElement>('[data-field="'+name+'"]');
   const s=(name:string)=>f(name).value.trim();
   const n=(name:string)=>Number(s(name));
-  let selectedClip:number|null=null,selectedLayer:number|null=null,seenVideo:unknown=null,seenLayers:unknown=null;
-  let priorFrame:unknown=null,priorStudio="",objectUrl:string|null=null,seenChat=-1,disposed=false;
+  let selectedClip:number|null=null,selectedLayer:number|null=null,seenVideo:string|null=null,seenLayers:string|null=null;
+  let priorFrameKey="",objectUrl:string|null=null,seenChat=-1,disposed=false;
   const frame=node<HTMLImageElement>('[data-ui="frame"]');
   const clearFrame=()=>{
     if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null;}
@@ -87,8 +105,14 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
   };
   const refreshFrame=(state:WorkspaceState)=>{
     const receipt=state.studio==="video"?state.videoFrame:state.motion.frame;
-    if(receipt===priorFrame&&priorStudio===state.studio)return;
-    priorFrame=receipt;priorStudio=state.studio;clearFrame();
+    const key=!receipt?"":state.studio==="video"?
+      "video:"+(receipt as {projectSha256:string;seconds?:number;pngBytes:number[]}).projectSha256+
+      ":"+(receipt as {seconds?:number}).seconds:
+      "motion:"+(receipt as {revision:number;checksum?:string}).revision+":"+
+      (receipt as {checksum?:string}).checksum;
+    const identity=state.studio+":"+key;
+    if(identity===priorFrameKey)return;
+    priorFrameKey=identity;clearFrame();
     if(!receipt)return;
     if(state.studio==="video"){
       const bytes=(receipt as {pngBytes:number[]}).pngBytes;
@@ -123,16 +147,26 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       else if(key==="approve"||key==="reject")button.disabled=state.busy;
       else button.disabled=state.busy||(state.needsReload&&!["video-open","motion-status","motion-open"].includes(key));
     });
-    if(state.video?.snapshot!==seenVideo){
-      seenVideo=state.video?.snapshot??null;selectedClip=null;
+    const videoKey=state.video?state.video.projectPath+":"+state.video.snapshot.projectSha256:null;
+    if(videoKey!==seenVideo){
+      seenVideo=videoKey;selectedClip=null;
       const timeline=node('[data-ui="clips"]');timeline.replaceChildren();
       const clips=clipsFromSequence(state.video?.snapshot.sequence);
       if(!clips.length)timeline.textContent="No real FilmCraft clips";
+      const media=node<HTMLSelectElement>('[data-field="mediaId"]');
+      const previouslySelected=media.value;media.replaceChildren();
+      const empty=document.createElement("option");empty.value="";empty.textContent="Select imported media";media.append(empty);
+      for(const item of mediaFromNativeProject(state.video?.snapshot.project)){
+        const option=document.createElement("option");option.value=String(item.id);
+        option.textContent=item.name+" (#"+item.id+")";media.append(option);
+      }
+      if([...media.options].some(option=>option.value===previouslySelected))media.value=previouslySelected;
       for(const c of clips){const button=document.createElement("button");button.type="button";
         button.dataset.clip=String(c.clipId);button.textContent=c.track+" · "+c.name+" · "+c.start.toFixed(2)+"s";timeline.append(button);}
     }
-    if(state.motion.layers!==seenLayers){
-      seenLayers=state.motion.layers;selectedLayer=null;
+    const layerKey=state.motion.composition?.id+":"+state.motion.revision;
+    if(layerKey!==seenLayers){
+      seenLayers=layerKey;selectedLayer=null;
       const layers=node('[data-ui="layers"]');layers.replaceChildren();
       if(!state.motion.layers.length)layers.textContent="No native layers";
       for(const layer of state.motion.layers){const button=document.createElement("button");button.type="button";
