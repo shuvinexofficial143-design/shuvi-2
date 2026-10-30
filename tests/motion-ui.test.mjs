@@ -7,6 +7,9 @@ const ts=read("src/studios/motion/bootstrap.ts");
 const ipc=read("src-tauri/src/motion/mod.rs");
 const lib=read("src-tauri/src/lib.rs");
 const cargo=read("src-tauri/Cargo.toml");
+const desktopE2e=read("tests/motion/desktop-e2e.mjs");
+const windowsRunner=read("scripts/motion/run-windows-e2e.ps1");
+const motionCi=read(".github/workflows/motion-smoke.yml");
 
 test("Motion lives in existing Shuvi single window without injecting a second editor",()=>{
   assert.match(html, /src\/main\.ts/);
@@ -102,4 +105,31 @@ test("stale native responses cannot draw in an unmounted window or wrong playhea
   assert.ok(ts.includes('if(!mounted||generation!==uiGeneration||activeComp?.id!==comp.id||currentTime!==frameTime)return;'));
   assert.ok(ts.includes('if(!mounted)return;'));
   assert.ok(ts.includes('if(activeComp)await afterEdit();'));
+});
+
+test("M10 WebView2 E2E actually launches Shuvi Tauri exe and performs mouse clicks",()=>{
+  assert.ok(desktopE2e.includes('browserName:"wry"'),"must launch real Tauri WebView");
+  assert.ok(desktopE2e.includes('tauri:options'),"must provide app binary");
+  assert.ok(desktopE2e.includes('button[data-studio="motion"]'));
+  for(const action of ["#motion-create","#motion-add-shape","#motion-add-effect",
+    "#motion-add-mask","#motion-save","#motion-export-png"]){
+    assert.ok(desktopE2e.includes(action),"real E2E is missing click "+action);
+  }
+  assert.ok(desktopE2e.includes("motion-windows-webview2.png"));
+  assert.ok(desktopE2e.includes("webview_e2e.ecproj"));
+  assert.ok(windowsRunner.includes("cargo install tauri-driver --locked"));
+  assert.ok(windowsRunner.includes("msedgedriver-tool"));
+  assert.ok(motionCi.includes("motion-desktop-e2e-windows:"));
+  assert.ok(motionCi.includes("cargo build --manifest-path src-tauri/Cargo.toml --bin shuvi2"));
+  assert.ok(motionCi.includes("needs: motion-engine-windows"));
+  assert.ok(motionCi.includes("shuvi-motion-windows-webview2-e2e"));
+});
+test("M10 scrubbing and native worker backpressure have bounded queues",()=>{
+  assert.ok(ts.includes("let pendingPreview = false;"));
+  assert.ok(ts.includes("function scheduleNativePreview():void"));
+  assert.ok(ts.includes("pendingPreview=true;return;"));
+  assert.ok(ts.includes("pendingPreview=false;"));
+  assert.ok(ipc.includes("mpsc::sync_channel(MAX_PENDING)"));
+  assert.ok(ipc.includes("Err(TrySendError::Full(_))"));
+  assert.ok(ipc.includes("Instant::now()>=work.deadline"));
 });
