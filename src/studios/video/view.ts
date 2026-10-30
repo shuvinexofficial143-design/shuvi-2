@@ -1,5 +1,6 @@
 import "./view.css";
 import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
+import {requestVideoAiProposal} from "./ai";
 import { createPreviewCoordinator } from "./scrub.mjs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { probeVideoEngine } from "./engine";
@@ -13,7 +14,7 @@ import { videoKeyboardCommand } from "./keyboard.mjs";
 import { mediaItems, timelineClips, sequenceDuration, sequenceFps, formatTimecode, localWindowsPath, requireNumber, type EditorClip } from "./model.mjs";
 
 /** The FilmCraft UI is owned by Video Studio. No Motion Studio DOM is removed. */
-export function mountVideoStudio(): { setActive(active:boolean):void; proposeChatText(text:string):string } {
+export function mountVideoStudio(): { setActive(active:boolean):void; proposeChatText(text:string):Promise<string> } {
   const preview=document.querySelector<HTMLElement>(".preview");
   const timeline=document.querySelector<HTMLElement>(".timeline");
   if(!preview||!timeline)throw Error("Missing Shuvi Studio mount");
@@ -43,6 +44,13 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
       <div class="v-monitor"><img data-v="image" alt="Real FilmCraft Program frame" hidden><span data-v="empty">Frame preview pending · click Render Frame after placing footage</span></div>
       <div class="v-options">
         <label>Imported media<select data-v="media"><option value="">Import first</option></select></label>
+        <label>Chat command source<select data-v="chatMode">
+          <option value="local">Local typed commands (no AI)</option>
+          <option value="openai">OpenAI real model (review required)</option>
+        </select></label>
+        <label>OpenAI API key (optional if OPENAI_API_KEY set)
+          <input data-v="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Session only · not saved">
+        </label>
         <label>Sequence Width<input data-v="width" type="number" value="1280" step="1" min="16" max="7680"></label>
         <label>Sequence Height<input data-v="height" type="number" value="720" step="1" min="16" max="4320"></label>
         <label>Sequence FPS<input data-v="fps" type="number" value="30" step="1" min="1" max="120"></label>
@@ -280,21 +288,61 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     if(after.projectSha256!==response.projectSha256)throw Error("Post-edit state changed unexpectedly; refresh/replan");
     inform("Verified "+action.type+" · backup: "+response.backupPath);
   }
-  function proposeChatText(text:string):string {
+  async function proposeChatText(text:string):Promise<string> {
     if(!active||busy||!snapshot)return "Open a real FilmCraft Video project before proposing a chat command.";
-    const plan=parseVideoChat(text,{
-      selectedRoot:value("root"),projectPath:value("project"),projectSha256:snapshot.projectSha256,
+    // Copy the active state before any asynchronous model call; no edit may
+    // happen while a proposal is being planned, and switching studio cancels it.
+    const modelMode=e<HTMLSelectElement>("chatMode").value==="openai";
+    const currentProject=snapshot.projectSha256;
+    const selectedRoot=value("root"),projectPath=value("project");
+    const ctx={
+      selectedRoot,projectPath,projectSha256:currentProject,
       clips:clips.map(c=>({clipId:c.clipId,start:c.start,duration:c.duration,kind:c.kind})),
       media:mediaItems(snapshot.project).map(m=>({itemId:m.itemId})),
-      selectedClipId:clipId,selectedMediaId:itemId
-    });
-    if(!plan.ok){clearProposal();return plan.message;}
+      selectedClipId:clipId,selectedMediaId:itemId,
+    };
+    let instruction=text;
+    let explanation="";
+    if(modelMode){
+      busy=true;draw();
+      try{
+        const credential=e<HTMLInputElement>("apiKey").value.trim();
+        const result=await requestVideoAiProposal({
+          prompt:text,apiKey:credential||null,
+          context:{
+            projectSha256:currentProject,clips:ctx.clips,
+            mediaIds:ctx.media.map(m=>m.itemId),
+            selectedClipId:clipId,selectedMediaId:itemId
+          }
+        });
+        if(!active||!snapshot||snapshot.projectSha256!==currentProject||
+          value("root")!==selectedRoot||value("project")!==projectPath){
+          clearProposal();
+          return "Project/studio changed while AI was planning; proposal discarded without execution.";
+        }
+        if(result.projectSha256!==currentProject)throw Error("Model response project digest mismatch");
+        instruction=result.command;
+        explanation=result.reason;
+      }catch(err){
+        clearProposal();
+        return "OpenAI model proposal failed; nothing executed: "+String(err);
+      }finally{busy=false;draw();}
+    }
+    const plan=parseVideoChat(instruction,ctx);
+    if(!plan.ok){
+      clearProposal();
+      return modelMode
+        ?"Model output rejected by the strict FilmCraft command allowlist; no edit executed. "+plan.message
+        :plan.message;
+    }
     pending=plan;
     e<HTMLElement>("chatReview").hidden=false;
-    e<HTMLElement>("chatSummary").textContent=plan.summary+" | SHA "+plan.expectedProjectSha256.slice(0,12);
+    e<HTMLElement>("chatSummary").textContent=(modelMode?"OpenAI model proposes: ":"Local command: ")+
+      plan.summary+" | SHA "+plan.expectedProjectSha256.slice(0,12)+
+      (explanation?" | "+explanation.slice(0,320):"");
     draw();
-    return "Local typed command (not AI): "+plan.summary+
-      ". Click Approve & Run in the Video Timeline; no edit has happened yet.";
+    return (modelMode?"Model-assisted proposal (not executed): ":"Local typed command (not AI): ")+
+      plan.summary+". Review the card and explicitly approve in Video Timeline.";
   }
   async function approveChat():Promise<void>{
     const plan=pending;
@@ -534,7 +582,10 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   draw();
   return {proposeChatText,setActive(next:boolean){
     active=next;
-    if(!next){stopSampledPlayback(true);clearProposal();}
+    if(!next){
+      stopSampledPlayback(true);clearProposal();
+      e<HTMLInputElement>("apiKey").value="";
+    }
     panel.hidden=!next;lane.hidden=!next;
     oldPreview.forEach(n=>{n.hidden=next});
     oldTimeline.forEach(n=>{n.hidden=next});
