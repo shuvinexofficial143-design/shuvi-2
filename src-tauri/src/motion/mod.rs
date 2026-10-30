@@ -31,6 +31,7 @@ pub enum MotionRequest{
     ListMasks { comp_id:u64,layer_id:u64 },
     SetMaskVertex { comp_id:u64,layer_id:u64,uid:u64,index:usize,point:[f64;2] },
     RemoveMask { comp_id:u64,layer_id:u64,uid:u64 },
+    ExportPng { workspace:String,filename:String,comp_id:u64,time:f64,max_side:u32,transparent:bool },
 }
 
 struct Work { request:MotionRequest, respond:Sender<Result<Value,String>> }
@@ -176,6 +177,16 @@ fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
             e.remove_mask(comp_id,layer_id,uid)?;
             Ok(json!({"removed":true,"uid":uid}))
         }
+        MotionRequest::ExportPng{workspace,filename,comp_id,time,max_side,transparent}=>{
+            // Explicit owner-specified existing workspace; bridge refuses clobber/traversal.
+            let receipt=e.export_png_frame(Path::new(&workspace),&filename,
+                comp_id,time,max_side,transparent)?;
+            Ok(json!({"path":receipt.path.to_string_lossy(),"bytes":receipt.bytes,
+                "width":receipt.width,"height":receipt.height,
+                "transparent":receipt.transparent,
+                "verifiedFromDisk":receipt.verified_from_disk,
+                "source":"native-effectcraft"}))
+        }
     }
 }
 
@@ -257,6 +268,28 @@ mod tests{
         assert!(host.execute(MotionRequest::AddEffect{
             comp_id:c,layer_id:l,effect:"userPlugin".into()
         }).is_err());
+    }
+    #[test]
+    fn real_native_png_export_is_verified_and_never_overwrites(){
+        let folder=tempfile::tempdir().unwrap();
+        let host=MotionHost::new();
+        let comp=host.execute(MotionRequest::CreateComposition{
+            name:"Export Native".into(),width:320,height:180,fps:30.0,duration_seconds:2.0
+        }).unwrap()["id"].as_u64().unwrap();
+        host.execute(MotionRequest::AddShape{
+            comp_id:comp,name:"Export Plate".into(),kind:"rect".into(),
+            x:160.0,y:90.0,width:150.0,height:85.0,fill:"#557799".into()
+        }).unwrap();
+        let folder=folder.path().to_string_lossy().to_string();
+        let request=||MotionRequest::ExportPng{
+            workspace:folder.clone(),filename:"native_frame.png".into(),
+            comp_id:comp,time:0.0,max_side:320,transparent:true
+        };
+        let receipt=host.execute(request()).unwrap();
+        assert_eq!(receipt["verifiedFromDisk"],true);
+        assert_eq!(receipt["source"],"native-effectcraft");
+        assert!(std::path::Path::new(receipt["path"].as_str().unwrap()).exists());
+        assert!(host.execute(request()).is_err());
     }
     #[test]
     fn frontend_json_contract_uses_only_typed_camel_case_actions(){
