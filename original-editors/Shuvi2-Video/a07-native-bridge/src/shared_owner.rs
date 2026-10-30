@@ -60,6 +60,20 @@ impl NativeVideoAdmission {
         owner.execute(id,params).map_err(|e|AdmissionError::Native(e.to_string()))
     }
 
+
+    /// Admission for native manual timeline gestures that call FilmCraft
+    /// Session::edit_sequence/edit_group directly, bypassing command registry.
+    /// Must be used from the future production GUI panel/drag/tool hooks.
+    /// The closure borrows the exact same Session as canonical A07; a nested
+    /// manual gesture returns Busy while A07 owns the mutex.
+    pub fn with_manual_session<R>(
+        &self,
+        operation: impl FnOnce(&mut Session)->Result<R,String>,
+    ) -> Result<R,AdmissionError> {
+        let mut owner=self.acquire()?;
+        operation(&mut owner).map_err(AdmissionError::Native)
+    }
+
     /// Return local native data for building a test or displaying a consent
     /// plan, while the original Session is under the SAME admission gate.
     pub fn native_readback(&self)

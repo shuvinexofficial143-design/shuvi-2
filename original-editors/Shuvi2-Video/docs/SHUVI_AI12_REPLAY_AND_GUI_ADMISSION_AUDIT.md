@@ -29,3 +29,8 @@ V-AI11 first SHA df165a725b42902fc6848a0dc61a76cceac9a73b had independently fini
 
 ## Testing
 `cargo test --manifest-path original-editors/Shuvi2-Video/a07-native-bridge/Cargo.toml --test shared_owner_admission -- --nocapture` (Windows CI also runs all bridge tests). Only report PASS once the exact new commit's job finishes.
+
+## Direct FilmCraft editing path admitted in isolated gate
+V-AI12 adds `NativeVideoAdmission::with_manual_session` for **trusted** native gestures which invoke `Session::edit_sequence`, `Session::edit_group`, or other direct FilmCraft mutation methods without passing through `Session::execute`. This is the same mutex as A07 reserve/consent/action. Regression tests attempt a real native `filmcraft_edit::razor_items` while the A07 gate owns the Session (must return Busy and not change project SHA), then perform the direct razor under manual admission after a SQLite plan reservation (must change SHA, and make the pending A07 owner consent fail StaleProject with no prompt or edit intent).
+
+The new method deliberately accepts a trusted Rust closure and is not exposed as a model- or JSON-controlled dispatcher. Its presence in the isolated bridge **does not** mean that the original production FilmcraftApp has been migrated: the application still has public direct Session access. An admission API alone is not a complete audit of GUI code paths.
