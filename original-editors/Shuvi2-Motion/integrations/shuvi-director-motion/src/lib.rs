@@ -746,6 +746,121 @@ mod tests{
     }
 
     #[test]
+    fn sqlite_guarded_shape_creates_real_geometry_and_verified_fill(){
+        let tmp=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let comp=gate.manual_command("comp.new",json!({
+            "name":"Shape Test","width":640,"height":360,"frameRate":30.0,"duration":5.0
+        })).unwrap()["comp"].as_u64().unwrap();
+        let rev=gate.revision().unwrap();
+        let (p,reserve,consent,bind)=plan(rev,vec![json!({
+            "type":"motion.addShape","compId":comp,"name":"Verified Box",
+            "kind":"rect","x":100.0,"y":90.0,
+            "width":200.0,"height":120.0,"fill":"#3366cc"
+        })]);
+        let mut db=tmp.open();
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            host.reserve(&reserve).unwrap();
+            host.request_consent(&consent,&mut TestOwnerConsent{count:0,yes:true}).unwrap();
+            let receipt=host.execute(wire(&p,0,rev)).unwrap();
+            assert_eq!(receipt["nativeVerified"],true);
+            assert_eq!(receipt["objectProofSha256"].as_str().unwrap().len(),64);
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["verified"]));
+        }).unwrap();
+        gate.with_native_owner(|owner|{
+            let comp=owner.session.project.comp(ItemId(comp)).unwrap();
+            let layer=comp.layers.iter().find(|l|l.name=="Verified Box").unwrap();
+            assert!(matches!(layer.source,LayerSource::Shape));
+            assert!(layer.props.group("contents").unwrap().groups().count()>0);
+        }).unwrap();
+    }
+
+    #[test]
+    fn real_sqlite_transform_then_effect_both_have_independent_native_proofs(){
+        let tmp=TestDb::new();
+        let gate=ExclusiveMotionSession::new(Session::new(),
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let comp=gate.manual_command("comp.new",json!({
+            "name":"Effect Test","width":640,"height":360,"frameRate":30.0,"duration":5.0
+        })).unwrap()["comp"].as_u64().unwrap();
+        let layer=gate.manual_command("layer.newText",json!({
+            "name":"Fx Target","text":"Blur me","size":44.0
+        })).unwrap()["layer"].as_u64().unwrap();
+        let rev=gate.revision().unwrap();
+        let (p,reserve,consent,bind)=plan(rev,vec![
+            json!({"type":"motion.setTransform","compId":comp,"layerId":layer,
+                "kind":"position","x":100.0,"y":80.0,"value":null}),
+            json!({"type":"motion.addEffect","compId":comp,"layerId":layer,
+                "effect":"gaussianBlur"})
+        ]);
+        let mut db=tmp.open();
+        gate.with_native_owner(|owner|{
+            let mut host=GuardedHost{ledger:&mut db,owner};
+            host.reserve(&reserve).unwrap();
+            host.request_consent(&consent,&mut TestOwnerConsent{count:0,yes:true}).unwrap();
+            let transformed=host.execute(wire(&p,0,rev)).unwrap();
+            assert_eq!(transformed["nativeVerified"],true);
+            let next=transformed["after"]["version"].as_u64().unwrap();
+            assert!(next>rev);
+            let effect=host.execute(wire(&p,1,next)).unwrap();
+            assert_eq!(effect["nativeVerified"],true);
+            assert_ne!(transformed["objectProofSha256"],effect["objectProofSha256"]);
+            assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["verified","verified"]));
+        }).unwrap();
+        gate.with_native_owner(|owner|{
+            let l=owner.session.project.comp(ItemId(comp)).unwrap()
+                .layer(LayerId(layer)).unwrap();
+            assert!(l.effects().unwrap().groups().any(|fx|fx.match_id=="ec.blur.gaussian"));
+            let position=l.props.prop("transform/position").unwrap();
+            assert!(matches!(&position.value,
+                effectcraft_engine::keyframe::Value::Vec3(v)
+                    if (v[0]-100.0).abs()<1e-5&&(v[1]-80.0).abs()<1e-5));
+        }).unwrap();
+        assert_eq!(tmp.open().recovery("realmotion1234").unwrap(),vec!["verified","verified"]);
+    }
+
+    #[test]
+    fn shape_unsupported_polygon_does_not_write_sqlite_intent_or_project(){
+        let tmp=TestDb::new();let mut s=Session::new();
+        let comp=from_comp(&mut s);
+        let rev=s.revision;
+        let (p,reserve,consent,bind)=plan(rev,vec![json!({
+            "type":"motion.addShape","compId":comp,"name":"Reject polygon",
+            "kind":"polygon","x":1.0,"y":2.0,"width":60.0,
+            "height":60.0,"fill":"#ffcc00"
+        })]);
+        let mut db=tmp.open();
+        let mut owner=EffectcraftNativeOwner::new(&mut s,"native-test.ecproj".into(),
+            "native-session-test-1234".into()).unwrap();
+        let mut host=GuardedHost{ledger:&mut db,owner:&mut owner};
+        host.reserve(&reserve).unwrap();
+        host.request_consent(&consent,&mut TestOwnerConsent{count:0,yes:true}).unwrap();
+        assert_eq!(host.execute(wire(&p,0,rev)).unwrap_err(),GuardError::Invalid);
+        assert_eq!(host.recover(&bind).unwrap()["steps"],json!(["not_started"]));
+        drop(host);drop(owner);
+        assert!(s.project.comp(ItemId(comp)).unwrap().layers.is_empty());
+    }
+
+    #[test]
+    fn unknown_effect_and_unchanged_transform_fail_before_native_intent(){
+        let mut s=Session::new();
+        let comp=from_comp(&mut s);
+        let layer=s.execute_checked("layer.newText",json!({"name":"Plain","text":"Text"}))
+            .unwrap()["layer"].as_u64().unwrap();
+        let mut owner=EffectcraftNativeOwner::new(&mut s,"native-test.ecproj".into(),
+            "native-session-test-1234".into()).unwrap();
+        assert!(!owner.preflight_action(&Action::MotionAddEffect {
+            comp_id:comp,layer_id:layer,effect:"nonexistent".into()
+        }).unwrap());
+        assert!(!owner.preflight_action(&Action::MotionSetTransform{
+            comp_id:comp,layer_id:layer,kind:"opacity".into(),
+            x:None,y:None,value:Some(100.0)
+        }).unwrap());
+    }
+
+    #[test]
     fn real_ai_director_provider_accepts_only_native_bounded_inventory(){
         use shuvi_ai_provider::{NativeModelRequest,build_request};
         let mut s=Session::new();
