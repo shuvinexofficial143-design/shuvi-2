@@ -68,6 +68,10 @@ jobs:
         run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-advanced-proof
         env:
           SHUVI_MOTION_PROOF_DIR: proof/motion
+      - name: Verify native Undo/Redo pixels and fresh project reopen
+        run: cargo run --manifest-path crates/shuvi-motion-bridge/Cargo.toml --bin motion-history-proof
+        env:
+          SHUVI_MOTION_PROOF_DIR: proof/motion
       - name: Upload native project and preview frames
         uses: actions/upload-artifact@v4
         with:
