@@ -10,6 +10,7 @@ const lib=read("src-tauri/src/lib.rs");
 const cargo=read("src-tauri/Cargo.toml");
 const desktopE2e=read("tests/motion/desktop-e2e.mjs");
 const windowsRunner=read("scripts/motion/run-windows-e2e.ps1");
+const windowsProof=read("scripts/motion/verify-desktop-proof.ps1");
 const motionCi=read(".github/workflows/motion-smoke.yml");
 const pkgConfig=JSON.parse(read("src-tauri/src/motion/tauri.release.conf.json"));
 const releaseRunner=read("scripts/motion/package-windows-release.ps1");
@@ -200,4 +201,20 @@ test("M13 preflight rejects malformed async WebDriver scripts before production 
   const prefix=motionCi.indexOf("Preflight validate desktop WebDriver JavaScript");
   const build=motionCi.indexOf("Build actual Tauri Windows binary with embedded production UI");
   assert.ok(prefix!==-1&&build>prefix,"syntax preflight must precede production compile");
+});
+
+test("M13 release gate independently verifies exact native desktop WebView screenshots",()=>{
+  assert.ok(motionCi.includes("run: ./scripts/motion/verify-desktop-proof.ps1"));
+  const proofStart=motionCi.indexOf("Independently verify actual GUI screenshot");
+  const uploadStart=motionCi.indexOf("Upload real desktop screenshot");
+  assert.ok(proofStart>=0 && uploadStart>proofStart);
+  assert.ok(windowsProof.includes("coldRestartVerified"));
+  assert.ok(windowsProof.includes("undoRedoVerified"));
+  assert.ok(windowsProof.includes("nativeEffectCraftPin"));
+  assert.ok(windowsProof.includes("Get-Content -LiteralPath"));
+  assert.ok(windowsProof.includes("GITHUB_SHA"));
+  assert.ok(windowsProof.includes("coldRestartSha256"));
+  assert.ok(windowsProof.includes("m11_03-cold-reopened-project.png"));
+  assert.ok(windowsProof.includes("motion-windows-webview2.png"));
+  assert.ok(motionCi.includes("needs: motion-desktop-e2e-windows"));
 });
