@@ -30,7 +30,7 @@ test("all manual editing actions go through native Tauri command",()=>{
     "status","createComposition","listLayers","addText","addShape",
     "setTransform","addKey","easeKeys","render","saveProject","openProject",
     "addEffect","listEffects","setEffectParameter","toggleEffect","removeEffect",
-    "addPolygonMask","listMasks","setMaskVertex","removeMask"
+    "addPolygonMask","listMasks","setMaskVertex","removeMask","exportPng"
   ];
   for(const action of actions){
     assert.ok(ts.includes('action:"'+action+'"'),"UI request not wired for "+action);
@@ -63,4 +63,12 @@ test("M08 native effect and mask UI is visibly connected to typed IPC",()=>{
   assert.match(ipc, /e\.remove_mask\(/);
   assert.match(ipc, /userPlugin/);
   assert.doesNotMatch(ts,/eval\(|window\.open\(/);
+});
+
+test("PNG frame export uses owner-scoped native bytes not browser-drawn fake output",()=>{
+  assert.ok(ts.includes('motion-export-png'));
+  assert.ok(ts.includes('motion-png-filename'));
+  assert.match(ts,/action:"exportPng"/);
+  assert.match(ipc,/e\.export_png_frame\(/);
+  assert.match(ipc,/verifiedFromDisk/);
 });
