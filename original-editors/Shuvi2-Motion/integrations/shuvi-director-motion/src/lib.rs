@@ -215,6 +215,42 @@ impl<'a> EffectcraftNativeOwner<'a> {
         }
     }
 
+    /// Resolve one leaf in an EXACT mask UID belonging to the exact native
+    /// composition/layer. No selected-layer fallback or cross-layer UID search.
+    fn mask_leaf(&self,comp_id:u64,layer_id:u64,uid:u64,property:&str)
+        ->Result<&effectcraft_engine::project::Property,String>{
+        let l=self.session.project.comp(ItemId(comp_id))
+            .and_then(|c|c.layer(LayerId(layer_id))).ok_or("mask layer missing")?;
+        if l.switches.locked {return Err("mask layer is locked".into());}
+        let group=l.masks().and_then(|m|m.groups().find(|g|g.uid==uid))
+            .ok_or("mask UID does not belong to this native layer")?;
+        let p=group.get(property).ok_or("unsupported mask property")?;
+        if !p.keys.is_empty()||p.expr.is_some(){
+            return Err("keyframed or expression-based mask is not supported".into());
+        }
+        Ok(p)
+    }
+
+    fn mask_readback(&self,comp_id:u64,layer_id:u64,uid:u64,
+        property:&str,value:f64)->Result<Value,String>{
+        let leaf=self.mask_leaf(comp_id,layer_id,uid,property)?;
+        let actual=match (&leaf.value,property){
+            (effectcraft_engine::keyframe::Value::Vec2(pair),"feather")=>{
+                if pair.iter().any(|v|(*v-value).abs()>1e-5){
+                    return Err("native feather dimensions disagree".into());
+                }
+                json!(pair)
+            }
+            (effectcraft_engine::keyframe::Value::Scalar(v),"opacity"|"expansion")=>{
+                if (*v-value).abs()>1e-5{return Err("native mask value mismatch".into());}
+                json!(v)
+            }
+            _=>return Err("native mask value type mismatch".into()),
+        };
+        Ok(json!({"kind":"maskProperty","compId":comp_id,"layerId":layer_id,
+            "maskUid":uid,"propertyUid":leaf.uid,"property":property,"observed":actual}))
+    }
+
     /// Independent readback after executing a native EffectCraft command.
     /// Values are read from the live Project, NOT from the command JSON.
     fn inspect_actual_object(&self,action:&Action)->Result<Value,String>{
@@ -274,6 +310,8 @@ impl<'a> EffectcraftNativeOwner<'a> {
                     "layerId":layer_id,"effectUid":uid,
                     "effectId":group.match_id,"name":group.name}))
             },
+            Action::MotionSetMaskProperty{comp_id,layer_id,uid,property,value} =>
+                self.mask_readback(*comp_id,*layer_id,*uid,property,*value),
             _=>Err("unsupported native Motion action".into())
         }
     }
@@ -305,6 +343,10 @@ impl<'a> EffectcraftNativeOwner<'a> {
                 let id=Self::effect_id(effect).ok_or("effect not allowed by original engine")?;
                 Ok(("effect.apply",json!({"layers":[layer_id],"effect":id})))
             }
+            // UID is resolved from the actual native mask group in preflight
+            // and apply. Never let the model supply a direct prop UID.
+            Action::MotionSetMaskProperty{..} =>
+                Err("native mask requires owner-resolved property UID".into()),
             _ => Err("typed action unsupported by native bridge".into()),
         }
     }
@@ -372,11 +414,39 @@ impl NativeOwner for EffectcraftNativeOwner<'_> {
                     effectcraft_engine::effects::lookup(id).is_some()
                 } else {false}
             },
+            Action::MotionSetMaskProperty{comp_id,layer_id,uid,property,value}=>{
+                let valid_range=match property.as_str(){
+                    "feather"=>(0.0..=8192.0).contains(value),
+                    "opacity"=>(0.0..=100.0).contains(value),
+                    "expansion"=>(-8192.0..=8192.0).contains(value),
+                    _=>false,
+                };
+                if self.session.active_comp_id()!=Some(ItemId(*comp_id))||!valid_range{
+                    false
+                }else{
+                    self.mask_leaf(*comp_id,*layer_id,*uid,property)
+                        .is_ok_and(|p|match (&p.value,property.as_str()){
+                            (effectcraft_engine::keyframe::Value::Vec2(pair),"feather")=>
+                                pair.iter().any(|a|(*a-*value).abs()>1e-6),
+                            (effectcraft_engine::keyframe::Value::Scalar(v),"opacity"|"expansion")=>
+                                (*v-*value).abs()>1e-6,
+                            _=>false
+                        })
+                }
+            },
             _=>false,
         };
         if !valid{return Ok(false);}
         // Real native schema; unknown/extra parameters are rejected.
-        let (cmd,params)=Self::command(action)?;
+        // Mask property UID must be RESOLVED from the real layer by this
+        // owner, never accepted from the model or renderer as a leaf target.
+        let (cmd,params)=if let Action::MotionSetMaskProperty{
+            comp_id,layer_id,uid,property,value
+        }=action {
+            let leaf=self.mask_leaf(*comp_id,*layer_id,*uid,property)?;
+            ("prop.set",json!({"layer":layer_id,"prop":leaf.uid,
+                "value":if property=="feather"{json!([value,value])}else{json!(value)}}))
+        } else {Self::command(action)?};
         let spec=effectcraft_engine::commands::find(cmd).ok_or("command not found")?;
         if !spec.journal {return Ok(false);}
         effectcraft_engine::commands::check_params(spec,&params).map_err(|e|e.to_string())?;
@@ -384,7 +454,13 @@ impl NativeOwner for EffectcraftNativeOwner<'_> {
     }
     fn apply(&mut self,action:&Action)->Result<(),String>{
         if !self.preflight_action(action)? {return Err("preflight rejected".into());}
-        let (cmd,params)=Self::command(action)?;
+        let (cmd,params)=if let Action::MotionSetMaskProperty{
+            comp_id,layer_id,uid,property,value
+        }=action {
+            let leaf=self.mask_leaf(*comp_id,*layer_id,*uid,property)?;
+            let v=if property=="feather"{json!([value,value])}else{json!(value)};
+            ("prop.set",json!({"layer":layer_id,"prop":leaf.uid,"value":v}))
+        } else {Self::command(action)?};
         self.last_action=None;
         self.last_result=None;
         let result=self.session.execute_checked(cmd,params).map_err(|e|e.to_string())?;
