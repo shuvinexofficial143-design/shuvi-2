@@ -177,3 +177,13 @@ test("M12 unsigned Windows NSIS package cannot run until real desktop E2E passes
   assert.ok(releaseRunner.includes("signed = $false"));
   assert.ok(releaseRunner.includes("Git commit SHA"));
 });
+
+test("native owner Ctrl+Z / Ctrl+Shift+Z are scoped away from editing text inputs",()=>{
+  assert.ok(ts.includes('document.addEventListener("keydown"'));
+  assert.ok(ts.includes("event.ctrlKey||event.metaKey"));
+  assert.ok(ts.includes("event.shiftKey"));
+  assert.ok(ts.includes('target.closest(\'input,textarea,select,[contenteditable="true"]\')'));
+  assert.ok(ts.includes("if(button.disabled)return;"));
+  assert.ok(ts.includes("lastHistoryCompId"));
+  assert.ok(ts.includes('action:"inspectComposition"'));
+});
