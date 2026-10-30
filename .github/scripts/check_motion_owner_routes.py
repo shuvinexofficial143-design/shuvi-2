@@ -79,8 +79,11 @@ def main():
                 errors.append("app/frame.rs file watcher bypasses owner admission")
         else:
             count = src.count(GATE)
-            if "app.session.execute(" in src or "app.session.execute_checked(" in src:
-                errors.append(f"Direct native execute reintroduced in {file}")
+            # Test modules intentionally use raw Session methods to create
+            # fixtures. Only shipping code may be rejected as a bypass.
+            runtime_part = re.split(r"(?m)^\\s*#\\[cfg\\(test\\)\\]\\s*\\n\\s*mod\\s+tests\\b", src, maxsplit=1)[0]
+            if "app.session.execute(" in runtime_part or "app.session.execute_checked(" in runtime_part:
+                errors.append(f"Direct native execute reintroduced in shipping code: {file}")
         if count < expected:
             errors.append(f"{file}: expected >= {expected} guarded native commands; got {count}")
         measured[file] = count
