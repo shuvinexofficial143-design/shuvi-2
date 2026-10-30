@@ -27,6 +27,7 @@ pub mod native_menu;
 pub mod panels;
 mod pointer_wrap;
 pub mod prefs_live;
+pub mod shuvi_ai;
 pub mod state;
 pub mod theme;
 pub mod updates_ui;

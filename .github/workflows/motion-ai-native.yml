@@ -1,0 +1,67 @@
+name: Shuvi 2 Motion M-AI01 Native Build
+on:
+  push:
+    branches:
+      - feature/shuvi2-original-motion-ai
+    paths:
+      - original-editors/Shuvi2-Motion/**
+      - .github/workflows/motion-ai-native.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  motion-native:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout this Motion branch commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin native Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-pc-windows-msvc
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: original-editors/Shuvi2-Motion
+          key: native-motion-ai-v1
+      - name: Check real native sources, notices and module wiring
+        shell: pwsh
+        run: |
+          foreach ($p in @(
+            "original-editors/Shuvi2-Motion/apps/effectcraft/src/main.rs",
+            "original-editors/Shuvi2-Motion/crates/ui-egui/src/shuvi_ai.rs",
+            "original-editors/Shuvi2-Motion/NOTICE",
+            "original-editors/Shuvi2-Motion/ATTRIBUTION.md"
+          )) { if (!(Test-Path $p)) { throw "Missing source or legal notice: $p" } }
+          if (!(Select-String -Path original-editors/Shuvi2-Motion/crates/ui-egui/src/lib.rs -SimpleMatch "pub mod shuvi_ai;")) { throw "Native module not wired" }
+      - name: Run native same-session adapter regression tests
+        shell: pwsh
+        run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_ai::tests -- --nocapture
+      - name: Build native Windows EffectCraft from OWN branch source
+        shell: pwsh
+        run: cargo build --release --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft
+      - name: Package real compiled binary with attribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force own-motion | Out-Null
+          $src = "original-editors/Shuvi2-Motion/target/release/effectcraft.exe"
+          if (!(Test-Path $src)) { throw "Native EXE missing" }
+          Copy-Item $src own-motion/Shuvi2-Motion.exe
+          foreach ($f in @("LICENSE-MIT","LICENSE-APACHE","NOTICE","ATTRIBUTION.md","SHUVI_SOURCE_ORIGIN.txt")) {
+            Copy-Item "original-editors/Shuvi2-Motion/$f" own-motion
+          }
+          Get-FileHash own-motion/Shuvi2-Motion.exe -Algorithm SHA256 | Format-List
+          Compress-Archive -Path own-motion/* -DestinationPath Shuvi2-Motion-MAI01-Win64.zip -Force
+          if ((Get-Item Shuvi2-Motion-MAI01-Win64.zip).Length -lt 5000000) { throw "Invalid ZIP" }
+      - name: Upload OWN Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shuvi2-Motion-MAI01-NativeProbe-Windows-x64
+          path: Shuvi2-Motion-MAI01-Win64.zip
+          retention-days: 14
+          if-no-files-found: error
