@@ -66,3 +66,12 @@
 .su .su-diagnostics p{color:var(--muted);font-size:12px}
 .su .su-diagnostics pre{max-height:290px;overflow:auto;border:1px solid var(--line);padding:12px;border-radius:6px;background:#0a101a;font-size:11px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
 .su button[data-act="video-verify"],.su button[data-act="motion-verify"]{margin-top:7px}
+
+/* U06: native clip inspector and scrollable timeline zoom (view-only). */
+.su .su-clip-inspector{padding:11px 12px;border:1px solid var(--line);border-radius:7px;background:#172234;color:#dceafa;font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.su [data-field="timelineZoom"]{width:100%;min-width:130px;accent-color:#8ab5ff}
+.su [data-ui="zoom-label"]{align-self:end;color:var(--muted);font-size:12px;padding:6px 0}
+.su .su-timeline-row{transition:none}
+.su .su-lane{cursor:crosshair}
+.su .su-lane button{cursor:grab}
+.su .su-lane button:focus-visible{outline:2px solid #a4c8ff;outline-offset:-2px}

@@ -8,6 +8,7 @@ import {createProjectSessionStore} from "../unified-workspace/session.mjs";
 import {describeApprovalState} from "../unified-workspace/approval.mjs";
 import {keyframeReadback} from "../unified-workspace/keyframes.mjs";
 import {nativeDiagnosticText} from "../unified-workspace/diagnostics.mjs";
+import {nativeClipInspector,timelineSeekFromX,splitPreflight} from "../unified-workspace/video-inspector.mjs";
 import "./workspace.css";
 
 export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=nativeWorkspaceBridge){
@@ -61,11 +62,16 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     '<button data-act="video-delete">Delete</button><button data-act="video-undo">Undo</button>',
     '<button data-act="video-redo">Redo</button></div>',
     '<h3>FilmCraft timeline · real drag/readback</h3>',
+    '<div class="su-pair"><label>Timeline zoom <input type="range" data-field="timelineZoom" min="100" max="400" step="25" value="100" aria-label="Timeline zoom percent"></label>',
+    '<span data-ui="zoom-label">100% · display only</span></div>',
     '<div class="su-pair"><label>Move selected to seconds<input data-field="moveTime" type="number" min="0" step=".04" value="0"></label>',
     '<label>Destination track<input data-field="moveTrack" value="V1"></label></div>',
     '<button data-act="video-move">Move selected clip (native)</button>',
     '<div data-ui="timeline-fps" class="su-native-meta">Native FPS not verified; drag disabled</div>',
     '<div data-ui="clips" class="su-timeline">Open project to read native clips</div>',
+    '<h3>Selected FilmCraft clip (native readback)</h3>',
+    '<div data-ui="clip-inspector" class="su-clip-inspector">Select a native timeline clip</div>',
+    '<small>Click an empty timeline lane to seek and request a real FilmCraft frame. Zoom affects display only, never the saved project.</small>',
     '<small class="su-help">Select clip, or drag horizontally on the same native track. Keyboard: S split, Del delete, Ctrl+Z/Y history, ←/→ one frame.</small>',
     '<label>New MP4 output path<input data-field="output"></label>',
     '<button data-act="video-export">Export real MP4</button></section>',
@@ -183,6 +189,20 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     }
     frame.hidden=false;node('[data-ui="noFrame"]').hidden=true;
   };
+  const showSelectedClip=(state:WorkspaceState)=>{
+    const selected=selectedClip===null?null:nativeClipInspector(state,selectedClip);
+    const view=node('[data-ui="clip-inspector"]');
+    if(!selected){view.textContent="Select a native timeline clip";return;}
+    const fnum=(value:number)=>value.toFixed(3)+"s";
+    view.textContent="#"+selected.clipId+" · "+selected.name+" · "+selected.kind.toUpperCase()+
+      " · media #"+selected.itemId+" · "+selected.track+
+      " · "+fnum(selected.start)+"–"+fnum(selected.end)+
+      " · duration "+fnum(selected.duration)+
+      (selected.sourceStartFrame!==null?" · source frame "+selected.sourceStartFrame:"")+
+      (selected.sourceDurationFrames!==null?" · "+selected.sourceDurationFrames+" source frames":"")+
+      (selected.locked?" · NATIVE TRACK LOCKED":"")+
+      (selected.fps===null?" · FPS unavailable":" · "+selected.fps.toFixed(3)+" FPS");
+  };
   const render=(state:WorkspaceState)=>{
     if(disposed)return;
     for(const studio of ["video","motion"]){
@@ -222,7 +242,9 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         (key==="video-verify"&&!state.video)||
         (key==="motion-verify"&&!state.motion.ready);
     });
-    const videoKey=state.video?state.video.projectPath+":"+state.video.snapshot.projectSha256:null;
+    const zoom=Math.max(100,Math.min(400,Number(s("timelineZoom"))||100));
+    node('[data-ui="zoom-label"]').textContent=zoom+"% · display only";
+    const videoKey=state.video?state.video.projectPath+":"+state.video.snapshot.projectSha256+":"+zoom:null;
     if(videoKey!==seenVideo){
       seenVideo=videoKey;
       const timeline=node('[data-ui="clips"]');timeline.replaceChildren();
@@ -245,6 +267,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
       const tracks=[...new Set(clips.map(c=>c.track))].sort((x,y)=>x.localeCompare(y,undefined,{numeric:true}));
       for(const track of tracks){
         const row=document.createElement("div");row.className="su-timeline-row";
+        row.style.minWidth=Math.round(Math.max(390,600*zoom/100))+"px";
         const kind=track.startsWith("V")?"video":"audio";
         const laneNumber=Number(track.slice(1))-1;
         const nativeLane=state.video?.snapshot.sequence?.[kind]?.[laneNumber];
@@ -267,6 +290,7 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         row.append(label,lane);timeline.append(row);
       }
     }
+    showSelectedClip(state);
     const layerKey=state.motion.composition?.id+":"+state.motion.revision;
     if(layerKey!==seenLayers){
       seenLayers=layerKey;
@@ -413,7 +437,12 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         if(!s("moveTime")||!Number.isFinite(n("moveTime")))throw Error("Enter a finite native move time");
         return ctrl.moveVideoClip(clip(),s("moveTrack").toUpperCase(),n("moveTime"));
       }
-      case "video-split":return ctrl.applyVideo([{type:"split",clipId:clip(),seconds:n("videoTime")}]);
+      case "video-split":{
+        if(!s("videoTime")||!Number.isFinite(n("videoTime")))throw Error("Enter a finite FilmCraft playhead time");
+        const valid=splitPreflight(nativeClipInspector(ctrl.getState(),clip()),n("videoTime"));
+        if(!valid.ok)throw Error(valid.reason);
+        return ctrl.splitVideoClip(clip(),valid.seconds);
+      }
       case "video-trim":return ctrl.applyVideo([{type:"trim",clipId:clip(),edge:"out",deltaFrames:n("trimFrames"),ripple:false}]);
       case "video-delete":return ctrl.applyVideo([{type:"delete",clipId:clip(),ripple:false}]);
       case "video-undo":return ctrl.history("undo");
@@ -538,7 +567,22 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
         f("moveTime").value=String(clipState.start);
       }
       root.querySelectorAll("[data-clip]").forEach(el=>el.classList.toggle("selected",el===c));
+      showSelectedClip(ctrl.getState());
       return;
+    }
+    const lane=t.closest<HTMLElement>(".su-lane");
+    if(lane&&ctrl.getState().studio==="video"&&!ctrl.getState().busy){
+      const snapshot=ctrl.getState(),v=snapshot.video;
+      if(!v||snapshot.needsReload&&snapshot.recoveryStudio==="video")return;
+      const rect=lane.getBoundingClientRect();
+      const seconds=timelineSeekFromX({clientX:event.clientX,laneLeft:rect.left,laneWidth:rect.width,
+        sequence:v.snapshot.sequence,clips:v.clips});
+      if(seconds===null){
+        safe(async()=>{throw Error("Native FilmCraft FPS unavailable; seek disabled");});
+        return;
+      }
+      f("videoTime").value=String(seconds);
+      safe(()=>ctrl.renderVideo(seconds));return;
     }
     const l=t.closest<HTMLButtonElement>("[data-layer]");
     if(l){selectedLayer=Number(l.dataset.layer);root.querySelectorAll("[data-layer]").forEach(el=>el.classList.toggle("selected",el===l));
@@ -617,9 +661,9 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
     if(command==="split"||command==="delete"){
       if(selectedClip===null)return;
       const id=selectedClip;
-      safe(()=>ctrl.applyVideo(command==="split"?
-        [{type:"split",clipId:id,seconds:n("videoTime")}]:
-        [{type:"delete",clipId:id,ripple:false}]));
+      safe(()=>command==="split"?
+        ctrl.splitVideoClip(id,n("videoTime")):
+        ctrl.applyVideo([{type:"delete",clipId:id,ripple:false}]));
       return;
     }
     const fps=nativeFps(state.video?.snapshot.sequence);
@@ -634,10 +678,15 @@ export function mountUnifiedWorkspace(root:HTMLElement,bridge:WorkspaceNative=na
   };
   const onInput=(event:Event)=>{
     const target=event.target;
-    if(!(target instanceof HTMLInputElement)||target.dataset.field!=="chatWidth")return;
-    const width=Number(target.value);
-    if(!Number.isFinite(width))return;
-    root.style.setProperty("--chat-width",Math.max(240,Math.min(420,width))+"px");
+    if(!(target instanceof HTMLInputElement))return;
+    if(target.dataset.field==="chatWidth"){
+      const width=Number(target.value);
+      if(!Number.isFinite(width))return;
+      root.style.setProperty("--chat-width",Math.max(240,Math.min(420,width))+"px");
+    }else if(target.dataset.field==="timelineZoom"){
+      if(!Number.isFinite(Number(target.value)))return;
+      render(ctrl.getState());
+    }
   };
   root.addEventListener("click",onClick);
   root.addEventListener("input",onInput);

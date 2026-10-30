@@ -4,6 +4,7 @@
  */
 import {nativeFps,verifyNativeMove,nativeTrackGuard} from "./timeline.mjs";
 import {checkedAiVideoActions} from "./ai-plan.mjs";
+import {nativeClipInspector,splitPreflight,verifyNativeSplit} from "./video-inspector.mjs";
 export class WorkspaceError extends Error {
   constructor(code, message) { super(message); this.name = "WorkspaceError"; this.code = code; }
 }
@@ -158,6 +159,18 @@ export function createWorkspaceController(native) {
       set({video:fresh,videoFrame:null,pendingApproval:null});
       return receipt;
     },{studio:"video",mutating:true});
+  }
+  async function splitVideoClip(clipId,seconds) {
+    requireReady("video");
+    const source=nativeClipInspector(state,clipId);
+    const preflight=splitPreflight(source,seconds);
+    if(!preflight.ok)fail("INVALID_SPLIT",preflight.reason);
+    const receipt=await applyVideo([{type:"split",clipId,seconds:preflight.seconds}]);
+    if(!verifyNativeSplit(source,state.video?.clips,preflight.seconds)){
+      set({needsReload:true,recoveryStudio:"video",videoFrame:null,exportReceipt:null,pendingApproval:null});
+      fail("REVISION_CONFLICT","FilmCraft split has no matching native left/right clip readback");
+    }
+    return receipt;
   }
   async function moveVideoClip(clipId,track,seconds) {
     requireReady("video");
@@ -513,7 +526,7 @@ export function createWorkspaceController(native) {
       state.chat.push({role:"assistant",text:"Draft only — AI Director is not connected; no native edit was executed."});emit();},
     stop(){if(!state.busy)return false;set({stopped:true,progress:"Stop requested; waiting for native IPC to settle"});return true;},
     dismissTask(){set({pendingApproval:null});},
-    refreshVideo,verifyVideoSnapshot,applyVideo,moveVideoClip,importVideo,renderVideo,exportVideo,history,
+    refreshVideo,verifyVideoSnapshot,applyVideo,splitVideoClip,moveVideoClip,importVideo,renderVideo,exportVideo,history,
     motionStatus,verifyMotionSnapshot,createComposition,inspectMotionLayer,editMotion,renderMotion,saveMotion,openMotion,exportMotionPng,
     stageAiVideoTask,approveTask
   };
