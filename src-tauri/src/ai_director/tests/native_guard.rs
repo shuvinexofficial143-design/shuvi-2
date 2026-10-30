@@ -39,7 +39,7 @@ impl NativeOwner for FakeOwner {
 }
 fn motion()->Scope{
     Scope {
-        task_id:"task12345".into(),plan_hash:"a".repeat(64),
+        task_id:"task12345".into(),plan_hash:"a".repeat(64),instruction:"Create title".into(),
         snapshot:Snapshot{editor:Editor::Motion,project_id:"workspace:scene.ecproj".into(),
             session_id:"effect-owner-1".into(),version:Version::MotionRevision(4)},
         actions:vec![Action::MotionAddText{comp_id:2,name:"Title".into(),
@@ -50,7 +50,7 @@ fn motion()->Scope{
 }
 fn video()->Scope {
     Scope{
-        task_id:"taskvideo1".into(),plan_hash:"a".repeat(64),
+        task_id:"taskvideo1".into(),plan_hash:"a".repeat(64),instruction:"Split clip".into(),
         snapshot:Snapshot{editor:Editor::Video,project_id:"/owner/video.fcproj".into(),
             session_id:"film-owner-1".into(),version:Version::VideoSha256("a".repeat(64))},
         actions:vec![Action::VideoSplit{clip_id:4,seconds:2.0}]
