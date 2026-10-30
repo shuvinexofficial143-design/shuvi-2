@@ -55,10 +55,12 @@ pub enum PanelKind {
     CreateNullsFromPaths,
     /// Window ▸ VR Comp Editor (our own panel).
     VrCompEditor,
+    /// Shuvi AI dock panel: native, read-only until owner-guarded execution is integrated.
+    ShuviAi,
 }
 
 impl PanelKind {
-    pub const ALL: [PanelKind; 34] = [
+    pub const ALL: [PanelKind; 35] = [
         PanelKind::Project,
         PanelKind::EffectControls,
         PanelKind::Composition,
@@ -93,6 +95,7 @@ impl PanelKind {
         PanelKind::ContentAwareFill,
         PanelKind::CreateNullsFromPaths,
         PanelKind::VrCompEditor,
+        PanelKind::ShuviAi,
     ];
     pub fn title(self) -> &'static str {
         match self {
@@ -132,6 +135,7 @@ impl PanelKind {
             PanelKind::ContentAwareFill => "Content-Aware Fill",
             PanelKind::CreateNullsFromPaths => "Create Nulls From Paths",
             PanelKind::VrCompEditor => "VR Comp Editor",
+            PanelKind::ShuviAi => "Shuvi AI",
         }
     }
     pub fn id(self) -> String {
@@ -371,6 +375,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
                             ContentAwareFill,
                             CreateNullsFromPaths,
                             VrCompEditor,
+                            ShuviAi,
                         ],
                     ),
                 ),
@@ -395,7 +400,7 @@ fn workspace_root(name: &str) -> Node<PanelKind> {
                 hsplit(FixedFirst(300.0), tabs(&[Project, EffectControls], 0), tabs(&[Composition, Layer], 0)),
                 tabs(&[Timeline, RenderQueue], 0),
             ),
-            vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets], 0)),
+            vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets, ShuviAi], 0)),
         ),
     }
 }
@@ -722,12 +727,13 @@ mod tests {
             panic!("{second:?}")
         };
         assert_eq!(**first, tabs(&[Preview], 0));
-        assert_eq!(**second, tabs(&[Properties, Align, Audio, EffectsPresets], 0));
+        assert_eq!(**second, tabs(&[Properties, Align, Audio, EffectsPresets, ShuviAi], 0));
         let mut w = Workspace::new(default);
         assert!(w.is_visible(Preview) && w.is_visible(Properties) && !w.is_visible(Align));
+        assert!(w.is_open(ShuviAi) && !w.is_visible(ShuviAi), "AI tab is docked, never replaces original Properties");
         // The Properties frame takes tabs; the Preview frame stays a frame of its own.
         apply(&mut w, Action::Move { panel: Project, anchor: Properties, placement: Placement::Tab { before: None } });
-        assert_eq!(w.group_of(Project), vec![Properties, Align, Audio, EffectsPresets, Project]);
+        assert_eq!(w.group_of(Project), vec![Properties, Align, Audio, EffectsPresets, ShuviAi, Project]);
         assert_eq!(w.group_of(Preview), vec![Preview]);
     }
 

@@ -226,6 +226,8 @@ impl Playback {
 pub struct EffectcraftApp {
     pub session: Session,
     pub ui: UiState,
+    /// Ephemeral native Shuvi AI dock/chat state; no credentials or approvals are persisted.
+    pub shuvi_ai: panels::shuvi_ai::ShuviAiState,
     workspace_store: workspace_state::WorkspaceStore,
     pub tokens: Tokens,
     pub auto: automation::Registry,

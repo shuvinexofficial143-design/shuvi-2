@@ -29,6 +29,7 @@ impl EffectcraftApp {
         EffectcraftApp {
             session,
             ui,
+            shuvi_ai: panels::shuvi_ai::ShuviAiState::default(),
             workspace_store,
             tokens: Tokens::for_kind(Default::default()),
             auto: Default::default(),

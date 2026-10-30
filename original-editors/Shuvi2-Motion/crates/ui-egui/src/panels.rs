@@ -44,6 +44,7 @@ pub mod roto_tool;
 pub mod rq_templates;
 pub mod scopes_panel;
 pub mod script_console;
+pub mod shuvi_ai;
 pub mod scriptui_view;
 pub mod settings;
 pub mod shortcut_editor;
@@ -213,6 +214,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: PanelKind, rect: Rec
         PanelKind::ContentAwareFill => content_fill_panel::show(app, ui, rect),
         PanelKind::CreateNullsFromPaths => path_vr_panels::create_nulls(app, ui, rect),
         PanelKind::VrCompEditor => path_vr_panels::vr_editor(app, ui, rect),
+        PanelKind::ShuviAi => shuvi_ai::show(app, ui, rect),
     }
 }
 
