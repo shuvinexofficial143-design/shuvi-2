@@ -3,6 +3,7 @@ import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
 import { clipDragDestination } from "./drag.mjs";
 import {shouldInvalidateVideoProjectOnFilePick} from "./file-picker.mjs";
+import {shouldRefreshVideoProjectAfterActionError} from "./error-policy.mjs";
 import {requestVideoAiProposal} from "./ai";
 import {canSubmitVideoAiRequest} from "./privacy.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
@@ -544,7 +545,26 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
         }
         if(action==="delete")await edit({type:"delete",clipId:clip.clipId,ripple:e<HTMLInputElement>("ripple").checked});
       }
-    }catch(error){inform(String(error),true);}
+    }catch(error){
+      const failure=String(error);
+      if(shouldRefreshVideoProjectAfterActionError(action)){
+        // Native FilmCraft may have committed file bytes before the UI error
+        // arrived. Never keep rendering/authorizing edits from a stale SHA.
+        try {
+          const latest=await load();
+          inform("Action NOT VERIFIED: "+failure+
+            " · current .fcproj reloaded (SHA "+latest.projectSha256.slice(0,12)+")",true);
+        }catch(reloadError){
+          clearProposal();
+          snapshot=null;history=null;clipId=null;itemId=null;
+          clearFrame();draw();
+          inform("Action failed and native project could not be reloaded: "+failure+
+            " · "+String(reloadError)+" · reopen project before editing",true);
+        }
+      } else {
+        inform(failure,true);
+      }
+    }
     finally{scrubber.resume();busy=false;draw();}
   }
   async function choose(which:string):Promise<void>{
