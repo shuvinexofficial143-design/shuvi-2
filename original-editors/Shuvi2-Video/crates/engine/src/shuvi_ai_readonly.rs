@@ -143,6 +143,37 @@ pub fn a07_preflight_video_split(session: &mut Session, proposal: Value) -> Resu
 }
 
 
+
+/// A read-only *proposal preview*, NOT A07's SQLite-reserved plan or consent.
+/// Neither these numeric IDs nor the fingerprint authorize execution.
+#[derive(Debug, Clone)]
+pub struct NativeA07PlanPreview {
+    pub project_sha256: String,
+    pub revision: u64,
+    pub document_epoch: u64,
+    pub active_sequence: u64,
+    pub actions: Vec<NativeA07SplitPreview>,
+}
+
+/// Preview the exact A07 action list (1..=12) against ONE native project state.
+/// No editor mutation, external provider, filesystem writes or owner approval.
+pub fn a07_preflight_video_plan(session: &mut Session, proposal: Value) -> Result<NativeA07PlanPreview> {
+    crate::shuvi_ai_owner::preflight_a07_video_plan(session, proposal)
+}
+
+/// An in-memory UI warning/stale fence. The canonical A07 ledger must do an
+/// independent equivalent check inside its exclusive native Owner lock.
+pub fn a07_check_plan_preview_fresh(session: &Session, plan: &NativeA07PlanPreview) -> Result<()> {
+    if session.revision != plan.revision
+        || session.document_epoch != plan.document_epoch
+        || session.state.active_sequence.map(|id| id.0) != Some(plan.active_sequence)
+        || a07_native_project_sha256(session) != plan.project_sha256
+    {
+        return Err(EngineError::Other("A07_PLAN_PREVIEW_STALE: project changed, refresh and replan".into()));
+    }
+    Ok(())
+}
+
 /// SHA-256 of the ORIGINAL editable FilmCraft project's native serialized
 /// document, including unsaved edits. No UI/renderer/model-provided hash is
 /// accepted. This fingerprint is a plan VERSION, not an approval or owner ID.

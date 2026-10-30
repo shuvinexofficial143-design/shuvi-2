@@ -1,4 +1,4 @@
-name: Shuvi 2 Video - AI07 Native SHA256 A07 Proof
+name: Shuvi 2 Video - AI08 Native Multi-step Readonly Plan
 on:
   push:
     branches:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shuvi2-video-ai07
+  group: shuvi2-video-ai08
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +42,6 @@ jobs:
             "original-editors/Shuvi2-Video/crates/ui-egui/src/lib.rs",
             "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_readonly.rs",
             "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_owner.rs",
-            "original-editors/Shuvi2-Video/crates/engine/src/shuvi_ai_readonly.rs",
             "original-editors/Shuvi2-Video/crates/ui-egui/src/panels/shuvi_ai.rs",
             "original-editors/Shuvi2-Video/NOTICE",
             "original-editors/Shuvi2-Video/SHUVI_SOURCE_ORIGIN.txt"

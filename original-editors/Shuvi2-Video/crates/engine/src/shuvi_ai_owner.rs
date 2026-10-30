@@ -162,14 +162,15 @@ fn clip_target_in(sequence: &Value, clip_id: u64, tick: i64) -> Result<(String, 
 }
 
 
-pub(crate) fn preflight_a07_video_split(
-    session: &mut Session,
+
+fn preview_action_on_snapshot(
+    session: &Session,
+    before: &shuvi_ai_readonly::NativeVideoSnapshot,
     proposal: Value,
 ) -> Result<shuvi_ai_readonly::NativeA07SplitPreview> {
-    let before = shuvi_ai_readonly::snapshot(session)?;
     let action = parse_a07_video_split(proposal, session)?;
     let TypedVideoEdit::SplitClipAt { clip_id, tick } = action else {
-        return Err(EngineError::Other("A07_ACTION_REJECTED: unsupported native preflight action".into()));
+        return Err(EngineError::Other("A07_ACTION_REJECTED: unsupported native preview action".into()));
     };
     let sequence = before.sequence.as_ref().ok_or(EngineError::NoSequence)?;
     let (track_kind, track_id) = clip_target_in(sequence, clip_id, tick)?;
@@ -179,13 +180,6 @@ pub(crate) fn preflight_a07_video_split(
         .and_then(|items| items.iter().find(|item| item["clip"].as_u64() == Some(clip_id)))
         .and_then(|clip| clip["item"].as_u64())
         .ok_or_else(|| EngineError::Other("A07_PREFLIGHT_INCOMPLETE: native clip source identity missing".into()))?;
-
-    if session.revision != before.revision
-        || session.document_epoch != before.document_epoch
-        || session.state.active_sequence.map(|id| id.0) != before.active_sequence
-    {
-        return Err(EngineError::Other("A07_PREFLIGHT_STALE: native Session changed during inspection".into()));
-    }
     Ok(shuvi_ai_readonly::NativeA07SplitPreview {
         revision: before.revision,
         document_epoch: before.document_epoch,
@@ -196,6 +190,77 @@ pub(crate) fn preflight_a07_video_split(
         track_kind,
         tick,
     })
+}
+
+/// Neither the UI nor a model can create A07 approval, owner identity or a
+/// durable plan hash by calling this read-only multi-action preview.
+pub(crate) fn preflight_a07_video_plan(
+    session: &mut Session,
+    proposals: Value,
+) -> Result<shuvi_ai_readonly::NativeA07PlanPreview> {
+    // Exact accepted untrusted planner shapes: [actions] OR
+    // {"reason":"...","actions":[...]}, with no other fields.
+    let actions = match proposals {
+        Value::Array(items) => items,
+        Value::Object(mut document) => {
+            if document.len() != 2 || !document.contains_key("reason") || !document.contains_key("actions") {
+                return Err(EngineError::Other("A07_PLAN_REJECTED: unexpected proposal fields".into()));
+            }
+            let reason = document.remove("reason").and_then(|v| v.as_str().map(str::to_owned))
+                .ok_or_else(|| EngineError::Other("A07_PLAN_REJECTED: invalid reason".into()))?;
+            if reason.len() > 2000 {
+                return Err(EngineError::Other("A07_PLAN_REJECTED: reason too long".into()));
+            }
+            document.remove("actions").and_then(|v| v.as_array().cloned())
+                .ok_or_else(|| EngineError::Other("A07_PLAN_REJECTED: invalid action list".into()))?
+        }
+        _ => return Err(EngineError::Other("A07_PLAN_REJECTED: expected action list".into())),
+    };
+    if !(1..=12).contains(&actions.len()) {
+        return Err(EngineError::Other("A07_PLAN_REJECTED: expected 1..12 actions".into()));
+    }
+    let source = shuvi_ai_readonly::snapshot(session)?;
+    let mut seen_clip_ids = std::collections::BTreeSet::new();
+    let mut evaluated = Vec::with_capacity(actions.len());
+    for raw in actions {
+        let view = preview_action_on_snapshot(session, &source, raw)?;
+        // The next cut would change original clip geometry. We do not attempt
+        // to simulate dependent multi-step IDs or implicitly replay edits.
+        if !seen_clip_ids.insert(view.clip_id) {
+            return Err(EngineError::Other("A07_PLAN_REJECTED: duplicate clip action; replan after readback".into()));
+        }
+        evaluated.push(view);
+    }
+    if session.revision != source.revision
+        || session.document_epoch != source.document_epoch
+        || session.state.active_sequence.map(|id| id.0) != source.active_sequence
+        || shuvi_ai_readonly::a07_native_project_sha256(session) != source.project_sha256
+    {
+        return Err(EngineError::Other("A07_PLAN_PREVIEW_STALE: editor changed while examining proposal".into()));
+    }
+    Ok(shuvi_ai_readonly::NativeA07PlanPreview {
+        project_sha256: source.project_sha256,
+        revision: source.revision,
+        document_epoch: source.document_epoch,
+        active_sequence: source.active_sequence.ok_or(EngineError::NoSequence)?,
+        actions: evaluated,
+    })
+}
+
+pub(crate) fn preflight_a07_video_split(
+    session: &mut Session,
+    proposal: Value,
+) -> Result<shuvi_ai_readonly::NativeA07SplitPreview> {
+    let before = shuvi_ai_readonly::snapshot(session)?;
+    let result = preview_action_on_snapshot(session, &before, proposal)?;
+    if session.revision != before.revision
+        || session.document_epoch != before.document_epoch
+        || session.state.active_sequence.map(|id| id.0) != before.active_sequence
+        || shuvi_ai_readonly::a07_native_project_sha256(session) != before.project_sha256
+    {
+        return Err(EngineError::Other("A07_PREFLIGHT_STALE: native Session changed during inspection".into()));
+    }
+    Ok(result)
 }
 
 /// Read back that a clip-specific split did not touch ANY unrelated track.
@@ -547,6 +612,64 @@ mod tests {
         ] {
             assert!(shuvi_ai_readonly::a07_preflight_video_split(&mut session, proposal).is_err());
             assert_eq!((session.revision, session.journal.len()), before);
+        }
+    }
+
+
+    #[test]
+    fn shuvi_ai08_multi_step_preview_read_only_and_fenced_after_manual_edit() {
+        let mut session = demo();
+        let tick = session.sequence_rate().tick_of(48);
+        let mut targets = Vec::new();
+        for track in &session.active_sequence().unwrap().video_tracks {
+            for item in &track.items {
+                if item.start < tick && tick < item.end() {
+                    targets.push(item.id.0);
+                }
+            }
+        }
+        for track in &session.active_sequence().unwrap().audio_tracks {
+            for item in &track.items {
+                if item.start < tick && tick < item.end() {
+                    targets.push(item.id.0);
+                }
+            }
+        }
+        assert!(targets.len() >= 2, "demo must expose at least two native clips across video/audio");
+        let before = (session.revision, session.journal.len(), shuvi_ai_readonly::a07_native_project_sha256(&session));
+        let json = json!({"reason":"two distinct clips","actions":[
+            {"type":"video.split","clipId":targets[0],"seconds":2.0},
+            {"type":"video.split","clipId":targets[1],"seconds":2.0}
+        ]});
+        let plan = shuvi_ai_readonly::a07_preflight_video_plan(&mut session, json).unwrap();
+        assert_eq!(plan.actions.len(), 2);
+        assert_eq!(plan.project_sha256, before.2);
+        assert_eq!(session.journal.len(), before.1);
+        assert_eq!(session.revision, before.0);
+        assert!(shuvi_ai_readonly::a07_check_plan_preview_fresh(&session, &plan).is_ok());
+        session.execute("file.newSequence", json!({"name":"manual"})).unwrap();
+        let err = shuvi_ai_readonly::a07_check_plan_preview_fresh(&session, &plan).unwrap_err();
+        assert!(err.to_string().contains("STALE"));
+    }
+
+    #[test]
+    fn shuvi_ai08_plan_rejects_duplicate_clip_and_extra_claims_without_edits() {
+        let mut session = demo();
+        let tick = session.sequence_rate().tick_of(48);
+        let clip = session.active_sequence().unwrap().video_tracks[0].items.iter()
+            .find(|x| x.start < tick && tick < x.end()).unwrap().id.0;
+        let action = json!({"type":"video.split","clipId":clip,"seconds":2.0});
+        let before = (session.revision, session.journal.len(), shuvi_ai_readonly::a07_native_project_sha256(&session));
+        for invalid in [
+            json!([]),
+            json!([action.clone(),action.clone()]),
+            json!({"reason":"r","actions":[action.clone()],"approved":true}),
+            json!({"reason":"r","actions":[]}),
+            json!([{"type":"video.delete","clipId":clip}]),
+            json!(vec![action.clone(); 13]),
+        ] {
+            assert!(shuvi_ai_readonly::a07_preflight_video_plan(&mut session, invalid).is_err());
+            assert_eq!((session.revision, session.journal.len(), shuvi_ai_readonly::a07_native_project_sha256(&session)), before);
         }
     }
 
