@@ -23,8 +23,8 @@ REQUIRED={
 TEST_MOD=re.compile(r"(?m)^\s*#\[cfg\(test\)\]\s*(?:#\[[^\n]*\]\s*)*mod\s+\w*tests\b")
 METHOD=re.compile(r"\b(?:app|self)\.session\.(?:set_time|open_comp|activate_comp|activate_comp_none|replace_project|set_resolution|mark_saved|sanitize_after_replacement|save|restore_view)\s*\(")
 ASSIGN=re.compile(r"\b(?:app|self)\.session\.(?:project|saved_project|history(?:\.\w+)?|state(?:\.\w+)?|path|prefs(?:\.\w+)?)\s*=(?!=)")
-COW=re.compile(r"(?:Arc|std::sync::Arc)::make_mut\\s*\\(\\s*&mut\\s*(?:app|self)\\.session\\.project")
-CONTAINER_MUTATION=re.compile(r"\\b(?:app|self)\\.session\\.(?:project|history|state|prefs)\\.(?:\\w+\\.)*(?:push|clear|retain|extend|insert|remove|append|sort|drain|swap|truncate)\\s*\\(")
+COW=re.compile(r"(?:Arc|std::sync::Arc)::make_mut\s*\(\s*&mut\s*(?:app|self)\.session\.project")
+CONTAINER_MUTATION=re.compile(r"\b(?:app|self)\.session\.(?:project|history|state|prefs)\.(?:\w+\.)*(?:push|clear|retain|extend|insert|remove|append|sort|drain|swap|truncate)\s*\(")
 RAW_PROJECT=re.compile(r"\b(?:app|self)\.session\.project\s*=(?!=)")
 def runtime(text):
     m=TEST_MOD.search(text)
