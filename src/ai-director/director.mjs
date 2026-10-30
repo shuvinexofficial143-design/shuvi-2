@@ -26,11 +26,16 @@ export class AiDirector {
   #adapter;
   #approval;
   #journal;
-  constructor({adapter, approval, journal}) {
+  #nativeStop;
+  constructor({adapter, approval, journal, nativeStop=null}) {
     checkPorts(adapter, approval, journal);
+    if (nativeStop !== null && (typeof nativeStop?.cancel !== "function" ||
+      typeof nativeStop?.recover !== "function"))
+      throw new Error("trusted native Stop/recovery ports required");
     this.#adapter = adapter;
     this.#approval = approval;
     this.#journal = journal;
+    this.#nativeStop = nativeStop;
   }
   get(taskId) {
     const task = this.#tasks.get(taskId);
@@ -58,6 +63,9 @@ export class AiDirector {
     return view(task);
   }
   cancel(taskId) {
+    // Legacy local-only test port. A connected production host must NEVER
+    // mistake a JavaScript flag for a SQLite-committed native cancellation.
+    if (this.#nativeStop) throw new Error("NATIVE_STOP_REQUIRED: use stopNative()");
     const task = this.#tasks.get(taskId);
     if (!task) return false;
     if (["complete","denied","blocked","cancelled","uncertain"].includes(task.status)) return false;
@@ -65,6 +73,37 @@ export class AiDirector {
     // Running native calls cannot be assumed cancelled; wait for their receipt.
     if (task.status === "prepared") task.status = "cancelled";
     return true;
+  }
+  async stopNative(taskId) {
+    if (!this.#nativeStop) throw new Error("NATIVE_STOP_UNAVAILABLE");
+    const task = this.#tasks.get(taskId);
+    if (!task) throw new Error("unknown task");
+    const result=await this.#nativeStop.cancel({taskId,planHash:task.hash});
+    if (result?.nativeAcknowledged !== true ||
+        result?.taskId !== taskId || typeof result.cancelled !== "boolean")
+      throw new Error("NATIVE_STOP_PROOF_INVALID");
+    if (result.cancelled) {
+      // The backend has committed Stop: local task can no longer start a
+      // next edit, but any running native operation must still be read back.
+      task.cancel=true;
+      if (task.status==="prepared") task.status="cancelled";
+    } else if (result.state==="intent_uncertain") {
+      // Never mark a possibly executed native action as Cancelled.
+      task.status="uncertain";
+      task.error="NATIVE_INTENT_UNCERTAIN: reload verified native status";
+    }
+    return result;
+  }
+  async recoverNative(taskId) {
+    if (!this.#nativeStop) throw new Error("NATIVE_RECOVERY_UNAVAILABLE");
+    const task=this.#tasks.get(taskId);
+    if (!task) throw new Error("unknown task");
+    const recovered=await this.#nativeStop.recover({taskId,planHash:task.hash});
+    if (recovered?.taskId!==taskId || !Array.isArray(recovered.steps) ||
+        recovered.steps.length!==task.plan.actions.length)
+      throw new Error("NATIVE_RECOVERY_PROOF_INVALID");
+    // Read-only. On re-opening an app, do NOT replay uncertain/missing steps.
+    return recovered;
   }
   async run(taskId) {
     const task = this.#tasks.get(taskId);
