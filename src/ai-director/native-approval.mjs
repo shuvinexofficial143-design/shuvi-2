@@ -18,9 +18,11 @@ export function createNativeApprovalGateway({invoke}={}) {
       const p=validateApprovalPreview(plan);
       // This is a fixed host-only command: native code verifies actual owner
       // button interaction and a persisted plan hash before granting consent.
+      // A07: the Windows native host must present the persisted validated
+      // Scope loaded from SQLite, never preview fields provided by WebView.
+      // WebView only supplies an identity and digest for lookup.
       const proof=await invoke("ai_director_request_owner_consent",{
-        request:{taskId:p.taskId,planHash:p.planHash,project:p.project,
-          instruction:p.instruction,actions:p.actions}
+        request:{taskId:p.taskId,planHash:p.planHash}
       });
       if(!proof||proof.granted!==true||proof.taskId!==p.taskId||
          proof.planHash!==p.planHash||proof.nativeOwnerInteraction!==true)
