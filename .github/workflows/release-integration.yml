@@ -34,6 +34,7 @@ jobs:
           workspaces: |
             src-tauri
             crates/shuvi-motion-bridge
+            src-tauri/src/ai_director
             vendor/filmcraft
       - name: Integration regression, native UI contracts, TypeScript build
         shell: pwsh
@@ -47,6 +48,11 @@ jobs:
       - name: Build actual FilmCraft Windows native sidecar
         shell: pwsh
         run: ./scripts/video/build-engine.ps1
+      - name: Verify isolated native AI A03 provider and guarded ledger
+        shell: pwsh
+        run: |
+          cargo test --manifest-path src-tauri/src/ai_director/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw 'Native AI provider and guarded journal verification failed' }
       - name: Test real in-process EffectCraft compositor
         shell: pwsh
         run: |

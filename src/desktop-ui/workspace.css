@@ -1,0 +1,47 @@
+.su{--bg:#10141e;--panel:#1c2432;--line:#354055;--fg:#f0f4fd;--muted:#a5b2c7;display:block;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif;min-height:100vh}
+.su *{box-sizing:border-box}.su [hidden]{display:none!important}
+.su .su-head{padding:13px 17px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.su .su-head b{letter-spacing:.05em;font-size:17px}.su .su-head span{font-size:12px;color:var(--muted)}
+.su button{border:1px solid var(--line);border-radius:7px;background:#2a3a52;color:var(--fg);padding:7px 10px;cursor:pointer}
+.su button:disabled{opacity:.4;cursor:not-allowed}.su button:hover:not(:disabled){background:#395477}
+.su button[aria-pressed=true],.su button.selected{background:#245e9e;border-color:#8ab5ff}
+.su nav,.su .su-buttons{display:flex;gap:7px;flex-wrap:wrap}
+.su .su-columns{display:grid;grid-template-columns:minmax(180px,235px) minmax(360px,1fr) minmax(235px,310px);min-height:calc(100vh - 72px)}
+.su .su-tools,.su .su-editor,.su .su-chat{padding:15px;min-width:0}
+.su .su-tools,.su .su-chat{background:var(--panel)}
+.su .su-tools{border-right:1px solid var(--line)}.su .su-chat{border-left:1px solid var(--line);display:flex;flex-direction:column;gap:11px}
+.su h2{font-size:16px;margin:0 0 12px}.su h3{font-size:13px;margin:15px 0 8px}
+.su label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;margin:10px 0}
+.su input,.su select,.su textarea{padding:8px;background:#101725;border:1px solid #516178;border-radius:6px;color:var(--fg);width:100%;font:inherit}
+.su .su-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.su .su-editorhead{display:flex;align-items:center;justify-content:space-between;gap:10px}.su .su-editorhead span{color:var(--muted);font-size:12px}
+.su .su-monitor{height:min(45vh,400px);min-height:210px;display:grid;place-items:center;background:#05080f;border:1px solid var(--line);border-radius:10px;color:var(--muted);text-align:center;padding:10px}
+.su .su-monitor img{max-width:100%;max-height:100%;object-fit:contain}
+.su .su-track{min-height:85px;border:1px solid var(--line);border-radius:9px;background:#161e2b;display:flex;align-items:center;gap:8px;padding:11px;overflow:auto}
+.su .su-track button{white-space:nowrap;flex-shrink:0}
+.su .su-progress{display:flex;justify-content:space-between;align-items:center;margin-top:16px;gap:10px;color:var(--muted)}
+.su .su-error{color:#ffbbbb;margin:10px 0;overflow-wrap:anywhere}
+.su .su-chat small{color:#ffd691}.su .su-chat .su-thread{flex:1;overflow:auto;min-height:180px;max-height:45vh;padding:10px;border:1px solid var(--line);border-radius:9px}
+.su .su-thread p{border-radius:9px;padding:9px;margin:8px 0;background:#344156;overflow-wrap:anywhere}.su .su-thread p.su-user{margin-left:18px;background:#285889}
+@media(max-width:1060px){.su .su-columns{grid-template-columns:minmax(180px,235px) minmax(320px,1fr)}.su .su-chat{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}.su .su-chat .su-thread{max-height:170px}}
+@media(max-width:650px){.su .su-columns{display:flex;flex-direction:column}.su .su-tools{border-right:0;border-bottom:1px solid var(--line)}}
+
+/* U02: real native inspector, visually separate from the editor monitor. */
+.su .su-inspector{padding:12px;margin-top:14px;border:1px solid var(--line);border-radius:9px;background:#151f2d}
+.su .su-inspector [data-ui="inspector-summary"]{color:var(--fg);font-weight:600;overflow-wrap:anywhere}
+.su .su-inspector [data-ui^="inspector-"]{margin:8px 0;font-size:12px;overflow-wrap:anywhere}
+.su .su-inspector button{margin-top:6px}
+.su [data-ui="health"]{overflow-wrap:anywhere}
+.su .su-track button.selected{outline:2px solid #9dbbf3}
+
+/* U03 native FilmCraft track lanes; layout is computed from saved sequence ticks. */
+.su .su-timeline{border:1px solid var(--line);border-radius:9px;background:#111b28;padding:10px;overflow:auto;min-height:112px}
+.su .su-timeline-row{display:grid;grid-template-columns:40px minmax(320px,1fr);min-width:390px;gap:9px;align-items:center;border-bottom:1px solid var(--line);padding:7px 0}
+.su .su-timeline-row:last-child{border-bottom:0}
+.su .su-track-name{color:var(--muted);font-weight:700;letter-spacing:.04em}
+.su .su-lane{height:36px;position:relative;border-radius:5px;background:repeating-linear-gradient(90deg,#142237 0 1px,#19283b 1px 10%);overflow:hidden}
+.su .su-lane button{position:absolute;top:4px;height:29px;max-width:calc(100% - 2px);padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;touch-action:pan-y;cursor:grab}
+.su .su-lane button:active{cursor:grabbing}.su .su-lane button[data-drag-disabled="true"]{cursor:default}
+.su .su-native-meta,.su .su-help{display:block;color:var(--muted);font-size:12px;padding:6px 0}
+.su .su-inspector .su-buttons{margin-top:8px}
+.su .su-inspector select{background:#101725}

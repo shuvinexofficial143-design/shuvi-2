@@ -12,8 +12,8 @@ const windowsRunner=read("scripts/motion/run-windows-e2e.ps1");
 const motionCi=read(".github/workflows/motion-smoke.yml");
 
 test("Motion lives in existing Shuvi single window without injecting a second editor",()=>{
-  assert.match(html, /src\/main\.ts/);
-  assert.match(html, /src\/studios\/motion\/bootstrap\.ts/);
+  assert.match(html,/src\\/entry\\.ts/); assert.ok(read("src/entry.ts").includes('await import("./main")'));
+  assert.ok(read("src/entry.ts").includes('await import("./studios/motion/bootstrap")'));
   assert.match(ts, /querySelector<HTMLButtonElement>\('button\[data-studio="motion"\]'\)/);
   assert.match(ts, /originalPreviewNodes = Array\.from\(preview\.childNodes\)/);
   assert.match(ts, /preview\.replaceChildren\(\.\.\.originalPreviewNodes\)/);
