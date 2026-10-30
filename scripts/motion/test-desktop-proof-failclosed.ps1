@@ -15,6 +15,25 @@ foreach ($name in $required) {
         throw "Cannot run negative verification without actual successful WebView2 evidence: $name"
     }
 }
+# Fail closed if the UNMODIFIED real E2E receipt does not pass the same checker.
+# This prevents every tampered copy from appearing to be rejected merely because
+# the verifier cannot work on this runner (missing git context, syntax error, etc).
+$baselineOutput = & pwsh -NoProfile -NonInteractive -File $verifier -Evidence $source 2>&1
+$baselineExitCode = $LASTEXITCODE
+if ($baselineExitCode -ne 0) {
+    throw "Original real WebView2 receipt failed before tampering: $($baselineOutput | Out-String)"
+}
+$expectedReason = @{
+    "receipt-not-successful" = "Receipt is not a successful real Tauri WebView2 session"
+    "forged-source-commit" = "WebView2 receipt does not match the checkout and GitHub runner source"
+    "forged-effectcraft-pin" = "Native EffectCraft Gitlink does not match the reviewed exact pin"
+    "forged-sequence-checksum" = "First sequence PNG SHA-256 differs from independently exported native frame"
+    "forged-cold-restart-checksum" = "Cold-reopened native EffectCraft PNG SHA-256 differs from export"
+    "omitted-native-edit-step" = "WebView2 desktop receipt step count does not match the real E2E contract"
+    "missing-actual-screenshot" = "Actual WebView2 screenshot missing"
+    "non-png-screenshot" = "WebView2 evidence screenshot has no PNG signature"
+}
+$passed = New-Object System.Collections.Generic.List[string]
 $cases = @(
     "receipt-not-successful",
     "forged-source-commit",
@@ -51,12 +70,37 @@ foreach ($case in $cases) {
         }
         $receipt | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $receiptFile -Encoding utf8
         $output = & pwsh -NoProfile -NonInteractive -File $verifier -Evidence $copy 2>&1
-        if ($LASTEXITCODE -eq 0) {
+        $rejectionCode = $LASTEXITCODE
+        $diagnostic = $output | Out-String
+        if ($rejectionCode -eq 0) {
             throw "EVIDENCE GATE REGRESSION: accepted tampered real receipt ($case)"
         }
-        Write-Host "PASS: verifier rejected tampered real E2E evidence: $case"
+        # Reject the expected *specific field*, not a generic parser/startup failure.
+        if ($rejectionCode -ne 1 -or !$diagnostic.Contains($expectedReason[$case])) {
+            throw "Unexpected rejection for $case (exit $rejectionCode): $diagnostic"
+        }
+        $passed.Add($case)
+        Write-Host "PASS: verifier rejected tampered real E2E evidence for expected reason: $case"
     } finally {
         Remove-Item -LiteralPath $copy -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-Write-Host "PASS: all 8 real-evidence forgery attempts rejected (no faked successful receipt)"
+if ($passed.Count -ne $cases.Count) {
+    throw "Evidence negative test did not complete all required forgery variants"
+}
+$receipt = Get-Content -LiteralPath (Join-Path $source "receipt.json") -Raw | ConvertFrom-Json
+$report = [ordered]@{
+    ok = $true
+    proof = "real-webview2-evidence-forgery-negative-suite"
+    exactSourceCommit = [string]$receipt.commitSha
+    baselineRealReceiptVerified = $true
+    tamperTests = @($passed.ToArray())
+    allExpectedFailureReasonsVerified = $true
+    originalEvidenceUntouched = $true
+}
+$report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $source "tamper-report.json") -Encoding utf8
+Write-Host "PASS: all 8 real-evidence forgery attempts rejected for their exact expected reasons"
+# Every negative child intentionally exits with code 1. Clear the inherited native
+# process exit code so Windows GitHub Actions correctly reports this parent suite PASS.
+$global:LASTEXITCODE = 0
+exit 0
