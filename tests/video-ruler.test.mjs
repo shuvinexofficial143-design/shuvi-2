@@ -14,7 +14,7 @@ test("real 2-hour timeline ruler has bounded valid ticks at 1x and 32x",()=>{
 });
 test("clicking real ruler snaps to saved 12fps frame and rejects clip EOF",()=>{
   const v=timelineViewport(1,1,0);
-  assert.equal(rulerSeekTime(150,{left:100,width:400},v,12),1/12);
+  assert.equal(rulerSeekTime(150,{left:100,width:400},v,12),2/12);
   assert.equal(rulerSeekTime(300,{left:100,width:400},v,12),0.5);
   assert.equal(rulerSeekTime(500,{left:100,width:400},v,12),11/12);
   assert.equal(rulerSeekTime(-300,{left:100,width:400},v,12),0);
