@@ -132,3 +132,26 @@ test("Stop accepted during pending approval prevents any native action",async()=
  assert.equal(result.status,"cancelled");
  assert.equal(used,0);
 });
+
+test("native Stop wins race when owner dialog rejects after SQLite cancellation",async()=>{
+ let closeDialog;
+ const waiting=new Promise((_,reject)=>{closeDialog=reject});
+ let executed=0;
+ const adapter={async readSnapshot(){return {...snapshot}},
+   async executeGuarded(){executed++;throw Error("No native edit permitted")}};
+ const journal={async reserve(){return true},async append(){}};
+ const nativeStop=createNativeStopController({invoke:async(_name,args)=>({
+   taskId:TASK,planHash:args.request.planHash,
+   nativeOwnerBound:true,durable:true,cancelled:true,state:"before_first_edit"
+ })});
+ const approval={async request(){return waiting}};
+ const director=new AiDirector({adapter,approval,journal,nativeStop});
+ await director.prepare({taskId:TASK,instruction:"Create a shape",actions:[shape]});
+ const running=director.run(TASK);
+ assert.equal((await director.stopNative(TASK)).cancelled,true);
+ closeDialog(new Error("approval window closed by host after cancellation"));
+ const result=await running;
+ assert.equal(result.status,"cancelled");
+ assert.equal(result.error,null);
+ assert.equal(executed,0);
+});
