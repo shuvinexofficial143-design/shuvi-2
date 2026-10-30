@@ -1,4 +1,4 @@
-name: Shuvi 2 AI Director A02 verification
+name: Shuvi 2 AI Director A03 verification
 on:
   push:
     branches:
