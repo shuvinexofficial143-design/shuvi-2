@@ -95,3 +95,14 @@ test('CI must refuse silent Tauri binary patching and retain strict installed ha
   assert.match(install,/sidecarHashMatched/);
   assert.match(install,/Release BLOCKED/);
 });
+
+test('Windows installed WebView2 CI pins a runner with working native CDP and records diagnostics',()=>{
+  const workflow=readFileSync(new URL('../.github/workflows/release-integration.yml',import.meta.url),'utf8');
+  const runner=readFileSync(new URL('../scripts/motion/run-windows-e2e.ps1',import.meta.url),'utf8');
+  assert.match(workflow,/runs-on:\s*windows-2022/);
+  assert.doesNotMatch(workflow,/runs-on:\s*windows-latest/);
+  assert.match(runner,/driver-prerequisites\.json/);
+  assert.match(runner,/webview2Version/);
+  assert.match(runner,/edgeDriverVersion/);
+  assert.match(runner,/Installed WebView2 suite failure:/);
+});

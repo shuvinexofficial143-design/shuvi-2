@@ -7,12 +7,16 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: shuvi2-release-integration-v05-${{ github.ref }}
+  group: shuvi2-release-integration-v06-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   integrated-windows-native-and-e2e:
     if: github.ref == 'refs/heads/feature/shuvi2-release-integration'
-    runs-on: windows-latest
+    # Win2025 image 20261021.278.1 failed WebView2 DevToolsActivePort despite
+    # a successful real NSIS install and matching native EXE/sidecar SHA-256.
+    # Pin supported Win2022 image for real Tauri-driver/EdgeDriver E2E.
+    # https://github.com/actions/runner-images/issues/14738
+    runs-on: windows-2022
     timeout-minutes: 115
     steps:
       - name: Checkout both real pinned engines

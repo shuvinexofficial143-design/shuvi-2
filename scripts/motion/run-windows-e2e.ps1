@@ -42,6 +42,26 @@ try {
 $driver = Get-ChildItem $driverDir -Recurse -Filter "msedgedriver.exe" | Select-Object -First 1
 if (!$driver) { throw "msedgedriver.exe was not downloaded" }
 $env:PATH = $driver.DirectoryName + ";" + $env:PATH
+# Read-only Windows WebView2 diagnostics. Keep genuine installed app/driver.
+$webviewRegistry = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+$webviewVersion = $null
+if (Test-Path $webviewRegistry) {
+    $webviewVersion = (Get-ItemProperty $webviewRegistry -ErrorAction SilentlyContinue).pv
+}
+$osInfo = Get-CimInstance Win32_OperatingSystem
+$prerequisites = [ordered]@{
+    gitSha = $env:GITHUB_SHA
+    runnerImage = $env:ImageOS
+    osCaption = $osInfo.Caption
+    osVersion = $osInfo.Version
+    webview2Version = $webviewVersion
+    edgeDriverVersion = ((& ($driver.FullName) --version) | Out-String).Trim()
+    tauriDriverVersion = ((& $tauri --version) | Out-String).Trim()
+    exactInstalledExe = $binary
+}
+$prerequisites | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $proof 'driver-prerequisites.json') -Encoding utf8
+Write-Host "Native WebView2 driver diagnostic saved; image=$($prerequisites.runnerImage), runtime=$($prerequisites.webview2Version)"
+
 $service = $null
 try {
     $service = Start-Process -FilePath $tauri -ArgumentList @("--port", "4444") -PassThru -RedirectStandardOutput (Join-Path $proof "tauri-driver.stdout.log") -RedirectStandardError (Join-Path $proof "tauri-driver.stderr.log")
@@ -61,13 +81,16 @@ try {
         $videoExit = $LASTEXITCODE
     }
     node tests/motion/desktop-e2e.mjs
-    if ($LASTEXITCODE -ne 0) { throw "Real Windows WebView2 native editing E2E FAILED" }
-    if ($videoExit -ne 0) { throw 'Installed Video E2E failed; Motion ran independently; see both receipts' }
+    $motionExit = $LASTEXITCODE
     if ($VideoFirst) {
         node --check scripts/release/unified-installed-e2e.mjs
         if ($LASTEXITCODE -ne 0) { throw 'Unified installed desktop script has syntax errors' }
         node scripts/release/unified-installed-e2e.mjs
-        if ($LASTEXITCODE -ne 0) { throw 'Installed Unified real WebView2 Video/Motion cold-reopen E2E FAILED' }
+        $unifiedExit = $LASTEXITCODE
+    } else { $unifiedExit = 0 }
+    # Preserve all three independent receipts even if one genuine GUI path fails.
+    if ($videoExit -ne 0 -or $motionExit -ne 0 -or $unifiedExit -ne 0) {
+        throw "Installed WebView2 suite failure: Video=$videoExit Motion=$motionExit Unified=$unifiedExit (all genuine receipts retained)"
     }
     Write-Host "PASS: installed classic Video, Motion and native Unified WebView2 E2E"
 } finally {
