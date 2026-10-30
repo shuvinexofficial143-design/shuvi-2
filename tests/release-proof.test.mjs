@@ -106,3 +106,15 @@ test('Windows installed WebView2 CI pins a runner with working native CDP and re
   assert.match(runner,/edgeDriverVersion/);
   assert.match(runner,/Installed WebView2 suite failure:/);
 });
+
+test('installed WebView2 driver version is matched to actual native runtime, not full Edge browser',()=>{
+  const source=readFileSync(new URL('../scripts/motion/run-windows-e2e.ps1',import.meta.url),'utf8');
+  assert.match(source,/Microsoft\\EdgeUpdate\\Clients/);
+  assert.match(source,/msedgedriver\.microsoft\.com\/\$webviewVersion\/edgedriver_win64\.zip/);
+  assert.match(source,/Get-AuthenticodeSignature/);
+  assert.match(source,/if \(\$driverBuild -ne \$runtimeBuild\)/);
+  assert.match(source,/WebView2.*EdgeDriver.*build mismatch/);
+  assert.match(source,/edgeDriverBuildMatched/);
+  assert.match(source,/edgeDriverSha256/);
+  assert.doesNotMatch(source,/cargo install --git https:\/\/github\.com\/chippers\/msedgedriver-tool/);
+});

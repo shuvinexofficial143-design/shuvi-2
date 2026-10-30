@@ -21,33 +21,60 @@ $env:SHUVI_MOTION_EXE = $binary
 $env:SHUVI_MOTION_E2E_ARTIFACTS = $proof
 $env:SHUVI_MOTION_WEBDRIVER = "http://127.0.0.1:4444"
 $tauri = Join-Path $HOME ".cargo/bin/tauri-driver.exe"
-$edgetool = Join-Path $HOME ".cargo/bin/msedgedriver-tool.exe"
+# Select Microsoft EdgeDriver for the actual installed WebView2 Runtime, NOT
+# the full Edge browser. Mismatched CDP versions can give misleading startup errors.
+# https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/webdriver
 if (!(Test-Path $tauri)) {
     cargo install tauri-driver --locked
     if ($LASTEXITCODE -ne 0) { throw "tauri-driver installation failed" }
 }
-if (!(Test-Path $edgetool)) {
-    cargo install --git https://github.com/chippers/msedgedriver-tool
-    if ($LASTEXITCODE -ne 0) { throw "msedgedriver-tool installation failed" }
-}
-$driverDir = Join-Path ([System.IO.Path]::GetTempPath()) ("shuvi-edgedriver-" + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
-Push-Location $driverDir
-try {
-    & $edgetool
-    if ($LASTEXITCODE -ne 0) { throw "Cannot find matching Windows Microsoft EdgeDriver" }
-} finally {
-    Pop-Location
-}
-$driver = Get-ChildItem $driverDir -Recurse -Filter "msedgedriver.exe" | Select-Object -First 1
-if (!$driver) { throw "msedgedriver.exe was not downloaded" }
-$env:PATH = $driver.DirectoryName + ";" + $env:PATH
-# Read-only Windows WebView2 diagnostics. Keep genuine installed app/driver.
-$webviewRegistry = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+$webviewGuid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+$runtimeKeys = @(
+    "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$webviewGuid",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$webviewGuid",
+    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$webviewGuid"
+)
 $webviewVersion = $null
-if (Test-Path $webviewRegistry) {
-    $webviewVersion = (Get-ItemProperty $webviewRegistry -ErrorAction SilentlyContinue).pv
+$webviewKey = $null
+foreach ($key in $runtimeKeys) {
+    if (-not (Test-Path $key)) { continue }
+    $found = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue).pv
+    if ($found -match '^\d+\.\d+\.\d+\.\d+$') {
+        $webviewVersion = $found
+        $webviewKey = $key
+        break
+    }
 }
+if (-not $webviewVersion) {
+    throw 'Installed WebView2 Runtime version cannot be proven from trusted registry. Native GUI E2E NOT VERIFIED.'
+}
+$driverDir = Join-Path ([System.IO.Path]::GetTempPath()) ("shuvi-webview2-matched-driver-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
+$archive = Join-Path $driverDir 'edgedriver_win64.zip'
+# Download only from Microsoft, bound to the runtime's four-part version.
+$driverUri = "https://msedgedriver.microsoft.com/$webviewVersion/edgedriver_win64.zip"
+try {
+    Invoke-WebRequest -Uri $driverUri -OutFile $archive -TimeoutSec 120 -ErrorAction Stop
+    if ((Get-Item $archive).Length -lt 100000) { throw 'Microsoft driver ZIP missing or empty' }
+    Expand-Archive -LiteralPath $archive -DestinationPath $driverDir -Force -ErrorAction Stop
+} catch {
+    throw "No verified Microsoft EdgeDriver matching WebView2 $webviewVersion: $($_.Exception.Message)"
+}
+$driver = Get-ChildItem $driverDir -Recurse -File -Filter 'msedgedriver.exe' | Select-Object -First 1
+if (-not $driver -or $driver.Length -lt 100000) { throw 'Microsoft EdgeDriver executable is absent/invalid' }
+$signature = Get-AuthenticodeSignature -LiteralPath $driver.FullName
+if ($signature.Status -ne 'Valid') { throw "EdgeDriver Authenticode signature invalid: $($signature.Status)" }
+$driverVersionText = ((& ($driver.FullName) --version) | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $driverVersionText -notmatch '(\d+\.\d+\.\d+\.\d+)') {
+    throw "Cannot verify downloaded Microsoft EdgeDriver version: $driverVersionText"
+}
+$driverVersion = $Matches[1]
+$runtimeBuild = ($webviewVersion.Split('.')[0..2] -join '.')
+$driverBuild = ($driverVersion.Split('.')[0..2] -join '.')
+if ($driverBuild -ne $runtimeBuild) {
+    throw "WebView2 $webviewVersion and EdgeDriver $driverVersion build mismatch; native GUI E2E BLOCKED"
+}
+$env:PATH = $driver.DirectoryName + ";" + $env:PATH
 $osInfo = Get-CimInstance Win32_OperatingSystem
 $prerequisites = [ordered]@{
     gitSha = $env:GITHUB_SHA
@@ -55,12 +82,17 @@ $prerequisites = [ordered]@{
     osCaption = $osInfo.Caption
     osVersion = $osInfo.Version
     webview2Version = $webviewVersion
-    edgeDriverVersion = ((& ($driver.FullName) --version) | Out-String).Trim()
+    webview2RegistryKey = $webviewKey
+    edgeDriverVersion = $driverVersion
+    edgeDriverBuildMatched = ($driverBuild -eq $runtimeBuild)
+    edgeDriverSha256 = (Get-FileHash $driver.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    edgeDriverSignature = $signature.Status.ToString()
+    driverSource = $driverUri
     tauriDriverVersion = ((& $tauri --version) | Out-String).Trim()
     exactInstalledExe = $binary
 }
-$prerequisites | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $proof 'driver-prerequisites.json') -Encoding utf8
-Write-Host "Native WebView2 driver diagnostic saved; image=$($prerequisites.runnerImage), runtime=$($prerequisites.webview2Version)"
+$prerequisites | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $proof 'driver-prerequisites.json') -Encoding utf8
+Write-Host "Verified matching signed Microsoft EdgeDriver $driverVersion for WebView2 $webviewVersion on $($prerequisites.runnerImage)"
 
 $service = $null
 try {
