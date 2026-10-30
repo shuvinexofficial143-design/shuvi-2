@@ -1,4 +1,4 @@
-name: Shuvi 2 AI Director A06 verification
+name: Shuvi 2 AI Director A07 verification
 on:
   push:
     branches:
@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '22'
       - name: Test bounded AI action plans and consent on exact branch HEAD
-        run: node --test tests/ai-director-core.test.mjs tests/ai-director-a02.test.mjs tests/ai-director-a04.test.mjs tests/ai-director-a05.test.mjs tests/ai-director-a06.test.mjs
+        run: node --test tests/ai-director-core.test.mjs tests/ai-director-a02.test.mjs tests/ai-director-a04.test.mjs tests/ai-director-a05.test.mjs tests/ai-director-a06.test.mjs tests/ai-director-a07.test.mjs
       - name: Verify existing app regressions
         run: |
           npm install --no-audit --no-fund
