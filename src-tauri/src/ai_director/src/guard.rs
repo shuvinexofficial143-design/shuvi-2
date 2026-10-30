@@ -128,6 +128,9 @@ pub trait OwnerConsent {fn grant(&mut self,scope:&Scope)->bool;}
 // The mutable borrow covers native state inspection, command and readback.
 pub trait NativeOwner {
     fn snapshot(&mut self)->Result<Snapshot,String>;
+    // Read-only lookup of the actual native clip/layer/comp IDs, track,
+    // edit capability and object state. Must NOT mutate or enqueue an edit.
+    fn preflight_action(&mut self,action:&Action)->Result<bool,String>;
     fn apply(&mut self,action:&Action)->Result<(),String>;
     // SHA-256 of a canonical independently inspected affected native object.
     fn object_proof_sha256(&mut self,action:&Action)->Result<String,String>;
@@ -232,6 +235,15 @@ impl Ledger {
         let current=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
         if !current.valid(){return Err(GuardError::Invalid);}
         if current!=expected{return Err(GuardError::StaleProject);}
+        // Native ID/track existence is NOT established by the model's inventory.
+        // Owner must independently confirm it before writing an edit intent.
+        if owner.preflight_action(&p.actions[index]).ok()!=Some(true){
+            return Err(GuardError::Invalid);
+        }
+        // Preflight must be observational. Re-check owner revision to catch
+        // accidental native changes before the irreversible intent is recorded.
+        let checked=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        if checked!=expected{return Err(GuardError::StaleProject);}
         let key=digest(&(digest(&p)?,index,&p.actions[index]))?;
         // A durable intent precedes the native call. On unknown outcome it
         // remains; reentry is rejected, never blind-replayed.
