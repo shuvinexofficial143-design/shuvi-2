@@ -13,6 +13,7 @@ pub mod preview;
 pub mod export;
 pub mod snapshot;
 pub mod history;
+pub mod ai;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

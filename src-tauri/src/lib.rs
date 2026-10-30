@@ -25,6 +25,14 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Real OpenAI structured proposal only. Never executes an editing action.
+#[tauri::command]
+async fn video_ai_propose(request:video::ai::ModelRequest)
+    -> Result<video::ai::ModelProposal,String> {
+    tauri::async_runtime::spawn_blocking(move||video::ai::propose(request))
+        .await.map_err(|e|format!("Video AI worker failed: {e}"))?
+}
+
 /// Explicit recovery of an interrupted history journal commit, not a file overwrite.
 #[tauri::command]
 async fn video_history_reconcile(request:video::history::ReconcileRequest)
@@ -110,7 +118,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot, video_history_status, video_history_restore, video_history_reconcile])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot, video_history_status, video_history_restore, video_history_reconcile, video_ai_propose])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }
