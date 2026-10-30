@@ -30,7 +30,8 @@ test("all manual editing actions go through native Tauri command",()=>{
     "status","createComposition","listLayers","addText","addShape",
     "setTransform","addKey","easeKeys","render","saveProject","openProject",
     "addEffect","listEffects","setEffectParameter","toggleEffect","removeEffect",
-    "addPolygonMask","listMasks","setMaskVertex","removeMask","exportPng"
+    "addPolygonMask","listMasks","setMaskVertex","removeMask","exportPng",
+    "inspectEffectParameter","getMaskSettings","setMaskProperty"
   ];
   for(const action of actions){
     assert.ok(ts.includes('action:"'+action+'"'),"UI request not wired for "+action);
@@ -77,4 +78,20 @@ test("changing selected native layer refreshes masks/effects and current layer r
   assert.ok(ts.includes('activeLayer=layers.find(item=>item.id===activeLayer?.id)??null'));
   assert.ok(ts.includes('await refreshEffectMaskControls();'));
   assert.ok(ts.includes('Selecting native layer'));
+});
+
+test("advanced native properties are read back and edited through same typed worker",()=>{
+  for(const id of ["motion-feather","motion-expansion","motion-mask-opacity",
+    "motion-apply-mask-settings","motion-mask-state","motion-fx-state"]){
+    assert.ok(ts.includes(id),"native property control missing: "+id);
+  }
+  assert.match(ts,/function refreshSelectedNativeProperties/);
+  assert.match(ts,/param\.source!=="native-effectcraft"/);
+  assert.match(ts,/action:"inspectEffectParameter"/);
+  assert.match(ts,/action:"getMaskSettings"/);
+  assert.match(ts,/action:"setMaskProperty"/);
+  assert.match(ipc,/e\.effect_parameter_state\(/);
+  assert.match(ipc,/e\.mask_settings\(/);
+  assert.match(ipc,/e\.set_mask_property\(/);
+  assert.doesNotMatch(ts,/window\.open\(|eval\(/);
 });
