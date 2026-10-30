@@ -85,6 +85,16 @@ jobs:
         shell: pwsh
         timeout-minutes: 12
         run: node scripts/video/windows-desktop-e2e.mjs
+      - name: Preserve Windows desktop E2E proof and failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shuvi2-video-desktop-e2e-proof
+          path: |
+            src-tauri/target/video-desktop-launch-smoke.json
+            src-tauri/target/video-desktop-e2e.json
+            src-tauri/target/video-desktop-e2e.png
+          if-no-files-found: warn
       - name: Verify real nonempty NSIS installer and staged binary
         shell: pwsh
         run: |
