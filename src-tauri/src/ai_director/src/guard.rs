@@ -123,6 +123,9 @@ pub trait OwnerConsent {fn grant(&mut self,scope:&Scope)->bool;}
 pub trait NativeOwner {
     fn snapshot(&mut self)->Result<Snapshot,String>;
     fn apply(&mut self,action:&Action)->Result<(),String>;
+    // Inspect the actual affected clip/layer/comp after applying, not merely
+    // a session revision. A false or missing native proof is UNCERTAIN.
+    fn verify_action(&mut self,action:&Action)->Result<bool,String>;
 }
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
@@ -228,6 +231,9 @@ impl Ledger {
         owner.apply(&p.actions[index]).map_err(|_|GuardError::NativeOutcomeUncertain)?;
         let after=owner.snapshot().map_err(|_|GuardError::NativeOutcomeUncertain)?;
         if !after.valid()||!progressed(&expected,&after) {
+            return Err(GuardError::NativeOutcomeUncertain);
+        }
+        if owner.verify_action(&p.actions[index]).ok()!=Some(true) {
             return Err(GuardError::NativeOutcomeUncertain);
         }
         let receipt=Receipt{task_id:id.into(),index,key,before:expected,after,native_verified:true};
