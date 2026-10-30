@@ -95,3 +95,11 @@ test("advanced native properties are read back and edited through same typed wor
   assert.match(ipc,/e\.set_mask_property\(/);
   assert.doesNotMatch(ts,/window\.open\(|eval\(/);
 });
+
+test("stale native responses cannot draw in an unmounted window or wrong playhead",()=>{
+  assert.match(ts,/let uiGeneration = 0/);
+  assert.match(ts,/uiGeneration\+\+/);
+  assert.ok(ts.includes('if(!mounted||generation!==uiGeneration||activeComp?.id!==comp.id||currentTime!==frameTime)return;'));
+  assert.ok(ts.includes('if(!mounted)return;'));
+  assert.ok(ts.includes('if(activeComp)await afterEdit();'));
+});
