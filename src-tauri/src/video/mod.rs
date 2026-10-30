@@ -12,6 +12,7 @@ pub mod timeline;
 pub mod preview;
 pub mod export;
 pub mod snapshot;
+pub mod history;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -33,6 +34,12 @@ pub struct VideoProbe {
 /// This is a *content* fingerprint, not FilmCraft's per-process revision counter.
 /// A new FilmCraft CLI process restarts the session revision, so callers must
 /// compare this digest to detect intervening manual edits before AI actions.
+pub(super) fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut hash=Sha256::new();
+    hash.update(bytes);
+    format!("{:x}",hash.finalize())
+}
+
 pub(super) fn project_sha256(path: &Path) -> Result<String, String> {
     let data = std::fs::read(path).map_err(|e| format!("Cannot fingerprint project: {e}"))?;
     if data.is_empty() || data.len() > 64 * 1024 * 1024 {

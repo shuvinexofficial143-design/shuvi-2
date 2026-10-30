@@ -73,6 +73,12 @@ jobs:
           $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
           cargo test --manifest-path src-tauri/Cargo.toml --lib video::export::tests::real_export_playable_h264_mp4 -- --exact --ignored --nocapture
           if ($LASTEXITCODE -ne 0) { throw "FilmCraft real H264 export test failed." }
+      - name: Verify real cross-session FilmCraft Undo Redo saved snapshots
+        shell: pwsh
+        run: |
+          $env:SHUVI_FILMCRAFT_CLI_PATH = (Resolve-Path src-tauri/binaries/filmcraft-cli-x86_64-pc-windows-msvc.exe).Path
+          cargo test --manifest-path src-tauri/Cargo.toml --lib video::history::tests::real_cross_session_undo_redo -- --exact --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Video persistent history E2E failed." }
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
       - name: Build Windows NSIS experimental Shuvi video package

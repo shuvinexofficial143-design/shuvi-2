@@ -25,6 +25,21 @@ fn serialize_captions(cues: Vec<subtitles::Cue>) -> Result<String, String> {
     subtitles::serialize(&cues)
 }
 
+/// Cross-session FilmCraft project snapshot history; user-initiated only.
+#[tauri::command]
+async fn video_history_status(selected_root:String,project_path:String)
+    -> Result<video::history::HistoryStatus,String> {
+    tauri::async_runtime::spawn_blocking(move||video::history::status(selected_root,project_path))
+        .await.map_err(|e|format!("History worker failed: {e}"))?
+}
+
+#[tauri::command]
+async fn video_history_restore(request:video::history::RestoreRequest)
+    -> Result<video::history::RestoreReceipt,String> {
+    tauri::async_runtime::spawn_blocking(move||video::history::restore(request))
+        .await.map_err(|e|format!("History restore worker failed: {e}"))?
+}
+
 /// Refresh exact project SHA-256 before AI-planned edits or manual operations.
 #[tauri::command]
 async fn video_project_snapshot(
@@ -87,7 +102,7 @@ async fn video_engine_probe() -> Result<video::VideoProbe, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot])
+        .invoke_handler(tauri::generate_handler![engine_status, serialize_captions, video_engine_probe, video_import_media, video_timeline_apply, video_preview_frame, video_export_mp4, video_project_snapshot, video_history_status, video_history_restore])
         .run(tauri::generate_context!())
         .expect("Failed to start Shuvi 2");
 }

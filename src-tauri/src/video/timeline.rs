@@ -182,6 +182,8 @@ pub fn apply(request: TimelineRequest) -> Result<TimelineReceipt, String> {
     if after["root"].is_null() {
         return Err("Project tree readback unavailable; original backup preserved".into());
     }
+    let verified_after_bytes=fs::read(&project).map_err(|e|e.to_string())?;
+    super::history::record_edit(&project,&before_bytes,&verified_after_bytes)?;
     Ok(TimelineReceipt {
         project_path: project_str.into(), before_revision: revision, after_revision: new_revision,
         project_sha256: super::project_sha256(&project)?,
