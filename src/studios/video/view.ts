@@ -555,6 +555,8 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
   });
   for(const key of ["root","project"]){
     e<HTMLInputElement>(key).addEventListener("change",()=>{
+      // Project changes invalidate every pending model or local proposal.
+      clearProposal();
       history=null;snapshot=null;clipId=null;itemId=null;
       scrubber.invalidate();clearFrame();draw();
     });
