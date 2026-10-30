@@ -5,7 +5,7 @@ use filmcraft_ui_egui::{FilmcraftApp,menus};
 use serde_json::json;
 use shuvi_ai_provider::{
     guard::Version,
-    host::TaskBinding,
+    host::{TaskBinding,OwnerConsentRequest},
     plan::{ReserveWire,independently_hash},
 };
 use shuvi_video_a07_native_bridge::gui_runtime::NativeGuiA07Runtime;
@@ -92,6 +92,24 @@ fn real_native_gui_adapter_denies_old_approval_scope_after_project_switch(){
             json!({"name":"new document context","width":320,"height":240})).unwrap();
         assert_ne!(host.snapshot(&mut original).unwrap().session_id,
             reserve.project["sessionId"].as_str().unwrap());
+        // Exercise the REAL native Windows approval dispatch. It MUST
+        // reject a stale persisted project BEFORE the OS modal is reached.
+        // Headless CI therefore never asks anyone to click Yes/No.
+        let stale=OwnerConsentRequest{
+            task_id:reserve.task_id.clone(),plan_hash:binding.plan_hash.clone()
+        };
+        assert_eq!(
+            host.request_native_owner_consent(&mut original,&stale).unwrap_err(),
+            "StaleProject"
+        );
+        // Forged plan hash is also rejected before any native modal.
+        let forged=OwnerConsentRequest{
+            task_id:reserve.task_id.clone(),plan_hash:"f".repeat(64)
+        };
+        assert_eq!(
+            host.request_native_owner_consent(&mut original,&forged).unwrap_err(),
+            "Invalid"
+        );
         // Read-only history is still available and identity-scoped.
         let state=host.task_history(&mut original).unwrap();
         assert_eq!(state["nativeOwnerBound"],true);
