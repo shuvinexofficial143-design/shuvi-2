@@ -26,7 +26,9 @@ fn clipboard_note(s: &effectcraft_engine::Session) -> String {
 pub(crate) fn run_engine(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     // Events already queued belong to earlier invocations (`engine.execute` defers them).
     let queued = app.session.events.len();
-    let mut r = app.session.execute(id, params).map_err(|e| e.to_string());
+    // M-AI13: menu/shortcut native command and control engine.execute must
+    // take the SAME real EffectcraftApp manual owner lease.
+    let mut r = app.motion_owner_gate.manual_menu_command(&mut app.session, id, params);
     if let Err(e) = &r {
         app.ui.status = e.clone();
     } else if COPY_COMMANDS.contains(&id) && app.session.state.text_edit.is_none() {
