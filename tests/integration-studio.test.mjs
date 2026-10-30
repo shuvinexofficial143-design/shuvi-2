@@ -11,7 +11,7 @@ test("Video and Motion commands coexist in one Tauri Windows host",()=>{
     assert.ok(cargo.includes(item),"Missing dependency: "+item);
 });
 test("both studios mount into the SAME window and Video DOM survives switching",()=>{
-  assert.match(html,/src\\/entry\\.ts/); assert.ok(read("src/entry.ts").includes('await import("./main")'));
+  assert.match(html,/src\/entry\.ts/); assert.ok(read("src/entry.ts").includes('await import("./main")'));
   assert.ok(read("src/entry.ts").includes('await import("./studios/motion/bootstrap")'));
   assert.match(motion,/originalPreviewNodes = Array\.from\(preview\.childNodes\)/);
   assert.match(motion,/originalTimelineNodes = Array\.from\(timeline\.childNodes\)/);
