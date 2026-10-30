@@ -37,6 +37,10 @@ fn run()->Result<(),String>{
         ("m08_effected.png",effected.clone()),("m08_masked.png",masked.clone())]{
         fs::write(folder.join(name),frame.png()?).map_err(|e|e.to_string())?;
     }
+    let exported=r.export_png_frame(&folder,"m08_native_export.png",c,0.0,320,true)?;
+    if !exported.verified_from_disk||exported.bytes==0{
+        return Err("native PNG export disk readback failed".into());
+    }
     let receipt=json!({"ok":true,"proof":"native-effect-mask-render-save-reopen",
         "engine":"effectcraft","compositionId":c,"layerId":l,
         "effectUid":fx.uid,"maskUid":mask.uid,"projectBytes":save.bytes,
@@ -44,7 +48,8 @@ fn run()->Result<(),String>{
         "effectChecksum":effected.checksum().to_string(),
         "maskedChecksum":masked.checksum().to_string(),
         "maskVertices":mask.vertices.len(),
-        "outputFiles":["m08_original.png","m08_effected.png","m08_masked.png","m08_effects_masks.ecproj"]});
+        "nativeExportPngBytes":exported.bytes,"nativeExportVerified":exported.verified_from_disk,
+        "outputFiles":["m08_original.png","m08_effected.png","m08_masked.png","m08_native_export.png","m08_effects_masks.ecproj"]});
     fs::write(folder.join("m08_receipt.json"),serde_json::to_vec_pretty(&receipt)
         .map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     println!("{receipt}");
