@@ -41,6 +41,7 @@
     "independentObjectReadback": false
   },
   "desktopIntegrationRequirements": [
+    "Review M-AI13 original egui MotionOwnerGate (menu/shortcut, control-channel direct/offloaded admission) but do NOT mistake it for complete global mutation arbitration",
     "Native egui/eframe manual commands and AI guarded commands must share the SAME exclusive owner and session",
     "Use trusted owner-originated project and session identity, increment incarnation on project open/revert/new/save as",
     "Persist SQLite WAL/FULL transaction ledger in a protected owner-local OS path, never under untrusted project input",
@@ -56,5 +57,16 @@
     "nativeWindowsBuildAvailableInCI": "not-yet-verified-for-current-commit",
     "sqliteBridgeBundled": false,
     "productionAiEditingEnabled": false
+  },
+  "manualNativeOwnerGateFoundation": {
+    "appOwned": true,
+    "menuAndShortcutCommandRoute": true,
+    "controlChannelEngineExecuteRoute": true,
+    "controlChannelOffloadedCommandAdmission": true,
+    "aiLeaseAvailableInProduction": false,
+    "otherDirectNativeMutationRoutesReconciled": false,
+    "desktopTrustedOwnerApproval": false,
+    "globalCrossProcessLock": false,
+    "statusOnly": "Manual command admission is not a global owner lock or production AI execution authorization"
   }
 }
