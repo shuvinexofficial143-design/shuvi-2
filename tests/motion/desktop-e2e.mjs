@@ -94,6 +94,9 @@ async function test(){
   assert.ok(session,"tauri-driver did not create a real desktop session");
   let exportedPng;
   const result={driver:"tauri-driver",window:"real-windows-webview2",
+    commitSha:process.env.GITHUB_SHA??null,
+    nativeEffectCraftPin:process.env.SHUVI_EFFECTCRAFT_PIN??null,
+    runnerOS:process.env.RUNNER_OS??process.platform,
     projectDir:root,steps:[],nativeScreenshot:null};
   async function step(name,fn){lastStep=name;await fn();result.steps.push(name)}
   try{
