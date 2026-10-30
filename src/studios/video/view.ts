@@ -1,6 +1,7 @@
 import "./view.css";
 import {parseVideoChat, type VideoChatProposal} from "./chat-command.mjs";
 import { createVideoProposalEpoch } from "./proposal-epoch.mjs";
+import { clipDragDestination } from "./drag.mjs";
 import {requestVideoAiProposal} from "./ai";
 import {canSubmitVideoAiRequest} from "./privacy.mjs";
 import { createPreviewCoordinator } from "./scrub.mjs";
@@ -240,7 +241,34 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
           btn.textContent=clip.name;
           btn.style.left=String(Math.min(99,Math.max(0,clip.start/seconds*100)))+"%";
           btn.style.width=String(Math.max(3,Math.min(100-clip.start/seconds*100,clip.duration/seconds*100)))+"%";
-          btn.title="#"+clip.clipId+" · "+formatTimecode(clip.start)+" · "+formatTimecode(clip.duration);
+          btn.title="#"+clip.clipId+" · "+formatTimecode(clip.start)+" · "+formatTimecode(clip.duration)+
+            " · Drag horizontally on same track to request a real FilmCraft move";
+          let pointerStartX:number|null=null;
+          let activePointer:number|null=null;
+          btn.addEventListener("pointerdown",event=>{
+            if(event.button!==0||busy||!active)return;
+            pointerStartX=event.clientX;
+            activePointer=event.pointerId;
+            btn.setPointerCapture(event.pointerId);
+          });
+          btn.addEventListener("pointercancel",()=>{
+            pointerStartX=null;activePointer=null;
+          });
+          btn.addEventListener("pointerup",event=>{
+            if(pointerStartX===null||activePointer!==event.pointerId)return;
+            const deltaPixels=event.clientX-pointerStartX;
+            pointerStartX=null;activePointer=null;
+            if(Math.abs(deltaPixels)<8||busy||!active)return;
+            const fps=sequenceFps(snapshot?.sequence);
+            if(!fps){inform("Cannot drag: native FilmCraft FPS is unavailable",true);return;}
+            const destination=clipDragDestination({
+              start:clip.start,deltaPixels,lanePixels:track.getBoundingClientRect().width,
+              visibleSeconds:seconds,fps
+            });
+            if(destination===null){inform("Invalid pointer drag geometry; no edit made",true);return;}
+            if(Math.abs(destination-clip.start)<(0.5/fps))return;
+            void moveClipByDrag(clip,destination);
+          });
           btn.addEventListener("click",()=>{
             clipId=clip.clipId;
             e<HTMLInputElement>("seconds").value=String(Number((clip.start+clip.duration/2).toFixed(3)));
@@ -289,6 +317,30 @@ export function mountVideoStudio(): { setActive(active:boolean):void; proposeCha
     const accepted=scrubber.request({...req,seconds,scale},immediate);
     if(!accepted)throw Error("Preview is busy or inactive");
     inform("FilmCraft rendering requested at "+formatTimecode(seconds)+" · newest frame will replace older requests");
+  }
+  async function moveClipByDrag(clip:EditorClip,seconds:number):Promise<void>{
+    if(!active||busy||!snapshot)return;
+    stopSampledPlayback(true);
+    busy=true;draw();
+    inform("Moving real FilmCraft clip #"+clip.clipId+" to "+formatTimecode(seconds)+
+      "… Awaiting native save and verification.");
+    try{
+      await scrubber.pauseAndDrain();
+      const current=clips.find(c=>c.clipId===clip.clipId&&c.track===clip.track);
+      if(!current||current.start!==clip.start)
+        throw Error("Timeline changed since pointer drag began");
+      const receipt=await editVideoTimeline({...request(),actions:[{
+        type:"move",clipId:clip.clipId,track:clip.track,seconds,insert:false
+      }]});
+      const state=await load();
+      if(state.projectSha256!==receipt.projectSha256)
+        throw Error("FilmCraft clip move readback mismatch");
+      clipId=clip.clipId;
+      inform("Verified real timeline move · clip #"+clip.clipId+" → "+formatTimecode(seconds));
+    }catch(error){
+      inform("Drag did not complete: "+String(error),true);
+      try{await load();}catch{}
+    }finally{scrubber.resume();busy=false;draw();}
   }
   async function edit(action:TimelineAction):Promise<void>{
     const response=await editVideoTimeline({...request(),actions:[action]});
