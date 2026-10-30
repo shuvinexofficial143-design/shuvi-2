@@ -170,6 +170,24 @@ try{
   await page.locator(".v-lanes .v-clip").first().waitFor({state:"visible",timeout:20000});
   note("redo","Verified independent CLI session restored same FilmCraft project clip");
 
+  // Zoom/Pan must be purely visual and reflect saved native FilmCraft clip geometry.
+  const preZoomProject=readFileSync(project);
+  await page.locator('[data-v="timelineZoom"]').selectOption("4");
+  const panControl=page.locator('[data-v="timelinePan"]');
+  await panControl.evaluate(el=>{
+    el.value=String(Number(el.max)/2);
+    el.dispatchEvent(new Event("input",{bubbles:true}));
+  });
+  await page.locator('.v-lanes .v-track-lane .v-clipped-left').first()
+    .waitFor({state:"visible",timeout:10000});
+  if(!(await page.locator('[data-v="viewRange"]').textContent())?.includes("4× zoom"))
+    throw Error("Native FilmCraft timeline zoom viewport label missing");
+  if(!readFileSync(project).equals(preZoomProject))
+    throw Error("Changing timeline zoom/pan modified saved .fcproj bytes");
+  note("zoom-pan","Real FilmCraft timeline visually clipped/panned without editing project");
+  await page.locator('[data-v="timelineZoom"]').selectOption("1");
+
+
   // Real mouse pointer drag: actual FilmCraft typed "move" saves .fcproj.
   // Verify the saved file SHA changes only after native readback; undo restores.
   const originalBeforeDrag=readFileSync(project);
