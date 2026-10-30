@@ -1,0 +1,29 @@
+name: Shuvi 2 AI Director A01 verification
+on:
+  push:
+    branches:
+      - feature/shuvi2-ai-director
+  pull_request:
+    paths:
+      - 'src/ai-director/**'
+      - 'tests/ai-director-*.test.mjs'
+      - 'docs/ai-director/**'
+      - '.github/workflows/ai-director.yml'
+permissions:
+  contents: read
+jobs:
+  ai-director-contracts-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test bounded AI action plans and consent on exact branch HEAD
+        run: node --test tests/ai-director-core.test.mjs
+      - name: Verify existing app regressions
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
