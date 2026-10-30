@@ -4,7 +4,7 @@
 use std::{path::Path, sync::mpsc::{self,Sender,Receiver}, thread, time::Duration};
 use serde::Deserialize;
 use serde_json::{json,Value};
-use shuvi_motion_bridge::{CompositionSpec,MotionBridge,Property,ShapeKind,Transform};
+use shuvi_motion_bridge::{BuiltinEffect,CompositionSpec,MotionBridge,Property,ShapeKind,Transform};
 use base64::{engine::general_purpose::STANDARD,Engine as _};
 
 #[derive(Debug,Deserialize)]
@@ -22,6 +22,15 @@ pub enum MotionRequest{
     Render { comp_id:u64,time:f64,max_side:u32,transparent:bool },
     SaveProject { workspace:String,basename:String },
     OpenProject { workspace:String,basename:String },
+    AddEffect { comp_id:u64,layer_id:u64,effect:String },
+    ListEffects { comp_id:u64,layer_id:u64 },
+    SetEffectParameter { comp_id:u64,layer_id:u64,uid:u64,effect:String,parameter:String,value:f64 },
+    ToggleEffect { comp_id:u64,layer_id:u64,uid:u64,enabled:bool },
+    RemoveEffect { comp_id:u64,layer_id:u64,uid:u64 },
+    AddPolygonMask { comp_id:u64,layer_id:u64,vertices:Vec<[f64;2]> },
+    ListMasks { comp_id:u64,layer_id:u64 },
+    SetMaskVertex { comp_id:u64,layer_id:u64,uid:u64,index:usize,point:[f64;2] },
+    RemoveMask { comp_id:u64,layer_id:u64,uid:u64 },
 }
 
 struct Work { request:MotionRequest, respond:Sender<Result<Value,String>> }
@@ -65,6 +74,19 @@ fn shape(name:&str)->Result<ShapeKind,String>{
         "polygon"=>Ok(ShapeKind::Polygon),
         _=>Err("allowed shapes: rect|ellipse|rounded|star|polygon".into())
     }
+}
+fn builtin(name:&str)->Result<BuiltinEffect,String>{
+    match name {
+        "gaussianBlur"=>Ok(BuiltinEffect::GaussianBlur),
+        "brightnessContrast"=>Ok(BuiltinEffect::BrightnessContrast),
+        _=>Err("only gaussianBlur and brightnessContrast built-ins are approved".into())
+    }
+}
+fn effect_json(f:shuvi_motion_bridge::EffectInfo)->Value{
+    json!({"uid":f.uid,"id":f.id,"name":f.name,"enabled":f.enabled})
+}
+fn mask_json(m:shuvi_motion_bridge::MaskInfo)->Value{
+    json!({"uid":m.uid,"name":m.name,"closed":m.closed,"vertices":m.vertices})
 }
 fn coords(x:Option<f64>,y:Option<f64>)->Result<(f64,f64),String>{
     match (x,y){(Some(x),Some(y))=>Ok((x,y)),_=>Err("both x and y are required".into())}
@@ -130,6 +152,30 @@ fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
         MotionRequest::OpenProject{workspace,basename}=>{
             Ok(receipt(e.open_project(Path::new(&workspace),&basename)?))
         }
+        MotionRequest::AddEffect{comp_id,layer_id,effect}=>
+            Ok(effect_json(e.add_effect(comp_id,layer_id,builtin(&effect)?)?)),
+        MotionRequest::ListEffects{comp_id,layer_id}=>Ok(Value::Array(e.list_effects(comp_id,layer_id)?
+            .into_iter().map(effect_json).collect())),
+        MotionRequest::SetEffectParameter{comp_id,layer_id,uid,effect,parameter,value}=>{
+            let actual=e.set_effect_numeric(comp_id,layer_id,uid,builtin(&effect)?,&parameter,value)?;
+            Ok(json!({"uid":uid,"parameter":parameter,"value":actual,"verified":true}))
+        }
+        MotionRequest::ToggleEffect{comp_id,layer_id,uid,enabled}=>
+            Ok(effect_json(e.set_effect_enabled(comp_id,layer_id,uid,enabled)?)),
+        MotionRequest::RemoveEffect{comp_id,layer_id,uid}=>{
+            e.remove_effect(comp_id,layer_id,uid)?;
+            Ok(json!({"removed":true,"uid":uid}))
+        }
+        MotionRequest::AddPolygonMask{comp_id,layer_id,vertices}=>
+            Ok(mask_json(e.new_polygon_mask(comp_id,layer_id,&vertices)?)),
+        MotionRequest::ListMasks{comp_id,layer_id}=>Ok(Value::Array(e.list_masks(comp_id,layer_id)?
+            .into_iter().map(mask_json).collect())),
+        MotionRequest::SetMaskVertex{comp_id,layer_id,uid,index,point}=>
+            Ok(mask_json(e.set_mask_vertex(comp_id,layer_id,uid,index,point)?)),
+        MotionRequest::RemoveMask{comp_id,layer_id,uid}=>{
+            e.remove_mask(comp_id,layer_id,uid)?;
+            Ok(json!({"removed":true,"uid":uid}))
+        }
     }
 }
 
@@ -179,6 +225,40 @@ mod tests{
         assert_eq!(before["projectRevision"],after["projectRevision"]);
     }
     #[test]
+    fn actual_effect_mask_commands_share_native_worker(){
+        let host=MotionHost::new();
+        let c=host.execute(MotionRequest::CreateComposition{
+            name:"Effect IPC".into(),width:320,height:180,fps:30.0,duration_seconds:3.0
+        }).unwrap()["id"].as_u64().unwrap();
+        let l=host.execute(MotionRequest::AddShape{
+            comp_id:c,name:"Plate".into(),kind:"rect".into(),x:160.0,y:90.0,
+            width:160.0,height:90.0,fill:"#557799".into()
+        }).unwrap()["id"].as_u64().unwrap();
+        let fx=host.execute(MotionRequest::AddEffect{
+            comp_id:c,layer_id:l,effect:"brightnessContrast".into()
+        }).unwrap();
+        let uid=fx["uid"].as_u64().unwrap();
+        let p=host.execute(MotionRequest::SetEffectParameter{
+            comp_id:c,layer_id:l,uid,effect:"brightnessContrast".into(),
+            parameter:"brightness".into(),value:70.0
+        }).unwrap();
+        assert_eq!(p["value"],70.0);
+        let ms=host.execute(MotionRequest::AddPolygonMask{
+            comp_id:c,layer_id:l,
+            vertices:vec![[-40.0,-30.0],[40.0,-30.0],[40.0,30.0],[-40.0,30.0]]
+        }).unwrap();
+        assert_eq!(ms["closed"],true);
+        assert_eq!(host.execute(MotionRequest::ListEffects{
+            comp_id:c,layer_id:l
+        }).unwrap().as_array().unwrap().len(),1);
+        assert_eq!(host.execute(MotionRequest::ListMasks{
+            comp_id:c,layer_id:l
+        }).unwrap().as_array().unwrap().len(),1);
+        assert!(host.execute(MotionRequest::AddEffect{
+            comp_id:c,layer_id:l,effect:"userPlugin".into()
+        }).is_err());
+    }
+    #[test]
     fn frontend_json_contract_uses_only_typed_camel_case_actions(){
         let valid=serde_json::json!({
             "action":"createComposition","name":"IPC Name",
@@ -190,6 +270,12 @@ mod tests{
             "maxSide":640,"transparent":true
         });
         assert!(serde_json::from_value::<MotionRequest>(render).is_ok());
+        let mask=serde_json::json!({"action":"addPolygonMask","compId":1,"layerId":2,
+            "vertices":[[0.0,0.0],[50.0,0.0],[50.0,50.0]]});
+        assert!(serde_json::from_value::<MotionRequest>(mask).is_ok());
+        let fx=serde_json::json!({"action":"setEffectParameter","compId":1,"layerId":2,
+            "uid":3,"effect":"gaussianBlur","parameter":"blurriness","value":12.0});
+        assert!(serde_json::from_value::<MotionRequest>(fx).is_ok());
         let untrusted=serde_json::json!({"action":"shell","command":"unsafe"});
         assert!(serde_json::from_value::<MotionRequest>(untrusted).is_err());
     }
