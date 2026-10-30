@@ -1,5 +1,6 @@
 //! A02 isolated real HTTPS OpenAI adapter. Not yet registered in Tauri.
 //! Credential retrieval belongs to the trusted Windows host vault, never JS.
+pub mod guard;
 //! No arbitrary model-selected endpoints, shell commands or editor IPC.
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
