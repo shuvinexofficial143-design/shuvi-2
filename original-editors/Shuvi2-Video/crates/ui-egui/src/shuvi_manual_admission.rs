@@ -16,6 +16,13 @@ pub(crate) struct ManualCommandAdmission { shared: Arc<Mutex<OwnerState>> }
 pub(crate) struct ManualCommandLease { shared: Arc<Mutex<OwnerState>>, thread: ThreadId }
 
 impl ManualCommandAdmission {
+    /// Stop all subsequent covered edits after a caught native panel panic.
+    /// Catching a panic must not make an uncertain edit safe to replay.
+    pub(crate) fn poison(&self) {
+        if let Ok(mut owner)=self.shared.lock() {
+            owner.poisoned=true;
+        }
+    }
     pub(crate) fn blocked_reason(&self)->Option<&'static str>{
         let Ok(owner)=self.shared.lock() else {
             return Some("SHUVI_NATIVE_OWNER_POISONED");
@@ -135,6 +142,28 @@ mod shuvi_manual_admission_tests {
         assert!(crate::menus::invoke(&mut app,&ctx,"file.newSequence",
             json!({"name":"must not edit"})).unwrap_err().contains("POISONED"));
         assert!(shared.try_claim().is_err());
+    }
+
+    #[test]
+    fn caught_panel_panic_poison_prevents_new_native_menu_commands() {
+        let mut app=FilmcraftApp::new(Session::default());
+        let owner=app.shuvi_manual_admission.clone();
+        let outer=owner.try_claim().unwrap();
+        // Simulate FilmcraftApp::ui_inner catching a panel panic while its
+        // outer UI pass lease stays live, so Drop alone would not poison it.
+        let caught=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
+            panic!("test-only caught panel panic")
+        }));
+        assert!(caught.is_err());
+        owner.poison();
+        assert_eq!(owner.blocked_reason(),Some("SHUVI_NATIVE_OWNER_POISONED"));
+        drop(outer);
+        let ctx=egui::Context::default();
+        let revision=app.session.revision;
+        let error=crate::menus::invoke(&mut app,&ctx,"file.newSequence",
+            json!({"name":"must not be created"})).unwrap_err();
+        assert!(error.contains("POISONED"));
+        assert_eq!(app.session.revision,revision);
     }
 
     #[test]

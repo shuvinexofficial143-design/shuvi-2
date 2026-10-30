@@ -390,6 +390,11 @@ impl FilmcraftApp {
         // A panic in one panel must not close the app (losing unsaved work) or leave a blank
         // window: catch it, keep the session, and say what happened.
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.frame(ui))).is_err() {
+            // Original FilmCraft deliberately catches a panel panic instead
+            // of unwinding the whole UI callback. An edit may already have
+            // mutated the Session; poison the shared native admission so
+            // later manual/AI actions cannot accidentally replay it.
+            self.shuvi_manual_admission.poison();
             self.ui_error = Some(crash::take_last().unwrap_or_else(|| "unknown error".into()));
             self.playback.playing = false;
         }
@@ -398,7 +403,9 @@ impl FilmcraftApp {
         }
         self.error_window(ui.ctx());
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| graphics_notice::show(self, ui.ctx()))).is_err() {
-            // a broken notice must not take the session down: drop it
+            // A broken native dialog callback may have changed project
+            // state before being caught. Fail closed like other UI panics.
+            self.shuvi_manual_admission.poison();
             self.graphics_notice = None;
         }
         self.last_ui_time = self.now();

@@ -11,3 +11,6 @@
 This is a real source-level UI event-pass owner, not an A07 SQLite-integrated owner. The full native FilmcraftApp still has public direct Session references, some hooks enter outside ui_inner/logic_inner, and work on background workers can have their own side effects. A07 NativeVideoAdmission exists separately in a bridge crate and has NOT yet been connected to the production graphical app; trusted Windows approval, native credential vault connection, verified persistence and exact transaction binding are still missing. Therefore native AI editing remains disabled, including Send/Approve/Stop buttons.
 
 Tests must be run on the exact commit's GitHub Actions Windows CI before claiming build success; earlier V-AI13 CI may still be pending.
+
+## Catch-unwind continuation hardening
+The original native FilmcraftApp::ui_inner deliberately catches panics inside panel drawing and graphics notice rendering. A catch does not unwind the outer UI owner lease, so it formerly left the admission lane erroneously healthy. This change explicitly calls ManualCommandAdmission::poison() in both caught-panic branches. The gate then blocks all covered new edits even after the current UI pass returns, until explicit trusted recovery / application restart. New regression simulates this exact caught-while-owner-active case and verifies no native newSequence can run after poison.
