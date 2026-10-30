@@ -905,6 +905,72 @@ mod tests{
     }
 
     #[test]
+    fn native_text_readback_detects_real_out_of_band_mutation(){
+        // A command success payload never substitutes for fresh object inspection.
+        let mut session=Session::new();
+        let comp=from_comp(&mut session);
+        let mut owner=EffectcraftNativeOwner::new(&mut session,
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let action=Action::MotionAddText {
+            comp_id:comp,name:"Inspect Me".into(),text:"Approved Content".into(),
+            x:75.0,y:35.0,size:32.0
+        };
+        assert!(owner.preflight_action(&action).unwrap());
+        owner.apply(&action).unwrap();
+        assert!(owner.verify_action(&action).unwrap());
+        let stable=owner.object_proof_sha256(&action).unwrap();
+        assert_eq!(stable.len(),64);
+        let layer=owner.last_result.as_ref().unwrap()["layer"].as_u64().unwrap();
+        owner.session.execute_checked("layer.setText",json!({
+            "layer":layer,"text":"Changed outside the approved action"
+        })).unwrap();
+        assert!(!owner.verify_action(&action).unwrap(),
+            "real manually modified native object must invalidate approval proof");
+        assert!(owner.object_proof_sha256(&action).is_err(),
+            "do not hash approved intent after native contents changed");
+    }
+
+    #[test]
+    fn native_shape_readback_detects_real_geometry_mismatch(){
+        let mut s=Session::new();
+        let comp=from_comp(&mut s);
+        let mut owner=EffectcraftNativeOwner::new(&mut s,
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let action=Action::MotionAddShape {
+            comp_id:comp,name:"Check Position".into(),kind:"ellipse".into(),
+            x:42.0,y:36.0,width:110.0,height:84.0,fill:"#aabbcc".into()
+        };
+        assert!(owner.preflight_action(&action).unwrap());
+        owner.apply(&action).unwrap();
+        assert!(owner.verify_action(&action).unwrap());
+        let layer=owner.last_result.as_ref().unwrap()["layer"].as_u64().unwrap();
+        owner.session.execute_checked("prop.set",json!({
+            "layer":layer,"path":"transform/position","value":[10.0,20.0,0.0]
+        })).unwrap();
+        assert!(!owner.verify_action(&action).unwrap(),
+            "moving the native layer after apply must invalidate its readback");
+    }
+
+    #[test]
+    fn effect_preflight_denies_duplicate_on_same_native_layer(){
+        let mut s=Session::new();
+        let comp=from_comp(&mut s);
+        let layer=s.execute_checked("layer.newText",json!({
+            "name":"Filter Test","text":"Effect"
+        })).unwrap()["layer"].as_u64().unwrap();
+        let mut owner=EffectcraftNativeOwner::new(&mut s,
+            "native-test.ecproj".into(),"native-session-test-1234".into()).unwrap();
+        let action=Action::MotionAddEffect {
+            comp_id:comp,layer_id:layer,effect:"brightnessContrast".into()
+        };
+        assert!(owner.preflight_action(&action).unwrap());
+        owner.apply(&action).unwrap();
+        assert!(owner.verify_action(&action).unwrap());
+        assert!(!owner.preflight_action(&action).unwrap(),
+            "duplicate identical native effect must be rejected before SQLite intent");
+    }
+
+    #[test]
     fn native_inventory_uses_real_session_ids_without_paths(){
         let mut s=Session::new();
         let comp=from_comp(&mut s);
