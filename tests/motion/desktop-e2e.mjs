@@ -113,6 +113,7 @@ async function test(){
       assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
       const listed=await text("#motion-layer-list");
       assert.match(listed,/WebDriver Shape/);
+      await screenshot("m11_01-native-shape.png");
     });
     await step("effect parameters and polygon mask visibly change real rendered PNG",async()=>{
       const original=await attr("#motion-native-frame","src");
@@ -133,6 +134,7 @@ async function test(){
       assert.match(masked,/^data:image\/png;base64,/);
       assert.notEqual(masked,blurred,"Polygon mask did not change native pixels");
       result.frames={originalBytes:original.length,blurredBytes:blurred.length,maskedBytes:masked.length};
+      await screenshot("m11_02-effect-mask.png");
     });
     await step("save persistent .ecproj and export real PNG to owner temp workspace",async()=>{
       await fill("#motion-workspace",root);
@@ -207,6 +209,7 @@ async function test(){
       assert.ok(decoded.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
         "Relaunched application failed to return a real EffectCraft PNG preview");
       result.coldRestartVerified=true;
+      await screenshot("m11_03-cold-reopened-project.png");
     });
     await step("native desktop screenshot",async()=>{
       await screenshot("motion-windows-webview2.png");
