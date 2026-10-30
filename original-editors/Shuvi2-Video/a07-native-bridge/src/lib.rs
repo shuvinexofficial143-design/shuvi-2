@@ -71,13 +71,14 @@ impl<'a> VideoOwner<'a> {
         let Action::VideoSplit { clip_id, seconds } = action else {
             return Err("NATIVE_ACTION_MISMATCH".into());
         };
+        let clip_id = *clip_id;
         if !seconds.is_finite() {
             return Err("NATIVE_ACTION_MISMATCH".into());
         }
         let tick = self.session.sequence_rate()
             .snap_nearest(Tick((seconds * TICKS_PER_SECOND as f64).round() as i64)).0;
         let state = self.last.as_ref().ok_or("NATIVE_INTENT_NOT_EXECUTED")?;
-        if state.clip_id != *clip_id || state.tick != tick {
+        if state.clip_id != clip_id || state.tick != tick {
             return Err("NATIVE_ACTION_MISMATCH".into());
         }
         let before = state.before.clone();
@@ -190,6 +191,7 @@ impl NativeOwner for VideoOwner<'_> {
         let Action::VideoSplit { clip_id, .. } = action else {
             return Err("A07_PROOF_TARGET_MISSING".into());
         };
+        let clip_id = *clip_id;
         for kind in ["video","audio"] {
             if let Some(tracks)=after[kind].as_array() {
                 for tr in tracks {
