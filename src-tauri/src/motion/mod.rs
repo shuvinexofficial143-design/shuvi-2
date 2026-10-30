@@ -1,7 +1,7 @@
 //! Single-owner EffectCraft engine worker for Shuvi Motion Studio.
 //! One in-process engine, shared by manual UI and later approved AI commands.
 //! Separate thread keeps possibly non-Send render hosts away from Tauri state.
-use std::{path::Path, sync::mpsc::{self,Sender,Receiver}, thread, time::Duration};
+use std::{path::Path, sync::mpsc::{self,Sender,SyncSender,Receiver,TrySendError}, thread, time::{Duration,Instant}};
 use serde::Deserialize;
 use serde_json::{json,Value};
 use shuvi_motion_bridge::{BuiltinEffect,CompositionSpec,MaskProperty,MotionBridge,Property,ShapeKind,Transform};
@@ -37,12 +37,15 @@ pub enum MotionRequest{
     SetMaskProperty { comp_id:u64,layer_id:u64,uid:u64,property:String,value:f64 },
 }
 
-struct Work { request:MotionRequest, respond:Sender<Result<Value,String>> }
+struct Work { request:MotionRequest, respond:Sender<Result<Value,String>>, deadline:Instant }
 #[derive(Clone)]
-pub struct MotionHost { tx:Sender<Work> }
+pub struct MotionHost { tx:SyncSender<Work> }
+const MAX_PENDING:usize=32;
+const COMMAND_TIMEOUT:Duration=Duration::from_secs(120);
 impl MotionHost{
     pub fn new()->Self{
-        let (tx,rx)=mpsc::channel();
+        // Bound memory and pending edits: prevent unlimited queued commands under heavy rendering.
+        let (tx,rx)=mpsc::sync_channel(MAX_PENDING);
         // A native engine session lives on this worker alone, never duplicated
         // between UI events or silently lost between commands.
         thread::Builder::new().name("shuvi-effectcraft".into())
@@ -51,16 +54,26 @@ impl MotionHost{
     }
     pub fn execute(&self,request:MotionRequest)->Result<Value,String>{
         let (answer_tx,answer_rx)=mpsc::channel();
-        self.tx.send(Work{request,respond:answer_tx})
-            .map_err(|_|"Motion engine worker unavailable".to_string())?;
-        answer_rx.recv_timeout(Duration::from_secs(120))
-            .map_err(|e|format!("motion worker did not respond: {e}"))?
+        let deadline=Instant::now()+COMMAND_TIMEOUT;
+        match self.tx.try_send(Work{request,respond:answer_tx,deadline}){
+            Ok(())=>{},
+            Err(TrySendError::Full(_))=>return Err("Motion engine busy: queue capacity reached; no action was accepted".into()),
+            Err(TrySendError::Disconnected(_))=>return Err("Motion engine worker unavailable".into()),
+        }
+        answer_rx.recv_timeout(COMMAND_TIMEOUT)
+            .map_err(|e|format!("motion worker did not respond: {e}; pending work expires before execution"))?
     }
 }
 fn worker(rx:Receiver<Work>){
     let mut engine=MotionBridge::new();
     while let Ok(work)=rx.recv(){
-        let response=apply(&mut engine,work.request);
+        // If a UI client timed out before its turn, never execute a stale queued edit.
+        // Once an engine operation begins, EffectCraft still owns its completion.
+        let response=if Instant::now()>=work.deadline{
+            Err("Motion command expired before native execution; no edit applied".into())
+        }else{
+            apply(&mut engine,work.request)
+        };
         let _=work.respond.send(response);
     }
 }
@@ -351,6 +364,21 @@ mod tests{
             parameter:"brightness".into()
         }).unwrap();
         assert_eq!(p["value"],0.0);
+    }
+    #[test]
+    fn bounded_worker_refuses_unlimited_backlog_without_admitting_hidden_edits(){
+        // No engine executes here; this isolates the bounded queue's capacity contract.
+        let (tx,rx)=mpsc::sync_channel::<Work>(MAX_PENDING);
+        for _ in 0..MAX_PENDING{
+            let (answer,_)=mpsc::channel();
+            tx.try_send(Work{request:MotionRequest::Status,
+                respond:answer,deadline:Instant::now()+Duration::from_secs(20)}).unwrap();
+        }
+        let (answer,_)=mpsc::channel();
+        assert!(matches!(tx.try_send(Work{request:MotionRequest::Status,
+            respond:answer,deadline:Instant::now()+Duration::from_secs(20)}),
+            Err(TrySendError::Full(_))));
+        drop(rx);
     }
     #[test]
     fn frontend_json_contract_uses_only_typed_camel_case_actions(){
