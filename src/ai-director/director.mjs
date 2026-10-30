@@ -36,10 +36,13 @@ export class AiDirector {
     const task = this.#tasks.get(taskId);
     return task ? view(task) : null;
   }
-  async prepare({taskId, instruction, actions}) {
+  async prepare({taskId, instruction, actions, expectedSnapshot}) {
     if (this.#tasks.has(taskId)) throw new Error("duplicate task id; original task cannot be replayed");
     // Snapshot is trusted native state, not part of the language model output.
     const snapshot = validateSnapshot(await this.#adapter.readSnapshot());
+    if (expectedSnapshot && !sameSnapshot(snapshot, validateSnapshot(expectedSnapshot))) {
+      throw new Error("STALE_PROJECT_DURING_PREPARE: native project changed before plan reservation");
+    }
     const plan = validateDraft({taskId, instruction, snapshot, actions});
     const hash = await digest(plan);
     const task = {plan, hash, status:"prepared", receipts:[], error:null, cancel:false, inFlight:false, intentLogged:false};
