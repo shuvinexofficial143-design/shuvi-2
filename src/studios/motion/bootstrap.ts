@@ -397,8 +397,13 @@ function bind():void {
       {property:"expansion",value:number("#motion-expansion")},
       {property:"opacity",value:number("#motion-mask-opacity")}
     ];
+    const ranges:Record<string,[number,number]>={
+      feather:[0,250],expansion:[-250,250],opacity:[0,100]
+    };
     for(const setting of settings){
-      if(!Number.isFinite(setting.value))throw new Error("Invalid mask numeric value");
+      const [min,max]=ranges[setting.property];
+      if(!Number.isFinite(setting.value)||setting.value<min||setting.value>max)
+        throw new Error("Invalid "+setting.property+" (allowed "+min+".."+max+")");
     }
     for(const setting of settings){
       await request({action:"setMaskProperty",compId:c.id,layerId:l.id,uid,...setting});
