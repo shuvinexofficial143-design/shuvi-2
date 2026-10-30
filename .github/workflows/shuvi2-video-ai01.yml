@@ -11,9 +11,12 @@ on:
 permissions:
   contents: read
 
+# Keep ONE latest build on this development branch. AI01-AI15 changing the
+# group name each milestone left many Windows runners competing indefinitely.
+# This is a development-only workflow; release CI uses separate workflows.
 concurrency:
-  group: shuvi2-video-ai15
-  cancel-in-progress: false
+  group: shuvi2-video-native-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify-and-build-native-video:
