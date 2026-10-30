@@ -508,7 +508,7 @@ impl EffectcraftApp {
             let last: f64 = ctx.data(|d| d.get_temp(key)).unwrap_or(0.0);
             if now - last >= 10.0 {
                 ctx.data_mut(|d| d.insert_temp(key, now));
-                match self.session.execute("file.watchFolder.poll", serde_json::json!({})) {
+                match self.motion_owner_gate.manual_menu_command(&mut self.session, "file.watchFolder.poll", serde_json::json!({})) {
                     Ok(r) => {
                         if let Some(n) = r["rendered"].as_array().map(Vec::len).filter(|n| *n > 0) {
                             self.ui.status = format!("Watch Folder: rendered {n} project(s)");

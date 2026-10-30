@@ -771,7 +771,7 @@ fn text_layer_at(app: &EffectcraftApp, ectx: &EvalCtx, map: &ViewerMap, s: Pos2,
 }
 
 fn exec(app: &mut EffectcraftApp, id: &str, p: Value) -> Option<Value> {
-    match app.session.execute(id, p) {
+    match app.motion_owner_gate.manual_menu_command(&mut app.session, id, p) {
         Ok(v) => Some(v),
         Err(e) => {
             app.ui.status = e.to_string();

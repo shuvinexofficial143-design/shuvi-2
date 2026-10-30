@@ -161,7 +161,7 @@ pub fn home_tab(app: &mut EffectcraftApp, ui: &mut egui::Ui, area: Rect) {
         if super::unsaved::guard(app, "templates.create", &json!({"id": id})) {
             return;
         }
-        match app.session.execute("templates.create", json!({"id": id})) {
+        match app.motion_owner_gate.manual_menu_command(&mut app.session, "templates.create", json!({"id": id})) {
             Ok(_) => app.ui.start_screen = false,
             Err(e) => app.ui.status = e.to_string(),
         }
@@ -205,7 +205,7 @@ pub fn show_delete(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     app.dialog = None;
     app.dialog_state.delete_template = None;
     if delete {
-        match app.session.execute("templates.delete", json!({"id": id})) {
+        match app.motion_owner_gate.manual_menu_command(&mut app.session, "templates.delete", json!({"id": id})) {
             Ok(_) => {
                 app.template_thumbs.remove(&id);
             }
@@ -262,7 +262,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx, &app.tokens, crate::i18n::language(&app));
         // File ▸ New ▸ New Project from Template… opens the Templates tab.
-        let ev = app.session.execute("file.newFromTemplate", json!({})).unwrap();
+        let ev = app.motion_owner_gate.manual_menu_command(&mut app.session, "file.newFromTemplate", json!({})).unwrap();
         assert_eq!(ev["frontend"], "file.newFromTemplate");
         crate::menus::invoke(&mut app, &ctx, "file.newFromTemplate", json!({})).unwrap();
         assert!(app.ui.start_screen && app.ui.home_templates && !app.ui.home_learn);
@@ -282,7 +282,7 @@ mod tests {
         }
         assert!(app.auto.find("home.recent.0").is_none());
         // Save as Template… opens its form (once there is a comp).
-        app.session.execute("templates.create", json!({"id": "logo-reveal"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "templates.create", json!({"id": "logo-reveal"})).unwrap();
         crate::menus::invoke(&mut app, &ctx, "templates.saveAs", json!({})).unwrap();
         assert!(matches!(app.dialog, Some(crate::Dialog::Form)));
         assert_eq!(app.dialog_state.form.command, "templates.saveAs");
@@ -293,7 +293,7 @@ mod tests {
         }
         let params = app.dialog_state.form.params();
         assert_eq!((params["embedFootage"].as_bool(), params["embedLimitMB"].as_f64()), (Some(true), Some(256.0)), "{params}");
-        app.session.execute("templates.saveAs", params).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "templates.saveAs", params).unwrap();
         app.dialog = None;
         app.ui.start_screen = true;
         for _ in 0..3 {
@@ -303,7 +303,7 @@ mod tests {
         assert!(app.auto.find(&format!("home.templates.{mine}.delete")).is_some());
         assert!(app.template_thumbs.get(mine).is_some_and(Option::is_some));
         // Opening makes an untitled copy.
-        app.session.execute("templates.create", json!({"id": mine})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "templates.create", json!({"id": mine})).unwrap();
         assert!(app.session.path.is_none());
         assert!(app.session.active_comp().is_some_and(|c| c.layers.iter().any(|l| l.name == "BRAND NAME")));
         // The card's delete button asks first: the file can't be brought back.
@@ -331,7 +331,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx, &app.tokens, crate::i18n::language(&app));
         // Menu check marks follow the active comp's viewer.
-        app.session.execute("comp.new", json!({"name": "C", "width": 64, "height": 48})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.new", json!({"name": "C", "width": 64, "height": 48})).unwrap();
         let item = crate::menus::menu_items(&app).into_iter().find(|m| m.id == "view.customRgb").expect("menu item");
         assert_eq!(item.label, "My Custom RGB...");
         assert_eq!(item.checked, Some(false));
@@ -344,7 +344,7 @@ mod tests {
         let mut p = app.dialog_state.form.params();
         assert_eq!(p["red"], json!([0.64, 0.33]));
         p["gamma"] = json!(1.8);
-        app.session.execute("view.customRgb", p).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "view.customRgb", p).unwrap();
         assert_eq!(app.session.prefs.custom_rgb.gamma, 1.8);
         assert_eq!(app.session.state.viewer.simulation.profile, effectcraft_engine::viewer::SimProfile::MyCustom);
         let item = crate::menus::menu_items(&app).into_iter().find(|m| m.id == "view.customRgb").unwrap();

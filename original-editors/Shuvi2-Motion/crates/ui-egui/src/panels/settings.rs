@@ -435,7 +435,7 @@ fn models_ui(app: &mut EffectcraftApp, ui: &mut egui::Ui, t: &Tokens, acts: &mut
         Task::Mask => ("roto", "Roto Brush"),
         Task::Face => ("face", "Face tracking"),
     };
-    let Ok(info) = app.session.execute(&format!("{prefix}.models"), json!({})) else { return };
+    let Ok(info) = app.motion_owner_gate.manual_menu_command(&mut app.session, &format!("{prefix}.models"), json!({})) else { return };
     let web = cfg!(target_arch = "wasm32");
     let busy = info["busy"].as_str().map(str::to_string);
     for m in info["models"].as_array().into_iter().flatten() {
