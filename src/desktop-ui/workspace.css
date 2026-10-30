@@ -12,7 +12,7 @@
 .su .su-tools{border-right:1px solid var(--line)}.su .su-chat{border-left:1px solid var(--line);display:flex;flex-direction:column;gap:11px}
 .su h2{font-size:16px;margin:0 0 12px}.su h3{font-size:13px;margin:15px 0 8px}
 .su label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px;margin:10px 0}
-.su input,.su textarea{padding:8px;background:#101725;border:1px solid #516178;border-radius:6px;color:var(--fg);width:100%;font:inherit}
+.su input,.su select,.su textarea{padding:8px;background:#101725;border:1px solid #516178;border-radius:6px;color:var(--fg);width:100%;font:inherit}
 .su .su-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .su .su-editorhead{display:flex;align-items:center;justify-content:space-between;gap:10px}.su .su-editorhead span{color:var(--muted);font-size:12px}
 .su .su-monitor{height:min(45vh,400px);min-height:210px;display:grid;place-items:center;background:#05080f;border:1px solid var(--line);border-radius:10px;color:var(--muted);text-align:center;padding:10px}
