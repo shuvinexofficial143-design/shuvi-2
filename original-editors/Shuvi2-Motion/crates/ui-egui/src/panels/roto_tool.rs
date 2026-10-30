@@ -181,7 +181,7 @@ pub fn interact(app: &mut EffectcraftApp, ui: &mut egui::Ui, painter: &egui::Pai
         {
             let dia = (2.0 * f64::from(origin.distance(pos)) / zoom).clamp(1.0, 5000.0).round();
             let key = if refine { "refineDiameter" } else { "diameter" };
-            if let Err(e) = app.session.execute("roto.options", json!({key: dia})) {
+            if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "roto.options", json!({key: dia})) {
                 app.ui.status = e.to_string();
             }
             painter.circle_stroke(origin, (dia * 0.5 * zoom) as f32, Stroke::new(1.5, col));
@@ -228,7 +228,7 @@ pub fn interact(app: &mut EffectcraftApp, ui: &mut egui::Ui, painter: &egui::Pai
 }
 
 fn run_stroke(app: &mut EffectcraftApp, layer: u64, kind: &str, points: &[[f64; 2]], radius: f64) {
-    let r = app.session.execute("roto.stroke", json!({"layer": layer, "kind": kind, "points": points, "radius": radius}));
+    let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "roto.stroke", json!({"layer": layer, "kind": kind, "points": points, "radius": radius}));
     if let Err(e) = r {
         app.ui.status = e.to_string();
     }
@@ -295,14 +295,14 @@ pub fn span_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, 
         let f = f_of(pos.x);
         if handle == 0 && (resp.clicked() || resp.dragged()) {
             let t = layer.comp_time(comp.frame_rate.tick_of(f));
-            let _ = app.session.execute("time.set", json!({"time": t.seconds()}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "time.set", json!({"time": t.seconds()}));
         }
         if handle != 0 && resp.dragged() {
             p.line_segment([pos2(pos.x, track.min.y), pos2(pos.x, track.max.y)], Stroke::new(2.0, Color32::from_rgb(240, 200, 40)));
         }
         if handle != 0 && resp.drag_stopped() {
             let k = if handle == 1 { "start" } else { "end" };
-            if let Err(e) = app.session.execute("roto.span", json!({"layer": layer.id.0, "effect": uid, k: f})) {
+            if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "roto.span", json!({"layer": layer.id.0, "effect": uid, k: f})) {
                 app.ui.status = e.to_string();
             }
         }
@@ -322,7 +322,7 @@ pub fn bar_buttons(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painte
         let on = view == id;
         if widgets::text_button(ui, r, label, on, &t, egui::Id::unique(("roto-view", id))).clicked() {
             let v = if on { "none" } else { id };
-            let _ = app.session.execute("roto.options", json!({"view": v}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "roto.options", json!({"view": v}));
         }
         app.auto.add(&format!("layerPanel.roto.view.{id}"), r, label);
         x += 70.0;
@@ -337,7 +337,7 @@ pub fn bar_buttons(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painte
     let label = if frozen { tr("Unfreeze") } else { tr("Freeze") };
     if widgets::text_button(ui, r, label, frozen, &t, egui::Id::unique(("roto-freeze", uid))).clicked() {
         let id = if frozen { "roto.unfreeze" } else { "roto.freeze" };
-        if let Err(e) = app.session.execute(id, json!({"layer": layer.id.0, "effect": uid})) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, id, json!({"layer": layer.id.0, "effect": uid})) {
             app.ui.status = e.to_string();
         }
     }
@@ -346,7 +346,7 @@ pub fn bar_buttons(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painte
     if running {
         let r = Rect::from_min_size(pos2(x, bar.center().y - 10.0), vec2(60.0, 20.0));
         if widgets::text_button(ui, r, tr("Stop"), false, &t, egui::Id::unique("roto-stop")).clicked() {
-            let _ = app.session.execute("roto.cancel", json!({}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "roto.cancel", json!({}));
         }
         app.auto.add("layerPanel.roto.stop", r, "Stop");
         if let Some(pr) = app.session.roto_progress() {

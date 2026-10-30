@@ -61,7 +61,7 @@ fn num(v: &Value) -> f64 {
 
 /// Animation ▸ Keyframe Velocity… (⇧⌘K) with keys selected.
 pub fn open_velocity(app: &mut EffectcraftApp) -> Result<(), String> {
-    let info = app.session.execute("keys.info", json!({})).map_err(|e| e.to_string())?;
+    let info = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.info", json!({})).map_err(|e| e.to_string())?;
     let first = info.as_array().and_then(|a| a.first()).ok_or("select keyframes first")?;
     let dims = first["dims"].as_u64().unwrap_or(1).max(1) as usize;
     let side = |k: &str| -> (Vec<f64>, Vec<f64>, bool) {
@@ -91,7 +91,7 @@ pub fn open_velocity(app: &mut EffectcraftApp) -> Result<(), String> {
 
 /// Animation ▸ Keyframe Interpolation… (⌥⌘K).
 pub fn open_interpolation(app: &mut EffectcraftApp) -> Result<(), String> {
-    let info = app.session.execute("keys.info", json!({})).map_err(|e| e.to_string())?;
+    let info = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.info", json!({})).map_err(|e| e.to_string())?;
     let a = info.as_array().cloned().unwrap_or_default();
     if a.is_empty() {
         return Err("select keyframes first".into());
@@ -186,7 +186,7 @@ pub fn velocity(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
             params["outSpeed"] = json!(d.out_speed);
             params["outInfluence"] = json!(d.out_inf);
         }
-        if let Err(e) = app.session.execute("keys.velocity", params) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.velocity", params) {
             app.ui.status = e.to_string();
         }
         cancel = true;
@@ -240,7 +240,7 @@ pub fn interpolation(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) 
             params["roving"] = json!(d.roving == 2);
         }
         if params.as_object().is_some_and(|m| !m.is_empty())
-            && let Err(e) = app.session.execute("keys.interpolation", params)
+            && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.interpolation", params)
         {
             app.ui.status = e.to_string();
         }
@@ -286,7 +286,7 @@ pub fn time_stretch(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     app.dialog_state.stretch = d.clone();
     if ok || super::dialogs::ui_enter(ctx) {
         let hold = ["in", "current", "out"][d.hold.min(2)];
-        if let Err(e) = app.session.execute("layer.timeStretch", json!({"percent": d.percent, "hold": hold})) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.timeStretch", json!({"percent": d.percent, "hold": hold})) {
             app.ui.status = e.to_string();
         }
         cancel = true;

@@ -271,7 +271,7 @@ pub(crate) fn rulers(app: &mut EffectcraftApp, ui: &mut egui::Ui, map: &ViewerMa
         {
             let c = map.to_comp(hp);
             let pos = if vertical { c[0] } else { c[1] }.round();
-            let r = app.session.execute("view.addGuide", json!({"orientation": if vertical { "vertical" } else { "horizontal" }, "position": pos}));
+            let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.addGuide", json!({"orientation": if vertical { "vertical" } else { "horizontal" }, "position": pos}));
             if let Err(e) = r {
                 app.ui.status = e.to_string();
             }
@@ -637,7 +637,7 @@ fn exposure_field(app: &mut EffectcraftApp, ui: &mut egui::Ui, er: Rect, stops: 
     let resp = resp.on_hover_text(crate::i18n::tr("Adjust Exposure (stops)"));
     app.auto.add_response("viewer.exposure", &resp, "Adjust Exposure");
     if resp.changed() {
-        let _ = app.session.execute("view.exposure", json!({"stops": ev}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.exposure", json!({"stops": ev}));
     }
 }
 
@@ -709,7 +709,7 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
     let has_roi = app.session.state.region_of_interest.is_some();
     if tog(ui, &mut app.auto, &mut x, Icon::Region, has_roi || app.ui.viewer.roi_draw, "roi", "Region of Interest").0 {
         if has_roi {
-            let _ = app.session.execute("view.setRegionOfInterest", json!({"rect": null}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.setRegionOfInterest", json!({"rect": null}));
             app.ui.viewer.roi_draw = false;
         } else {
             app.ui.viewer.roi_draw = !app.ui.viewer.roi_draw;
@@ -756,12 +756,12 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
     if let Some(i) = popup(app, ui, "vw-channel-pop", cr, &items, "channelItem") {
         let params =
             if i < Channel::ALL.len() { json!({"channel": Channel::ALL[i].id()}) } else { json!({"channel": vo.channel.id(), "colorized": !vo.colorized}) };
-        let _ = app.session.execute("view.channel", params);
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.channel", params);
     }
     // Exposure.
     let exposed = vo.exposure != 0.0;
     if tog(ui, &mut app.auto, &mut x, Icon::Exposure, exposed, "resetExposure", "Reset Exposure").0 {
-        let _ = app.session.execute("view.resetExposure", json!({}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.resetExposure", json!({}));
     }
     let er = Rect::from_min_size(pos2(x, cy - 10.0), vec2(42.0, 20.0));
     exposure_field(app, ui, er, vo.exposure as f64);
@@ -769,7 +769,7 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
     // Snapshots.
     if tog(ui, &mut app.auto, &mut x, Icon::Snapshot, false, "snapshot", "Take Snapshot").0 {
         let scale = app.viewer_scale(zoom, ppp);
-        match app.session.execute("view.takeSnapshot", json!({"scale": scale.clamp(0.05, 1.0)})) {
+        match app.motion_owner_gate.manual_menu_command(&mut app.session, "view.takeSnapshot", json!({"scale": scale.clamp(0.05, 1.0)})) {
             Ok(_) => app.ui.status = "Snapshot taken".into(),
             Err(e) => app.ui.status = e.to_string(),
         }
@@ -779,7 +779,7 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
     // Show Snapshot works while the button is held, like F5.
     let held = ui.input(|i| i.pointer.primary_down()) && ui.input(|i| i.pointer.press_origin()).is_some_and(|o| sr.intersect(ui.clip_rect()).contains(o));
     if app.session.snapshot.is_some() && held != app.session.state.viewer.show_snapshot {
-        let _ = app.session.execute("view.showSnapshot", json!({"value": held}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.showSnapshot", json!({"value": held}));
     }
     // Fast Previews.
     let fp = vo.fast_previews;
@@ -789,7 +789,7 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
     }
     let items: Vec<(String, bool)> = FastPreviews::ALL.iter().map(|m| (m.label().to_string(), fp == *m)).collect();
     if let Some(i) = popup(app, ui, "vw-fast-pop", fr, &items, "fastPreviewsItem") {
-        let _ = app.session.execute("view.fastPreviewMode", json!({"mode": FastPreviews::ALL[i].id()}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.fastPreviewMode", json!({"mode": FastPreviews::ALL[i].id()}));
     }
     x += 4.0;
     // 3D renderer + view.
@@ -807,7 +807,7 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
         let items: Vec<(String, bool)> = renderers.iter().map(|(r, label, _)| (label.to_string(), *r == comp.renderer)).collect();
         if let Some((renderer, _, id)) = popup(app, ui, "vw-3d-pop", r, &items, "renderer3dItem").and_then(|i| renderers.get(i))
             && *renderer != comp.renderer
-            && let Err(e) = app.session.execute("comp.settings", json!({"renderer": id}))
+            && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.settings", json!({"renderer": id}))
         {
             app.ui.status = e.to_string();
         }
@@ -823,13 +823,13 @@ fn bottom_bar_contents(app: &mut EffectcraftApp, ui: &mut egui::Ui, bar: Rect, z
         use effectcraft_engine::render::three_d::View3D;
         let items: Vec<(String, bool)> = View3D::ALL.iter().map(|v| (v.label().to_string(), *v == cur)).collect();
         if let Some(i) = popup(app, ui, "vw-cam-pop", r, &items, "view3dItem") {
-            let _ = app.session.execute("view.set3DView", json!({"view": View3D::ALL[i].id()}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.set3DView", json!({"view": View3D::ALL[i].id()}));
         }
         x = r.max.x + 4.0;
         // Extended Viewer (Settings ▸ 3D): custom views and Draft 3D show past the comp frame.
         let on = app.session.prefs.three_d.extended_viewer;
         if tog(ui, &mut app.auto, &mut x, Icon::ExtendedViewer, on, "extendedViewer", "Extended Viewer").0 {
-            let _ = app.session.execute("view.extendedViewer", json!({}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.extendedViewer", json!({}));
         }
         x += 2.0;
     }

@@ -171,7 +171,7 @@ fn paint_stroke(app: &mut EffectcraftApp, ui: &egui::Ui, painter: &egui::Painter
         if resp.drag_stopped() {
             ctx.data_mut(|dd| dd.remove::<Drag>(did));
             let pts: Vec<[f64; 2]> = d.points.clone();
-            let r = app.session.execute("paint.stroke", json!({"layer": d.layer, "kind": kind, "points": pts, "duration": (now - d.started).max(0.0)}));
+            let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "paint.stroke", json!({"layer": d.layer, "kind": kind, "points": pts, "duration": (now - d.started).max(0.0)}));
             if let Err(e) = r {
                 app.ui.status = e.to_string();
             }
@@ -180,7 +180,7 @@ fn paint_stroke(app: &mut EffectcraftApp, ui: &egui::Ui, painter: &egui::Painter
     if resp.clicked()
         && let Some(pos) = resp.interact_pointer_pos()
     {
-        let r = app.session.execute("paint.stroke", json!({"layer": layer, "kind": kind, "points": [to_layer(pos)], "duration": 0.0}));
+        let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "paint.stroke", json!({"layer": layer, "kind": kind, "points": [to_layer(pos)], "duration": 0.0}));
         if let Err(e) = r {
             app.ui.status = e.to_string();
         }
@@ -409,7 +409,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         && let Some(pos) = resp.interact_pointer_pos()
     {
         let lp = to_layer(pos);
-        let _ = app.session.execute("paint.setCloneSource", json!({"layer": layer.id.0, "point": lp}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "paint.setCloneSource", json!({"layer": layer.id.0, "point": lp}));
         return;
     }
     if let Some(kind) = kind

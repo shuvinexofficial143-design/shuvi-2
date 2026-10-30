@@ -67,7 +67,7 @@ pub fn open_dialog(app: &mut EffectcraftApp, m: MarkerRef) -> Result<(), String>
     if let Some(l) = m.layer {
         p["layer"] = json!(l);
     }
-    let list = app.session.execute("markers.list", p).map_err(|e| e.to_string())?;
+    let list = app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.list", p).map_err(|e| e.to_string())?;
     let v = list.get(m.index).ok_or("no such marker")?;
     let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
     let cue = &v["cuePoint"];
@@ -225,13 +225,13 @@ pub fn dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     delete |= delete_key && !ok && !cancel;
     // Enter is OK, unless a text field has it.
     if ok || (!cancel && !delete && (ok_key || super::dialogs::ui_enter(ctx))) {
-        if let Err(e) = app.session.execute("markers.set", draft_params(&d)) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.set", draft_params(&d)) {
             app.ui.status = e.to_string();
         }
         cancel = true;
     }
     if delete && let Some(m) = d.target {
-        if let Err(e) = app.session.execute("markers.delete", m.params()) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.delete", m.params()) {
             app.ui.status = e.to_string();
         }
         cancel = true;
@@ -316,7 +316,7 @@ fn marker(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, comp: 
         return;
     }
     if resp.clicked() && (if cfg!(target_os = "macos") { mods.mac_cmd || mods.command } else { mods.ctrl }) {
-        let _ = app.session.execute("markers.delete", r.params());
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.delete", r.params());
         return;
     }
     if resp.drag_started() {
@@ -336,7 +336,7 @@ fn marker(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, comp: 
         } else {
             params["time"] = json!(tt);
         }
-        if let Ok(v) = app.session.execute("markers.set", params)
+        if let Ok(v) = app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.set", params)
             && let Some(ni) = v["index"].as_u64()
         {
             ctx.data_mut(|d| d.insert_temp(drag_state_id(), (layer, ni as usize, alt)));
@@ -351,7 +351,7 @@ fn marker(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, comp: 
             if ui.button(label).clicked() {
                 if cmd == "dialog" {
                     let _ = open_dialog(app, r);
-                } else if let Err(e) = app.session.execute(cmd, params) {
+                } else if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, cmd, params) {
                     app.ui.status = e.to_string();
                 }
                 ui.close();
@@ -412,7 +412,7 @@ pub(crate) fn marker_bin(app: &mut EffectcraftApp, ui: &mut egui::Ui, comp: &Com
         p.add(egui::Shape::convex_polygon(marker_shape(tm.x(at), strip.min.y, h), col, Stroke::NONE));
     }
     if resp.drag_stopped()
-        && let Err(e) = app.session.execute("comp.addMarker", json!({"time": at}))
+        && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.addMarker", json!({"time": at}))
     {
         app.ui.status = e.to_string();
     }
@@ -463,7 +463,7 @@ fn nested_markers(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter
         app.auto.add(&format!("timeline.layer.{}.nestedMarker.{i}", layer.id.0), hit, &tip);
         if resp.double_clicked() {
             let opened =
-                app.session.execute("comp.open", json!({"comp": item.0})).and_then(|_| app.session.execute("time.set", json!({"time": m.time.seconds()})));
+                app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.open", json!({"comp": item.0})).and_then(|_| app.motion_owner_gate.manual_menu_command(&mut app.session, "time.set", json!({"time": m.time.seconds()})));
             if let Err(e) = opened {
                 app.ui.status = e.to_string();
             }
@@ -495,8 +495,8 @@ mod tests {
         d.protected = true;
         d.cue = false;
         let p = draft_params(d);
-        app.session.execute("markers.set", p).unwrap();
-        let m = &app.session.execute("markers.list", json!({})).unwrap()[0];
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.set", p).unwrap();
+        let m = &app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.list", json!({})).unwrap()[0];
         assert_eq!(m["duration"], 0.5);
         assert_eq!(m["chapter"], "Ch");
         assert_eq!(m["frameTarget"], "_self");
@@ -504,7 +504,7 @@ mod tests {
         assert!(m["cuePoint"].is_null());
         assert_eq!(m["label"], "Blue");
         app.session.undo();
-        assert_eq!(app.session.execute("markers.list", json!({})).unwrap()[0]["chapter"], "");
+        assert_eq!(app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.list", json!({})).unwrap()[0]["chapter"], "");
         // Enter is OK and Cmd+Backspace is Delete.
         let ctx = egui::Context::default();
         crate::theme::install(&ctx, &app.tokens, crate::i18n::language(&app));
@@ -519,7 +519,7 @@ mod tests {
         app.dialog_state.marker.chapter = "Entered".into();
         crate::panels::dialogs::press_key(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
         assert!(app.dialog.is_none());
-        assert_eq!(app.session.execute("markers.list", json!({})).unwrap()[0]["chapter"], "Entered");
+        assert_eq!(app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.list", json!({})).unwrap()[0]["chapter"], "Entered");
         open_dialog(&mut app, MarkerRef { layer: None, index: 0 }).unwrap();
         // Also from a focused text field: Tab to one, then press the key.
         for _ in 0..40 {
@@ -533,7 +533,7 @@ mod tests {
         app.dialog_state.marker.chapter = "Cmd".into();
         crate::panels::dialogs::press_key(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::COMMAND);
         assert!(app.dialog.is_none());
-        let m = &app.session.execute("markers.list", json!({})).unwrap()[0];
+        let m = &app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.list", json!({})).unwrap()[0];
         assert_eq!((m["chapter"].as_str(), m["comment"].as_str()), (Some("Cmd"), Some("hello")));
         open_dialog(&mut app, MarkerRef { layer: None, index: 0 }).unwrap();
         for _ in 0..40 {
@@ -545,6 +545,6 @@ mod tests {
         assert!(ctx.egui_wants_keyboard_input(), "a text field has focus");
         crate::panels::dialogs::press_key(&mut app, &ctx, egui::Key::Backspace, egui::Modifiers::COMMAND);
         assert!(app.dialog.is_none());
-        assert_eq!(app.session.execute("markers.list", json!({})).unwrap().as_array().map(Vec::len), Some(0), "deleted");
+        assert_eq!(app.motion_owner_gate.manual_menu_command(&mut app.session, "markers.list", json!({})).unwrap().as_array().map(Vec::len), Some(0), "deleted");
     }
 }

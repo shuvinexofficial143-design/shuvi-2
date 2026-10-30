@@ -2122,7 +2122,7 @@ fn header_timecode(app: &mut EffectcraftApp, ui: &mut egui::Ui, g: &Tl) {
     if tc_resp.dragged() {
         let d = tc_resp.drag_delta().x as f64;
         let f = fr.frame_at(time) + (d * 0.5).round() as i64;
-        let _ = app.session.execute("time.set", json!({"frame": f.max(0)}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "time.set", json!({"frame": f.max(0)}));
     }
     if tc_resp.double_clicked() {
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique("tl-tc-edit"), tc.clone()));
@@ -2132,7 +2132,7 @@ fn header_timecode(app: &mut EffectcraftApp, ui: &mut egui::Ui, g: &Tl) {
         let r = child.add(egui::TextEdit::singleline(&mut buf).font(Tokens::semibold(16.0)).desired_width(150.0));
         if r.lost_focus() {
             if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                let _ = app.session.execute("time.set", json!({"timecode": buf}));
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "time.set", json!({"timecode": buf}));
             }
             ctx.data_mut(|d| d.remove::<String>(egui::Id::unique("tl-tc-edit")));
         } else {
@@ -2172,7 +2172,7 @@ fn header_search_and_switches(app: &mut EffectcraftApp, ui: &mut egui::Ui, g: &T
                 "graph" => app.ui.timeline.graph_editor = !app.ui.timeline.graph_editor,
                 "flowchart" => app.show_panel(crate::dock::PanelKind::Flowchart),
                 _ => {
-                    let _ = app.session.execute("comp.setSwitch", json!({"switch": id}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.setSwitch", json!({"switch": id}));
                 }
             }
         }
@@ -2285,7 +2285,7 @@ fn work_area_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, g: &mut Tl) {
             a += work_area_snap(app, &comp, &[a, a + len], pps);
         }
         let a = fr.snap_nearest(Tick::from_seconds_f64(a.clamp(0.0, (comp.duration.seconds() - len).max(0.0)))).seconds();
-        let _ = app.session.execute("comp.workArea", json!({"start": a, "end": a + len, "merge": "wa-drag"}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.workArea", json!({"start": a, "end": a + len, "merge": "wa-drag"}));
     }
     for (hx, set) in [(wa.min.x, "begin"), (wa.max.x, "end")] {
         let hr = Rect::from_center_size(pos2(hx, wa.center().y), vec2(8.0, 14.0));
@@ -2309,7 +2309,7 @@ fn work_area_bar(app: &mut EffectcraftApp, ui: &mut egui::Ui, g: &mut Tl) {
             }
             let secs = fr.snap_nearest(Tick::from_seconds_f64(secs)).seconds();
             let key = if set == "begin" { "start" } else { "end" };
-            let _ = app.session.execute("comp.workArea", json!({key: secs, "merge": "wa-drag"}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.workArea", json!({key: secs, "merge": "wa-drag"}));
         }
     }
 }

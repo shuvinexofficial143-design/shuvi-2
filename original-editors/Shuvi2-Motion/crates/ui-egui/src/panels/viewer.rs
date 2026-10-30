@@ -1153,7 +1153,7 @@ fn phase_dragstart(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, 
                 let me = json!({"layer": h.layer.0, "mask": h.mask, "index": h.index});
                 let selected = app.session.state.selected_vertices.iter().any(|v| v.layer == h.layer && v.mask == h.mask && v.index == h.index);
                 if !selected {
-                    let _ = app.session.execute("mask.selectVertices", json!({"vertices": [me], "add": mods.shift}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.selectVertices", json!({"vertices": [me], "add": mods.shift}));
                 }
                 let src = h.l2c.apply(gv2(h.vertex[0], h.vertex[1]));
                 Gesture::Vertices {
@@ -1225,7 +1225,7 @@ fn phase_dragstart(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, 
                     // With path vertices on screen the marquee selects vertices (layers stay
                     // selected); otherwise it starts from a clean selection.
                     if !mods.shift && !vertex_hits.iter().any(|h| h.tangent.is_none()) {
-                        let _ = app.session.execute("edit.deselectAll", json!({}));
+                        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "edit.deselectAll", json!({}));
                     }
                     Some(Gesture::Marquee { start: press })
                 }
@@ -1284,7 +1284,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 }
                 for (lid, p0, ax, ay) in layers {
                     let v = json!([p0[0] + ax[0] * d[0] + ay[0] * d[1], p0[1] + ax[1] * d[0] + ay[1] * d[1], p0[2] + ax[2] * d[0] + ay[2] * d[1]]);
-                    let _ = app.session.execute("prop.set", json!({"layer": lid.0, "path": "transform/position", "value": v, "merge": merge}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": lid.0, "path": "transform/position", "value": v, "merge": merge}));
                 }
             }
             Gesture::Scale { layer, start_scale, start_local, handle, anchor, axes, l2c, inv, others } => {
@@ -1296,7 +1296,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 let f = snap_handle(f, handle, anchor, &l2c, axes, uniform, |p| vt::snap(app, &ctx, ectx, &map, &[layer], &[p], mods));
                 for (lid, s0) in std::iter::once((layer, start_scale)).chain(others) {
                     let v = [s0[0] * f[0], s0[1] * f[1], s0[2]];
-                    let _ = app.session.execute("prop.set", json!({"layer": lid.0, "path": "transform/scale", "value": v, "merge": merge}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": lid.0, "path": "transform/scale", "value": v, "merge": merge}));
                 }
             }
             Gesture::Rotate { layer, center, last_angle, turned, start_rot, others } => {
@@ -1307,10 +1307,10 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 ui.data_mut(|dd| dd.insert_temp(gid, Gesture::Rotate { layer, center, last_angle: ang, turned, start_rot, others: others.clone() }));
                 // Shift snaps the accumulated value (so 405° snaps to 1x +45°, not to 45°).
                 let r = rotate_value(start_rot, turned, mods.shift);
-                let _ = app.session.execute("prop.set", json!({"layer": layer.0, "path": "transform/rotation", "value": r, "merge": merge}));
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": layer.0, "path": "transform/rotation", "value": r, "merge": merge}));
                 for (lid, r0) in others {
                     let _ =
-                        app.session.execute("prop.set", json!({"layer": lid.0, "path": "transform/rotation", "value": r0 + (r - start_rot), "merge": merge}));
+                        app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": lid.0, "path": "transform/rotation", "value": r0 + (r - start_rot), "merge": merge}));
                 }
             }
             Gesture::Anchor { layer, start_anchor, start_pos, start, inv, l2p, own, anchor_only } => {
@@ -1324,12 +1324,12 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 let b = inv.apply(gv2(start[0] + d[0] + sc[0], start[1] + d[1] + sc[1]));
                 let dl = gv2(b.x - a.x, b.y - a.y);
                 let na = [start_anchor[0] + dl.x, start_anchor[1] + dl.y, start_anchor[2]];
-                let _ = app.session.execute("prop.set", json!({"layer": layer.0, "path": "transform/anchor", "value": na, "merge": merge}));
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": layer.0, "path": "transform/anchor", "value": na, "merge": merge}));
                 // Position follows so the layer stays put, unless Alt moves the anchor point alone.
                 if !anchor_only {
                     let dp = l2p.apply_vec(dl);
                     let np = [start_pos[0] + dp.x, start_pos[1] + dp.y, start_pos[2]];
-                    let _ = app.session.execute("prop.set", json!({"layer": layer.0, "path": "transform/position", "value": np, "merge": merge}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": layer.0, "path": "transform/position", "value": np, "merge": merge}));
                 }
             }
             Gesture::Camera { tool } => {
@@ -1341,7 +1341,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                         Tool::PanCamera => ("camera.pan", json!({"dx": dx, "dy": dy, "merge": merge})),
                         _ => ("camera.dolly", json!({"amount": -dy * 2.0, "merge": merge})),
                     };
-                    if let Err(e) = app.session.execute(id, params) {
+                    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, id, params) {
                         app.ui.status = e.to_string();
                     }
                 }
@@ -1358,14 +1358,14 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 let total = [want[0] + c[0], want[1] + c[1]];
                 let d = inv.apply_vec(gv2(total[0] - applied[0], total[1] - applied[1]));
                 if d.x != 0.0 || d.y != 0.0 {
-                    let _ = app.session.execute("mask.moveVertices", json!({"delta": [d.x, d.y], "merge": merge}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.moveVertices", json!({"delta": [d.x, d.y], "merge": merge}));
                 }
                 ui.data_mut(|dd| dd.insert_temp(gid, Gesture::Vertices { start, src, applied: total, inv, layer }));
             }
             Gesture::Overlay(d) => match d {
                 ov::Drag::Guide { index, vertical } => {
                     let pos_v = if vertical { cpt[0] } else { cpt[1] }.round();
-                    let _ = app.session.execute("view.moveGuide", json!({"index": index, "position": pos_v, "merge": merge}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.moveGuide", json!({"index": index, "position": pos_v, "merge": merge}));
                 }
                 ov::Drag::Roi { start, keep } => {
                     let e = [keep[0].unwrap_or(cpt[0]), keep[1].unwrap_or(cpt[1])];
@@ -1387,7 +1387,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 if !mods.alt {
                     params[if out { "in" } else { "out" }] = json!([-t[0], -t[1]]);
                 }
-                let _ = app.session.execute("mask.setVertex", params);
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.setVertex", params);
             }
             Gesture::PuppetRecord { layer, pin, others, inv, began, cti, mut samples } => {
                 let lp = inv.apply(gv2(cpt[0], cpt[1]));
@@ -1412,7 +1412,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 let rotation = rotation + d.to_degrees();
                 let deg = if mods.shift { (rotation / 15.0).round() * 15.0 } else { rotation };
                 ui.data_mut(|dd| dd.insert_temp(gid, Gesture::PuppetRotate { layer, pin, center, last: a, rotation }));
-                if let Err(e) = app.session.execute("puppet.setPin", json!({"layer": layer.0, "pin": pin, "rotation": deg, "merge": merge})) {
+                if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.setPin", json!({"layer": layer.0, "pin": pin, "rotation": deg, "merge": merge})) {
                     app.ui.status = e.to_string();
                 }
             }
@@ -1420,13 +1420,13 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 // Shift snaps the scale to 5 % steps.
                 let pct = scale * (pos.distance(center) / start) as f64 * 100.0;
                 let pct = if mods.shift { (pct / 5.0).round() * 5.0 } else { pct }.max(1.0);
-                if let Err(e) = app.session.execute("puppet.setPin", json!({"layer": layer.0, "pin": pin, "scale": pct, "merge": merge})) {
+                if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.setPin", json!({"layer": layer.0, "pin": pin, "scale": pct, "merge": merge})) {
                     app.ui.status = e.to_string();
                 }
             }
             Gesture::PuppetPin { layer, pin, inv } => {
                 let lp = inv.apply(gv2(cpt[0], cpt[1]));
-                if let Err(e) = app.session.execute("puppet.movePin", json!({"layer": layer.0, "pin": pin, "position": [lp.x, lp.y], "merge": merge})) {
+                if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.movePin", json!({"layer": layer.0, "pin": pin, "position": [lp.x, lp.y], "merge": merge})) {
                     app.ui.status = e.to_string();
                 }
             }
@@ -1444,7 +1444,7 @@ fn phase_drag(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, resp:
                 q["layer"] = json!(layer.0);
                 q["tracker"] = json!(tracker);
                 q["merge"] = json!(merge);
-                let _ = app.session.execute("track.setPoint", q);
+                let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "track.setPoint", q);
             }
             Gesture::ObjectMatteBox { start } => super::object_matte_tool::draw_box(app, &painter, start, pos),
             Gesture::Marquee { start } | Gesture::PinMarquee { start } => {
@@ -1478,12 +1478,12 @@ fn phase_stopped(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, re
                     let mut layers: Vec<LayerId> = pin_hits.iter().map(|h| h.layer).collect();
                     layers.dedup();
                     if first && pin_hits.iter().all(|h| !r.contains(h.pos)) {
-                        let _ = app.session.execute("puppet.selectPins", json!({"pins": []}));
+                        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.selectPins", json!({"pins": []}));
                     }
                     for l in layers {
                         let pins: Vec<u64> = pin_hits.iter().filter(|h| h.layer == l && r.contains(h.pos)).map(|h| h.pin).collect();
                         if !pins.is_empty() {
-                            let _ = app.session.execute("puppet.selectPins", json!({"layer": l.0, "pins": pins, "add": !first}));
+                            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.selectPins", json!({"layer": l.0, "pins": pins, "add": !first}));
                             first = false;
                         }
                     }
@@ -1491,7 +1491,7 @@ fn phase_stopped(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, re
                 Gesture::PuppetRecord { layer, pin, others, cti, samples, .. } => {
                     let pts: Vec<serde_json::Value> = samples.iter().map(|(t, p)| json!([t, p[0], p[1]])).collect();
                     let q = json!({"layer": layer.0, "pin": pin, "pins": others, "samples": pts, "start": cti.seconds()});
-                    match app.session.execute("puppet.recordPin", q) {
+                    match app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.recordPin", q) {
                         Ok(_) => {
                             for p in std::iter::once(pin).chain(others) {
                                 super::puppet_tool::reveal_pin(app, layer, p);
@@ -1513,13 +1513,13 @@ fn phase_stopped(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, re
                     let (x1, y1) = (start[0].max(end[0]).min(comp.width as f64), start[1].max(end[1]).min(comp.height as f64));
                     if x1 - x0 >= 2.0 && y1 - y0 >= 2.0 {
                         let rect = [x0.round(), y0.round(), (x1 - x0).round(), (y1 - y0).round()];
-                        let _ = app.session.execute("view.setRegionOfInterest", json!({"rect": rect}));
+                        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.setRegionOfInterest", json!({"rect": rect}));
                     }
                     app.ui.viewer.roi_draw = false;
                 }
                 // A guide dragged off the image (back to the rulers) is removed.
                 Gesture::Overlay(ov::Drag::Guide { index, .. }) if !area.contains(pos) || !comp_rect.expand(40.0).contains(pos) => {
-                    let _ = app.session.execute("view.removeGuide", json!({"index": index}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.removeGuide", json!({"index": index}));
                 }
                 Gesture::Marquee { start } if vertex_hits.iter().any(|h| h.tangent.is_none() && Rect::from_two_pos(start, pos).contains(h.pos)) => {
                     // Marquee over path vertices selects them.
@@ -1529,7 +1529,7 @@ fn phase_stopped(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, re
                         .filter(|h| h.tangent.is_none() && r.contains(h.pos))
                         .map(|h| json!({"layer": h.layer.0, "mask": h.mask, "index": h.index}))
                         .collect();
-                    let _ = app.session.execute("mask.selectVertices", json!({"vertices": v, "add": mods.shift}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.selectVertices", json!({"vertices": v, "add": mods.shift}));
                 }
                 Gesture::Marquee { start } => {
                     let a = map.to_comp(start);
@@ -1538,7 +1538,7 @@ fn phase_stopped(app: &mut EffectcraftApp, ui: &mut egui::Ui, ectx: &EvalCtx, re
                         .filter(|l| layer_quad(ectx, l).is_some_and(|(_, q, _)| quad_intersects_box(&q, a, b)))
                         .map(|l| l.id.0)
                         .collect();
-                    let _ = app.session.execute("layer.select", json!({"layers": hits, "toggle": mods.shift}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"layers": hits, "toggle": mods.shift}));
                 }
                 _ => {}
             }
@@ -1602,35 +1602,35 @@ fn phase_clicked(app: &mut EffectcraftApp, ectx: &EvalCtx, resp: &egui::Response
             // Auto Bezier spatial interpolation.
             Tool::PenAdd => {
                 if let Some((l, m, seg, tt)) = ov::segment_at(&paths, &map, pos, 6.0) {
-                    let _ = app.session.execute("mask.insertVertex", json!({"layer": l.0, "mask": m, "segment": seg, "t": tt}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.insertVertex", json!({"layer": l.0, "mask": m, "segment": seg, "t": tt}));
                 } else if let Some(f) = ov::motion_frame_at(&motion_frames, &key_hits, pos) {
                     add_motion_key(app, f);
                 }
             }
             Tool::PenDelete => {
                 if let Some(h) = vertex_at(pos, false) {
-                    let _ = app.session.execute("mask.deleteVertices", json!({"vertices": [{"layer": h.layer.0, "mask": h.mask, "index": h.index}]}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.deleteVertices", json!({"vertices": [{"layer": h.layer.0, "mask": h.mask, "index": h.index}]}));
                 } else if let Some(k) = ov::motion_key_at(&key_hits, pos)
                     && select_motion_key(app, &k)
                 {
-                    let _ = app.session.execute("keys.delete", json!({}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.delete", json!({}));
                 }
             }
             Tool::PenConvert => {
                 if let Some(h) = vertex_at(pos, false) {
-                    let _ = app.session.execute("mask.convertVertex", json!({"layer": h.layer.0, "mask": h.mask, "index": h.index}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.convertVertex", json!({"layer": h.layer.0, "mask": h.mask, "index": h.index}));
                 } else if let Some(k) = ov::motion_key_at(&key_hits, pos) {
                     // A key showing direction handles becomes Linear; one without, Auto Bezier.
                     let curved = key_hits.iter().any(|h| h.tangent.is_some() && h.layer == k.layer && h.prop == k.prop && h.time == k.time);
                     if select_motion_key(app, &k) {
                         let spatial = if curved { "linear" } else { "autoBezier" };
-                        let _ = app.session.execute("keys.interpolation", json!({"spatial": spatial}));
+                        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "keys.interpolation", json!({"spatial": spatial}));
                     }
                 }
             }
             Tool::Selection if mods.alt && vertex_at(pos, false).is_some() => {
                 if let Some(h) = vertex_at(pos, false) {
-                    let _ = app.session.execute("mask.convertVertex", json!({"layer": h.layer.0, "mask": h.mask, "index": h.index}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.convertVertex", json!({"layer": h.layer.0, "mask": h.mask, "index": h.index}));
                 }
             }
             Tool::Selection if ft.is_some() && ft.as_ref().and_then(|f| ov::begin_ft_drag(f, pos, &map)).is_none() => {
@@ -1641,12 +1641,12 @@ fn phase_clicked(app: &mut EffectcraftApp, ectx: &EvalCtx, resp: &egui::Response
             t if t.puppet_kind().is_some() => {
                 if let Some((h, _)) = super::puppet_tool::hit(&pin_hits, pos) {
                     // Click selects the pin; Shift-click adds or removes it.
-                    let _ = app.session.execute("puppet.selectPins", json!({"layer": h.layer.0, "pins": [h.pin], "toggle": mods.shift}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.selectPins", json!({"layer": h.layer.0, "pins": [h.pin], "toggle": mods.shift}));
                 } else if let Some(l) = puppet_layer(app, cpt).and_then(|l| comp.layer(l))
                     && let Some(inv) = fx2c(ectx, l).inverse()
                 {
                     let lp = inv.apply(gv2(cpt[0], cpt[1]));
-                    match app.session.execute("puppet.addPin", json!({"layer": l.id.0, "kind": t.puppet_kind(), "position": [lp.x, lp.y]})) {
+                    match app.motion_owner_gate.manual_menu_command(&mut app.session, "puppet.addPin", json!({"layer": l.id.0, "kind": t.puppet_kind(), "position": [lp.x, lp.y]})) {
                         Ok(r) => {
                             if let Some(pin) = r["pin"].as_u64() {
                                 super::puppet_tool::reveal_pin(app, l.id, pin);
@@ -1659,23 +1659,23 @@ fn phase_clicked(app: &mut EffectcraftApp, ectx: &EvalCtx, resp: &egui::Response
             Tool::Selection if vertex_at(pos, false).is_some() => {
                 if let Some(h) = vertex_at(pos, false) {
                     let me = json!({"layer": h.layer.0, "mask": h.mask, "index": h.index});
-                    let _ = app.session.execute("mask.selectVertices", json!({"vertices": [me], "add": mods.shift, "toggle": mods.shift}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.selectVertices", json!({"vertices": [me], "add": mods.shift, "toggle": mods.shift}));
                 }
             }
             // The Roto Brush paints in the Layer panel only: select as usual and say so.
             rt if rt.roto_kind(false).is_some() => {
                 if pick(app, ectx, cpt, mods.shift).is_none() {
-                    let _ = app.session.execute("edit.deselectAll", json!({}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "edit.deselectAll", json!({}));
                 }
                 app.ui.status = crate::i18n::tr(ROTO_HINT).to_string();
             }
             _ => {
                 if pick(app, ectx, cpt, mods.shift).is_none() {
-                    let _ = app.session.execute("edit.deselectAll", json!({}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "edit.deselectAll", json!({}));
                 } else if !mods.shift && !app.session.state.selected_vertices.is_empty() && ov::segment_at(&paths, &map, pos, 6.0).is_none() {
                     // A click away from the paths, even on their layer, deselects the mask
                     // points (the layer stays selected), as in After Effects (#513).
-                    let _ = app.session.execute("mask.selectVertices", json!({"vertices": []}));
+                    let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.selectVertices", json!({"vertices": []}));
                 }
             }
         }
@@ -1713,7 +1713,7 @@ fn phase_dblclick(app: &mut EffectcraftApp, ectx: &EvalCtx, resp: &egui::Respons
         // the whole path (After Effects).
         if let Some(p) = paths.iter().find(|p| p.layer == l && p.uid == m) {
             let all: Vec<serde_json::Value> = (0..p.sp.vertices.len()).map(|index| json!({"layer": l.0, "mask": m, "index": index})).collect();
-            let _ = app.session.execute("mask.selectVertices", json!({"vertices": all}));
+            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.selectVertices", json!({"vertices": all}));
         }
         ov::begin_free_transform(&ctx, l, m);
     } else if resp.double_clicked()

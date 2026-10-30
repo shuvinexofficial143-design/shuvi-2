@@ -861,9 +861,9 @@ pub fn align(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     if let Some((kind, op)) = run {
         let r = if kind == "align" {
             let to = if app.ui.align_to_selection { "selection" } else { "composition" };
-            app.session.execute("layer.align", json!({"edge": op, "to": to}))
+            app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.align", json!({"edge": op, "to": to}))
         } else {
-            app.session.execute("layer.distribute", json!({"mode": op}))
+            app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.distribute", json!({"mode": op}))
         };
         if let Err(e) = r {
             app.ui.status = e.to_string();

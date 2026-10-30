@@ -13,7 +13,7 @@ use crate::theme::Tokens;
 use crate::{EffectcraftApp, widgets};
 
 fn set(app: &mut EffectcraftApp, v: Value) {
-    if let Err(e) = app.session.execute("paint.options", v) {
+    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "paint.options", v) {
         app.ui.status = e.to_string();
     }
 }
@@ -343,7 +343,7 @@ pub fn brushes(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         p.text(pos2(r.center().x, r.max.y - 5.0), Align2::CENTER_CENTER, format!("{}", tip.diameter), Tokens::ui(8.5), t.text_dim);
         app.auto.add(&format!("brushes.preset.{i}"), r, tip.name);
         if resp.on_hover_text(tip.name).clicked()
-            && let Err(e) = app.session.execute("paint.brushPreset", json!({"preset": i}))
+            && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "paint.brushPreset", json!({"preset": i}))
         {
             app.ui.status = e.to_string();
         }

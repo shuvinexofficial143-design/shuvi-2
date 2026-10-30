@@ -933,7 +933,7 @@ pub fn show_form(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     if ok || enter {
         app.dialog = None;
         let params = f.params();
-        if let Err(e) = app.session.execute(&f.command, params) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, &f.command, params) {
             app.ui.status = e.to_string();
         }
         return;
@@ -1047,8 +1047,8 @@ mod tests {
         let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
         let ctx = egui::Context::default();
         crate::theme::install(&ctx, &app.tokens, crate::i18n::language(&app));
-        app.session.execute("comp.new", json!({"name": "Spot", "width": 64, "height": 36, "frameRate": 25, "duration": 1})).unwrap();
-        app.session.execute("layer.newSolid", json!({"color": "#ff0000"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.new", json!({"name": "Spot", "width": 64, "height": 36, "frameRate": 25, "duration": 1})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.newSolid", json!({"color": "#ff0000"})).unwrap();
         crate::menus::invoke(&mut app, &ctx, "file.exportTimeline", json!({})).unwrap();
         assert!(matches!(app.dialog, Some(Dialog::Form)));
         let f = &app.dialog_state.form;
@@ -1070,7 +1070,7 @@ mod tests {
         let params = app.dialog_state.form.params();
         assert!(params.get("note").is_none());
         assert_eq!(params["format"], "xml");
-        let r = app.session.execute("file.exportTimeline", params).unwrap();
+        let r = app.motion_owner_gate.manual_menu_command(&mut app.session, "file.exportTimeline", params).unwrap();
         assert_eq!(r["path"], path.as_str());
         assert!(std::fs::read_to_string(&path).unwrap().contains("<xmeml"));
     }

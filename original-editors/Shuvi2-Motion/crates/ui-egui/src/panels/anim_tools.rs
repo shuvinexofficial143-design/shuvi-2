@@ -59,7 +59,7 @@ fn status_line(app: &EffectcraftApp, ui: &egui::Ui, rect: Rect, y: f32, need: us
 }
 
 fn apply(app: &mut EffectcraftApp, cmd: &str, params: serde_json::Value) {
-    match app.session.execute(cmd, params) {
+    match app.motion_owner_gate.manual_menu_command(&mut app.session, cmd, params) {
         Ok(r) => app.ui.status = format!("{}: {} → {} keyframes", if cmd == "keys.wiggle" { "Wiggler" } else { "Smoother" }, r["before"], r["after"]),
         Err(e) => app.ui.status = e.to_string(),
     }
@@ -326,7 +326,7 @@ pub fn sketch_overlay(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
         app.ui.anim_tools.sketch_armed = false;
         let st = &app.ui.anim_tools;
         let params = json!({"points": c.points, "start": c.start.seconds(), "captureSpeed": st.sketch_speed, "smoothing": st.sketch_smoothing});
-        match app.session.execute("motion.sketch", params) {
+        match app.motion_owner_gate.manual_menu_command(&mut app.session, "motion.sketch", params) {
             Ok(r) => app.ui.status = format!("Motion Sketch: {} Position keyframes", r["keys"]),
             Err(e) => app.ui.status = e.to_string(),
         }
@@ -448,14 +448,14 @@ pub fn mask_interpolation(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rec
     check(app, y, "firstVerticesMatch", "First Vertices Match", o.first_vertices_match);
     y += ROW + 8.0;
     if !changes.is_empty()
-        && let Err(e) = app.session.execute("mask.interpolationOptions", serde_json::Value::Object(changes))
+        && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.interpolationOptions", serde_json::Value::Object(changes))
     {
         app.ui.status = e.to_string();
     }
     let b = Rect::from_min_size(pos2(rect.max.x - 92.0, y), vec2(80.0, 24.0));
     let enabled = app.session.state.selected_keys.len() >= 2;
     if widgets::text_button(ui, b, "Apply", enabled, &t, egui::Id::unique("mi-apply")).clicked() {
-        match app.session.execute("mask.interpolate", json!({})) {
+        match app.motion_owner_gate.manual_menu_command(&mut app.session, "mask.interpolate", json!({})) {
             Ok(r) => app.ui.status = format!("Mask Interpolation: {} keyframes added ({} vertices)", r["keys"], r["vertices"]),
             Err(e) => app.ui.status = e.to_string(),
         }
