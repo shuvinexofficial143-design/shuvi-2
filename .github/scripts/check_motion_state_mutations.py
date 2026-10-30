@@ -59,6 +59,14 @@ def main():
     owner_src=runtime((ROOT/"shuvi_owner_gate.rs").read_text())
     if "pub(crate) fn set_owner_playback_time(" not in owner_src or "self.motion_owner_gate.manual_transaction(|| {" not in owner_src:
         errors.append("native playback clock owner transaction helper missing")
+    # Explicitly inspect the real Effect Controls panel's background
+    # deselection branch. A direct retain() here escaped prior source audits.
+    effect_src=runtime((ROOT/"panels/effect_controls/panel.rs").read_text())
+    background=effect_src.split("if bg.clicked() {",1)
+    if len(background)!=2 or "let has_clip" not in background[1] or \
+       "manual_transaction(|| {" not in background[1].split("let has_clip",1)[0] or \
+       "selected_props.retain(" not in background[1].split("let has_clip",1)[0]:
+        errors.append("Effect Controls empty-background deselection bypassed native owner gate")
     project_src=runtime((ROOT/"panels/project.rs").read_text())
     if "app.session.state.project_selection.clear();" not in project_src or \
        "app.motion_owner_gate.manual_transaction(|| {\n            app.session.state.project_selection.clear();" not in project_src:
