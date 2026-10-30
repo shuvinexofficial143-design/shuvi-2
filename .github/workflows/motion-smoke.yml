@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   motion-engine-windows:
+    if: github.head_ref != 'feature/shuvi2-release-integration'
     name: Real EffectCraft comp.new on Windows
     runs-on: windows-latest
     timeout-minutes: 55
@@ -115,3 +116,4 @@ jobs:
           path: proof/motion-desktop/
           if-no-files-found: warn
           retention-days: 14
+

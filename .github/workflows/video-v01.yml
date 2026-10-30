@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   video-windows-package:
+    if: github.head_ref != 'feature/shuvi2-release-integration'
     runs-on: windows-latest
     timeout-minutes: 70
     steps:
@@ -121,3 +122,4 @@ jobs:
             src-tauri/target/video-desktop-e2e.json
             src-tauri/target/video-desktop-e2e.png
           if-no-files-found: error
+

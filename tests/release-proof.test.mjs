@@ -1,0 +1,64 @@
+// Synthetic receipt tests for rejection behavior; NOT real Windows E2E evidence.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {validateReceipts,verifyFiles} from '../scripts/release/verify-installed-proof.mjs';
+import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+const sha='a'.repeat(40), hash='b'.repeat(64);
+function fixture() {
+  const shared={ok:true,sha,driver:'tauri-driver',application:'/installed/shuvi2.exe',applicationSha256:hash,
+    coldRestartVerified:true,noOverwriteVerified:true,steps:['synthetic-check']};
+  return {install:{ok:true,checkpoint:sha,installExitCode:0,installedProcessLaunched:true,
+    installedBinaryPath:shared.application,installedBinarySha256:hash,installedSidecarSha256:hash,installerSha256:hash,
+    enginePins:{filmcraft:'c49efe070fab862df6c21d61a503605eb6f07105',effectcraft:'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'}},
+    video:{...shared,outputSha256:hash,projectSha256:hash,outputBytes:500,previewWidth:64,previewHeight:64,
+      outputProbe:{duration:120,video:{codec:'h264',width:64,height:64}}},
+    motion:{...shared,pngSha256:hash,reopenedPngSha256:hash}};
+}
+test('complete editing receipts never imply provider AI or full release readiness',()=>{
+  const result=validateReceipts(fixture(),sha);
+  assert.equal(result.editingSliceVerified,true);assert.equal(result.releaseReady,false);
+  assert.equal(result.aiProviderEditVerified,false);
+});
+for(const [label,change] of [
+  ['stale install',f=>f.install.checkpoint='c'.repeat(40)],
+  ['failed Motion',f=>f.motion.ok=false],
+  ['other commit',f=>f.video.sha='c'.repeat(40)],
+  ['test binary',f=>f.video.application='/target/debug/shuvi2.exe'],
+  ['other executable bytes',f=>f.motion.applicationSha256='c'.repeat(64)],
+  ['unfinished restart',f=>f.video.coldRestartVerified=false],
+  ['changed native PNG',f=>f.motion.reopenedPngSha256='c'.repeat(64)],
+  ['missing no overwrite',f=>delete f.video.noOverwriteVerified],
+  ['non-H264 output',f=>f.video.outputProbe.video.codec='vp9'],
+  ['changed engine pin',f=>f.install.enginePins.effectcraft='c'.repeat(40)],
+  ['empty steps',f=>f.video.steps=[]]
+]) test(`release proof rejects ${label}`,()=>{const f=fixture();change(f);assert.throws(()=>validateReceipts(f,sha));});
+test('both GUI programs parse before any expensive Windows build',()=>{
+  for(const script of ['tests/motion/desktop-e2e.mjs','scripts/release/video-installed-e2e.mjs',
+    'scripts/release/webdriver.mjs','scripts/release/verify-installed-proof.mjs']) {
+    const result=spawnSync(process.execPath,['--check',script],{encoding:'utf8'});
+    assert.equal(result.status,0,script+'\n'+result.stderr);
+  }
+});
+test('evidence verifier rejects altered media and missing screenshots on physical disk',async()=>{
+  const root=await mkdtemp(path.join(tmpdir(),'release-gate-test-'));
+  try {
+    const f=fixture(),data=Buffer.from('synthetic binary/media bytes'),fingerprint=createHash('sha256').update(data).digest('hex');
+    const file=path.join(root,'bytes');await writeFile(file,data);
+    f.install.installerPath=file;f.install.installerSha256=fingerprint;
+    f.install.installedBinaryPath=file;f.install.installedBinarySha256=fingerprint;
+    f.install.installedSidecarPath=file;f.install.installedSidecarSha256=fingerprint;
+    f.video.output=file;f.video.outputSha256=fingerprint;f.video.project=file;f.video.projectSha256=fingerprint;
+    f.motion.projectDir=root;f.motion.pngSha256=fingerprint;await writeFile(path.join(root,'webview_e2e.png'),data);
+    await assert.rejects(()=>verifyFiles(f,root,root),/ENOENT/);
+    const png=Buffer.alloc(120);Buffer.from('89504e470d0a1a0a','hex').copy(png);
+    for(const name of ['video-native-timeline.png','video-export.png','video-cold-reopen.png',
+      'm11_01-native-shape.png','m11_02-effect-mask.png','m11_03-cold-reopened-project.png','motion-windows-webview2.png']) await writeFile(path.join(root,name),png);
+    await verifyFiles(f,root,root);
+    await writeFile(file,'tampered');
+    await assert.rejects(()=>verifyFiles(f,root,root),/Evidence bytes changed/);
+  } finally {await rm(root,{recursive:true,force:true});}
+});

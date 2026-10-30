@@ -1,6 +1,8 @@
 // Real Windows Tauri WebView2 E2E; requires running tauri-driver 2.x and EdgeDriver.
 // Uses W3C WebDriver HTTP, no test-side native IPC shortcuts and no mocks.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -72,6 +74,7 @@ async function screenshot(name){
   await writeFile(path.join(artifacts,name),Buffer.from(base64,"base64"));
 }
 async function test(){
+  assert.equal(process.platform,"win32","Real Windows required");
   assert.ok(application,"SHUVI_MOTION_EXE must be the real built Tauri .exe path");
   await stat(application);
   await mkdir(artifacts,{recursive:true});
@@ -91,9 +94,14 @@ async function test(){
   }
   session=created.sessionId;
   assert.ok(session,"tauri-driver did not create a real desktop session");
-  const result={driver:"tauri-driver",window:"real-windows-webview2",
+  const result={ok:false,sha:process.env.GITHUB_SHA,application:path.resolve(application),
+    applicationSha256:sha256(await readFile(application)),driver:"tauri-driver",window:"real-windows-webview2",
     projectDir:root,steps:[],nativeScreenshot:null};
-  async function step(name,fn){lastStep=name;await fn();result.steps.push(name)}
+  async function step(name,fn){
+    lastStep=name;
+    await writeFile(path.join(artifacts,"progress.json"),JSON.stringify({...result,lastStep},null,2));
+    await fn();result.steps.push(name);
+  }
   try{
     await step("click Motion Studio tab",async()=>{
       await waitFor("Motion Studio tab",()=>find('button[data-studio="motion"]'));
@@ -151,6 +159,7 @@ async function test(){
         "Exported frame was not an actual PNG");
       assert.ok(png.length>100,"PNG is empty");
       result.pngBytes=png.length;
+      result.pngSha256=sha256(png);
       result.projectBytes=project.size;
       // Native owner-owned export must refuse overwriting a real existing file.
       await click("#motion-export-png");
@@ -160,11 +169,12 @@ async function test(){
       });
       assert.deepEqual(await readFile(path.join(root,"webview_e2e.png")),png,
         "Second PNG export unexpectedly overwrote the owner file");
+      result.noOverwriteVerified=true;
     });
     await step("open saved native project from disk and restore effects and masks",async()=>{
       await click("#motion-open");
       await ready("Opening native project · native verification complete",60000);
-      await waitFor("persisted shape layer",async=>
+      await waitFor("persisted shape layer",async()=>
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       await click("#motion-layer-list .motion-layer");
       await ready("Selecting native layer · native verification complete",60000);
@@ -177,7 +187,7 @@ async function test(){
       await waitFor("Video Studio",async()=>await text("#studio-title")==="Video Studio");
       await click('button[data-studio="motion"]');
       await ready("Native Windows engine connected",60000);
-      await waitFor("reopened native layer list",async=>
+      await waitFor("reopened native layer list",async()=>
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       assert.match(await attr("#motion-native-frame","src"),/^data:image\/png;base64,/);
     });
@@ -197,7 +207,7 @@ async function test(){
       await fill("#motion-filename","webview_e2e.ecproj");
       await click("#motion-open");
       await ready("Opening native project · native verification complete",60000);
-      await waitFor("persisted shape after full process restart",async=>
+      await waitFor("persisted shape after full process restart",async()=>
         (await text("#motion-layer-list")).includes("WebDriver Shape"));
       await click("#motion-layer-list .motion-layer");
       await ready("Selecting native layer · native verification complete",60000);
@@ -208,6 +218,9 @@ async function test(){
       const decoded=Buffer.from(frame.split(",",2)[1],"base64");
       assert.ok(decoded.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
         "Relaunched application failed to return a real EffectCraft PNG preview");
+      const savedPng=await readFile(path.join(root,"webview_e2e.png"));
+      assert.deepEqual(decoded,savedPng,"Cold-reopened native pixels differ from saved PNG");
+      result.reopenedPngSha256=sha256(decoded);
       result.coldRestartVerified=true;
       await screenshot("m11_03-cold-reopened-project.png");
     });
@@ -215,6 +228,8 @@ async function test(){
       await screenshot("motion-windows-webview2.png");
       result.nativeScreenshot="motion-windows-webview2.png";
     });
+    assert.equal(sha256(await readFile(application)),result.applicationSha256,"App changed during test");
+    await wd("DELETE",`/session/${session}`); session=undefined;
     result.ok=true;
     result.proof="clicked-webview2-native-effects-masks-pixel-diffs-save-open-no-overwrite";
     await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify(result,null,2));
@@ -222,6 +237,7 @@ async function test(){
   }catch(error){
     result.ok=false;result.failedStep=lastStep;result.error=String(error);
     try{await screenshot("motion-failed.png")}catch{}
+    try{await writeFile(path.join(artifacts,"failed.html"),await wd("GET",`/session/${session}/source`))}catch{}
     await writeFile(path.join(artifacts,"receipt.json"),JSON.stringify(result,null,2));
     throw error;
   }finally{
@@ -229,3 +245,4 @@ async function test(){
   }
 }
 test().catch(e=>{console.error("REAL WINDOWS MOTION WEBVIEW2 E2E FAILED",e);process.exitCode=1});
+

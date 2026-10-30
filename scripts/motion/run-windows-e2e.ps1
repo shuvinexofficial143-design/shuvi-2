@@ -2,11 +2,18 @@
 [CmdletBinding()]
 param(
     [string]$Application = "src-tauri/target/debug/shuvi2.exe",
-    [string]$Artifacts = "proof/motion-desktop"
+    [string]$Artifacts = "proof/motion-desktop",
+    [switch]$VideoFirst
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $project = (Get-Location).Path
+node --check tests/motion/desktop-e2e.mjs
+if ($LASTEXITCODE -ne 0) { throw 'Motion E2E syntax invalid; no native build/driver work allowed' }
+if ($VideoFirst) {
+    node --check scripts/release/video-installed-e2e.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Video E2E syntax invalid' }
+}
 $binary = (Resolve-Path $Application -ErrorAction Stop).Path
 $proof = Join-Path $project $Artifacts
 New-Item -ItemType Directory -Path $proof -Force | Out-Null
@@ -23,7 +30,7 @@ if (!(Test-Path $edgetool)) {
     cargo install --git https://github.com/chippers/msedgedriver-tool
     if ($LASTEXITCODE -ne 0) { throw "msedgedriver-tool installation failed" }
 }
-$driverDir = Join-Path $project "proof/motion-desktop/driver"
+$driverDir = Join-Path ([System.IO.Path]::GetTempPath()) ("shuvi-edgedriver-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
 Push-Location $driverDir
 try {
@@ -48,9 +55,16 @@ try {
         Start-Sleep -Seconds 1
     }
     if (!$ready) { throw "Real tauri-driver WebDriver endpoint did not start" }
+    $videoExit = 0
+    if ($VideoFirst) {
+        node scripts/release/video-installed-e2e.mjs
+        $videoExit = $LASTEXITCODE
+    }
     node tests/motion/desktop-e2e.mjs
     if ($LASTEXITCODE -ne 0) { throw "Real Windows WebView2 native editing E2E FAILED" }
+    if ($videoExit -ne 0) { throw 'Installed Video E2E failed; Motion ran independently; see both receipts' }
     Write-Host "PASS: real native WebView2 click-to-edit verified"
 } finally {
     if ($service -and !$service.HasExited) { Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue }
 }
+
