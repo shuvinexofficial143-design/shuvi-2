@@ -492,7 +492,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         Apply::Effect(id) => ("effect.apply", json!({"effect": id})),
         Apply::Preset(preset) => preset.command(),
     };
-    match app.session.execute(cmd, params) {
+    match app.motion_owner_gate.manual_menu_command(&mut app.session, cmd, params) {
         Err(e) => app.ui.status = e.to_string(),
         Ok(applied) => {
             if let Apply::Effect(id) = &apply {

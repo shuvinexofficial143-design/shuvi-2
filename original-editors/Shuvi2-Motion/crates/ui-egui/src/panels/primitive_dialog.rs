@@ -106,7 +106,7 @@ pub fn dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
                 p[dim.match_id.as_str()] = json!(v);
             }
         }
-        if let Err(e) = app.session.execute("layer.newPrimitive", p) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.newPrimitive", p) {
             app.ui.status = e.to_string();
         }
         close = true;

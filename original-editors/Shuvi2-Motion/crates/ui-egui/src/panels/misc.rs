@@ -226,7 +226,7 @@ pub fn preview(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
     }
     yy += 24.0;
     for c in changes {
-        if let Err(e) = app.session.execute("playback.settings.set", c) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "playback.settings.set", c) {
             app.ui.status = e.to_string();
         }
     }

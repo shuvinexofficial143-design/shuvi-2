@@ -102,7 +102,7 @@ pub(super) fn aux_views(
         }
     }
     if let Some((pane, v)) = picked
-        && let Err(e) = app.session.execute("view.setPaneView", json!({"pane": pane, "view": v.id(), "comp": cid.0}))
+        && let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.setPaneView", json!({"pane": pane, "view": v.id(), "comp": cid.0}))
     {
         app.ui.status = e.to_string();
     }
@@ -200,7 +200,7 @@ pub(super) fn locked_pane(app: &mut EffectcraftApp, ui: &mut egui::Ui, full: Rec
     p.text(close.center(), Align2::CENTER_CENTER, "\u{00d7}", Tokens::ui(14.0), if resp.hovered() { Color32::WHITE } else { Color32::from_white_alpha(170) });
     app.auto.add("viewer.locked.close", close, "Close Locked Viewer");
     if resp.clicked() {
-        let _ = app.session.execute("view.closeLockedViewer", serde_json::json!({}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "view.closeLockedViewer", serde_json::json!({}));
     }
     main
 }

@@ -159,7 +159,7 @@ pub fn dialog(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     });
     app.dialog_state.precompose = d.clone();
     if ok || super::dialogs::ui_enter(ctx) {
-        if let Err(e) = app.session.execute("layer.precompose", draft_params(&d)) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.precompose", draft_params(&d)) {
             app.ui.status = e.to_string();
         }
         cancel = true;
@@ -341,7 +341,7 @@ mod tests {
         let mut app = EffectcraftApp::new(s);
         app.session.open_comp(main);
         let top = app.session.active_comp().unwrap().layers[0].id.0;
-        app.session.execute("layer.select", json!({"layers": [top]})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.select", json!({"layers": [top]})).unwrap();
         open(&mut app, &json!({})).unwrap();
         assert_eq!(app.dialog, Some(Dialog::Precompose));
         let d = &mut app.dialog_state.precompose;

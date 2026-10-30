@@ -70,7 +70,7 @@ pub fn route(app: &mut EffectcraftApp, id: &str, params: &Value) -> Result<bool,
     }
     let mark = app.session.history.undo.len();
     let checkpoint = checkpoint(app);
-    app.session.execute(id, json!({})).map_err(|e| e.to_string())?;
+    app.motion_owner_gate.manual_menu_command(&mut app.session, id, json!({})).map_err(|e| e.to_string())?;
     open(app, &json!({"style": style}))?;
     // Cancel also removes the style just added.
     app.dialog_state.layer_style.undo_mark = mark;
@@ -237,7 +237,7 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
         }
     });
     for (id, p) in actions {
-        if let Err(e) = app.session.execute(&id, p) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, &id, p) {
             app.ui.status = e.to_string();
         }
     }
@@ -303,7 +303,7 @@ mod tests {
         let (mut app, lid) = editing_app();
         open(&mut app, &json!({"layer": lid, "style": BLENDING})).unwrap();
         // A live preview edit changes the project but not the edited Source Text.
-        app.session.execute("prop.set", json!({"layer": lid, "path": "transform/opacity", "value": 40})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "prop.set", json!({"layer": lid, "path": "transform/opacity", "value": 40})).unwrap();
         let before = editor_state(&app);
         assert!(before.is_some());
 
@@ -330,7 +330,7 @@ mod tests {
     fn cancel_replaces_an_open_text_editor_when_the_preview_changed_its_text() {
         let (mut app, lid) = editing_app();
         open(&mut app, &json!({"layer": lid, "style": BLENDING})).unwrap();
-        app.session.execute("layer.setText", json!({"layer": lid, "text": "ab"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "layer.setText", json!({"layer": lid, "text": "ab"})).unwrap();
         let preview = editor_state(&app).expect("still editing");
         assert_eq!(layer_doc(&app.session, LayerId(lid)).unwrap().text, "ab");
 

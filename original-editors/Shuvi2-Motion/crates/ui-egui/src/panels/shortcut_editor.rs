@@ -627,7 +627,7 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
     }
     app.dialog_state.shortcuts = st;
     for (cmd, params) in run {
-        if let Err(e) = app.session.execute(&cmd, params) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, &cmd, params) {
             app.ui.status = e.to_string();
         }
     }
@@ -727,8 +727,8 @@ mod tests {
         let mut app = EffectcraftApp::new(effectcraft_engine::Session::default());
         let ctx = egui::Context::default();
         crate::theme::install(&ctx, &app.tokens, crate::i18n::language(&app));
-        app.session.execute("shortcuts.preset", json!({"op": "duplicate", "from": DEFAULT_PRESET, "name": "Mine"})).unwrap();
-        app.session.execute("shortcuts.preset", json!({"op": "select", "name": "Mine"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "shortcuts.preset", json!({"op": "duplicate", "from": DEFAULT_PRESET, "name": "Mine"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "shortcuts.preset", json!({"op": "select", "name": "Mine"})).unwrap();
         let has = |app: &EffectcraftApp| app.session.keymaps.names().iter().any(|n| n == "Mine");
         open(&mut app);
         for _ in 0..3 {
@@ -745,8 +745,8 @@ mod tests {
         assert!(!has(&app), "confirmed: the preset is gone");
         assert!(!confirming(&app) && app.dialog == Some(Dialog::Shortcuts));
         // Cmd+D is Delete; Enter is not.
-        app.session.execute("shortcuts.preset", json!({"op": "duplicate", "from": DEFAULT_PRESET, "name": "Mine"})).unwrap();
-        app.session.execute("shortcuts.preset", json!({"op": "select", "name": "Mine"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "shortcuts.preset", json!({"op": "duplicate", "from": DEFAULT_PRESET, "name": "Mine"})).unwrap();
+        app.motion_owner_gate.manual_menu_command(&mut app.session, "shortcuts.preset", json!({"op": "select", "name": "Mine"})).unwrap();
         app.dialog_state.shortcuts.confirm_delete = Some("Mine".into());
         crate::panels::dialogs::press_key(&mut app, &ctx, egui::Key::Enter, egui::Modifiers::NONE);
         assert!(has(&app) && confirming(&app));

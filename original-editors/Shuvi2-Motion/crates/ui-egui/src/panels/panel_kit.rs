@@ -54,7 +54,7 @@ pub fn number(app: &mut EffectcraftApp, ui: &mut egui::Ui, at: egui::Pos2, auto:
 
 /// Run a command, reporting errors in the status bar.
 pub fn exec(app: &mut EffectcraftApp, id: &str, p: serde_json::Value) -> Option<serde_json::Value> {
-    match app.session.execute(id, p) {
+    match app.motion_owner_gate.manual_menu_command(&mut app.session, id, p) {
         Ok(v) => Some(v),
         Err(e) => {
             app.ui.status = e.to_string();

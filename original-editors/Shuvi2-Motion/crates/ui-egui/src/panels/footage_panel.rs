@@ -118,7 +118,7 @@ pub fn show(app: &mut EffectcraftApp, ui: &mut egui::Ui, rect: Rect) {
         let dt = ctx.input(|i| i.stable_dt).min(0.1) as f64;
         let next = view.time.seconds() + dt;
         let next = if next >= dur.seconds() - fr.frame_duration().seconds() { 0.0 } else { next };
-        let _ = app.session.execute("footage.setTime", json!({"time": next}));
+        let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "footage.setTime", json!({"time": next}));
         ctx.request_repaint();
     }
     // Controls.

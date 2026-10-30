@@ -158,7 +158,7 @@ pub fn show(app: &mut EffectcraftApp, ctx: &egui::Context, t: &Tokens) {
         });
     });
     for (id, p) in actions {
-        if let Err(e) = app.session.execute(id, p) {
+        if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, id, p) {
             app.ui.status = e.to_string();
         }
     }

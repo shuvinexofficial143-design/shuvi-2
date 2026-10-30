@@ -165,7 +165,7 @@ pub(crate) fn toggle_time_display(app: &mut EffectcraftApp, resp: &egui::Respons
         return;
     }
     let timecode = app.session.project.settings.time_display == effectcraft_engine::project::TimeDisplayStyle::Timecode;
-    if let Err(e) = app.session.execute("file.projectSettings", serde_json::json!({"timeDisplay": if timecode { "frames" } else { "timecode" }})) {
+    if let Err(e) = app.motion_owner_gate.manual_menu_command(&mut app.session, "file.projectSettings", serde_json::json!({"timeDisplay": if timecode { "frames" } else { "timecode" }})) {
         app.ui.status = e.to_string();
     }
 }
@@ -259,7 +259,7 @@ pub fn panel_menu_popup(app: &mut EffectcraftApp, ui: &mut egui::Ui) {
                         ("Draft 3D", "draft3d"),
                     ] {
                         if ui.button(label).clicked() {
-                            let _ = app.session.execute("comp.setSwitch", serde_json::json!({"switch": id}));
+                            let _ = app.motion_owner_gate.manual_menu_command(&mut app.session, "comp.setSwitch", serde_json::json!({"switch": id}));
                             close = true;
                         }
                     }

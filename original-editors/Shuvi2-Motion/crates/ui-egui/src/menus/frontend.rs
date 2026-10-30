@@ -208,7 +208,7 @@ pub fn frontend(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, p: Valu
             // Include Audio of the shortcut shown in the Preview panel.
             let mut on = app.session.prefs.preview.active().include_audio;
             let r = toggle(&mut on, &p);
-            app.session.execute("playback.settings.set", json!({"includeAudio": on})).map_err(|e| e.to_string())?;
+            app.motion_owner_gate.manual_menu_command(&mut app.session, "playback.settings.set", json!({"includeAudio": on})).map_err(|e| e.to_string())?;
             if !on {
                 app.audio = None;
             }
@@ -663,7 +663,7 @@ fn run_with_picked(app: &mut EffectcraftApp, id: &str, key: &str, params: &Value
     }
     // Save (untitled) becomes Save As.
     let id = if id == "file.save" { "file.saveAs" } else { id };
-    let r = app.session.execute(id, Value::Object(p)).map_err(|e| e.to_string());
+    let r = app.motion_owner_gate.manual_menu_command(&mut app.session, id, Value::Object(p)).map_err(|e| e.to_string());
     if let Err(e) = &r {
         app.ui.status = e.clone();
     }
