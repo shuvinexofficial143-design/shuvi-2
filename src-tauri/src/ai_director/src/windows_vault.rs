@@ -51,7 +51,8 @@ impl CredentialVault for WindowsCredentialVault {
 mod tests{
     #[test]
     fn vault_target_is_fixed_and_never_supplied_by_a_model(){
-        let source=include_str!("windows_vault.rs");
+        let whole_source=include_str!("windows_vault.rs");
+        let source=whole_source.split("#[cfg(test)]").next().unwrap();
         assert!(source.contains("Shuvi2/OpenAI"));
         assert!(!source.contains("std::env::var"));
         assert!(!source.contains("println!"));
