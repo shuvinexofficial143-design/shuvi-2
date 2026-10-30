@@ -131,6 +131,22 @@ impl TransactionalLedger {
         tx.commit().map_err(sql_error)?;
         Ok(accepted)
     }
+    /// The actual Tauri Stop/Recovery IPC must bind both the task ID and
+    /// native persisted plan digest; never trust a bare frontend task ID.
+    pub fn cancel_bound(&mut self,id:&str,plan_hash:&str)
+        ->Result<CancelOutcome,GuardError>{
+        if !valid_sha(plan_hash){return Err(GuardError::Invalid);}
+        let (scope,_,_)=self.load(id)?;
+        if scope.plan_hash!=plan_hash{return Err(GuardError::Invalid);}
+        self.cancel(id)
+    }
+    pub fn recovery_bound(&self,id:&str,plan_hash:&str)
+        ->Result<Vec<&'static str>,GuardError>{
+        if !valid_sha(plan_hash){return Err(GuardError::Invalid);}
+        let (scope,_,_)=self.load(id)?;
+        if scope.plan_hash!=plan_hash{return Err(GuardError::Invalid);}
+        self.recovery(id)
+    }
     /// Atomic boundary with intent admission, suitable for Stop requests.
     /// If any native intent is outstanding, cancellation refuses because an
     /// external engine action may already be mutating the project.
