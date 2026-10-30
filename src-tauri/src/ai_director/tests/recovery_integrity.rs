@@ -157,3 +157,38 @@ fn intent_with_forged_receipt_cannot_be_recovered(){
     d.mutate("UPDATE ai_steps SET state='intent' WHERE step_index=0");
     assert_eq!(db.recovery(&p.task_id).unwrap_err(),GuardError::DuplicateOrUncertain);
 }
+
+#[test]
+fn post_restart_history_finds_old_session_but_marks_read_only(){
+    let (d,db,p,_owner)=initial(1);
+    drop(db);
+    let new_session=Snapshot{session_id:"other-native-owner-2".into(),..p.snapshot.clone()};
+    let reopened=d.ledger();
+    let entries=reopened.recent_history(&new_session).unwrap();
+    assert_eq!(entries.len(),1);
+    assert_eq!(entries[0]["taskId"],p.task_id);
+    assert_eq!(entries[0]["historicalSession"],true);
+    assert_eq!(entries[0]["steps"],json!(["verified","not_started"]));
+    assert_eq!(entries[0]["actionsCount"],2);
+}
+#[test]
+fn native_history_never_leaks_other_project_records(){
+    let (d,mut db,p,_owner)=initial(1);
+    let mut another=p.clone();
+    another.task_id="anotherTask12".into();
+    another.snapshot.project_id="other-asset.ecproj".into();
+    let mut other_owner=EditorDouble{state:another.snapshot.clone(),mutations:0};
+    db.reserve(&another,&mut other_owner).unwrap();
+    let current=Snapshot{session_id:"other-session-0002".into(),..p.snapshot.clone()};
+    let history=db.recent_history(&current).unwrap();
+    assert_eq!(history.len(),1);
+    assert_eq!(history[0]["taskId"],p.task_id);
+    assert_eq!(history[0]["projectId"],p.snapshot.project_id);
+    drop(db);drop(d);
+}
+#[test]
+fn corrupted_native_history_does_not_display_a_verified_claim(){
+    let (d,db,p,_owner)=initial(1);
+    d.mutate("UPDATE ai_steps SET receipt_json=json_set(receipt_json,'$.after.version.value',4) WHERE step_index=0");
+    assert_eq!(db.recent_history(&p.snapshot).unwrap_err(),GuardError::DuplicateOrUncertain);
+}
