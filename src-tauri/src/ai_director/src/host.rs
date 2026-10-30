@@ -109,6 +109,17 @@ impl<'a,O:NativeOwner> GuardedHost<'a,O>{
           "cancelled":cancelled,"state":state,
           "durable":true,"nativeOwnerBound":true}))
     }
+    /// A08: no frontend task IDs, file paths, or project selectors.
+    /// History is scoped to the active native owner project. Old sessions
+    /// are read-only and never eligible for implicit task resumption.
+    pub fn task_history(&mut self)->Result<Value,GuardError>{
+        let native=self.owner.snapshot()
+            .map_err(|_|GuardError::NativeOutcomeUncertain)?;
+        let rows=self.ledger.recent_history(&native)?;
+        Ok(json!({"nativeOwnerBound":true,"readOnly":true,
+            "projectId":native.project_id,"sessionId":native.session_id,
+            "tasks":rows}))
+    }
     pub fn recover(&mut self,request:&TaskBinding)->Result<Value,GuardError>{
         request.checked()?;
         self.ledger.verify_binding(&request.task_id,&request.plan_hash)?;
