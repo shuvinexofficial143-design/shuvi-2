@@ -442,6 +442,21 @@ impl eframe::App for FilmcraftApp {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         self.native_window_focused = Some(raw_input.focused);
         capture::note_raw_geometry(self, ctx, raw_input);
+        // Native keyboard/mouse events arrive BEFORE the actual ui() pass.
+        // Drop both unconsumed original hardware events and already queued
+        // synthetic input when a different owner holds the editor. Never
+        // replay stale keystrokes or clicks after an AI/native transaction.
+        if let Some(reason) = self.shuvi_manual_admission.blocked_reason() {
+            drop_native_input(raw_input);
+            self.synthetic.clear();
+            self.synthetic_pending_step = None;
+            self.synthetic_step_offered = false;
+            self.synthetic_modifiers_offered = false;
+            for reply in self.input_waiters.drain(..) {
+                let _ = reply.send(json!({"ok":false,"error":reason}));
+            }
+            return;
+        }
         #[cfg(target_os = "macos")]
         if !self.control_input_only {
             synthesize_mac_ctrl_click(&mut self.mac_ctrl_click_armed, raw_input);
@@ -536,6 +551,43 @@ mod lifecycle_synthetic_tests {
     use filmcraft_engine::Session;
 
     use super::FilmcraftApp;
+
+
+    /// A competing native owner must not leave raw or synthetic pointer
+    /// events queued to trigger an edit on a subsequent unlocked frame.
+    #[test]
+    fn blocked_native_raw_input_drops_hardware_and_stale_synthetic_events() {
+        use std::sync::{Arc,Barrier};
+        let ctx=egui::Context::default();
+        let mut app=FilmcraftApp::new(Session::default());
+        app.synthetic.push(Event::Text("stale native input".into()));
+        let barrier=Arc::new(Barrier::new(2));
+        let lane=app.shuvi_manual_admission.clone();
+        let wait=Arc::clone(&barrier);
+        let worker=std::thread::spawn(move||{
+            let _owner=lane.try_claim().unwrap();
+            wait.wait();
+            wait.wait();
+        });
+        barrier.wait();
+        let mut raw=egui::RawInput {
+            events:vec![
+                Event::Text("stale hardware input".into()),
+                Event::PointerMoved(pos2(7.0,9.0)),
+            ],
+            ..Default::default()
+        };
+        eframe::App::raw_input_hook(&mut app,&ctx,&mut raw);
+        assert!(raw.events.is_empty());
+        assert!(app.synthetic.is_empty());
+        assert!(app.synthetic_pending_step.is_none());
+        barrier.wait();
+        worker.join().unwrap();
+        // Input discarded under another native owner cannot replay here.
+        let mut clean=egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut app,&ctx,&mut clean);
+        assert!(clean.events.is_empty());
+    }
 
     /// Extract the pointer-moved positions from a raw event batch, for synthetic-input tests.
     fn pointer_events(events: &[Event]) -> Vec<egui::Pos2> {
