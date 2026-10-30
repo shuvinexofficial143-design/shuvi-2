@@ -69,6 +69,7 @@ function updateSlider():void {
 async function listLayers():Promise<void> {
   const comp = ensureComp();
   const layers = await request<Layer[]>({action:"listLayers",compId:comp.id});
+  activeLayer=layers.find(item=>item.id===activeLayer?.id)??null;
   const list = node<HTMLElement>("#motion-layer-list");
   list.replaceChildren();
   if (!layers.length) { list.textContent = "No layers yet"; activeLayer=null; return; }
@@ -81,7 +82,10 @@ async function listLayers():Promise<void> {
       activeLayer=layer;activeEffect=null;activeMask=null;
       node<HTMLInputElement>("#motion-rotation").value=String(layer.rotation);
       node<HTMLInputElement>("#motion-opacity").value=String(layer.opacity);
-      void listLayers();
+      void execute("Selecting native layer",async()=>{
+        await listLayers();
+        await refreshEffectMaskControls();
+      });
     });
     list.append(btn);
   }
