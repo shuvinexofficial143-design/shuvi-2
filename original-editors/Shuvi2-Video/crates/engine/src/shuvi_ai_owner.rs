@@ -197,13 +197,15 @@ fn confirm_named_split(
     clip_id: u64,
     tick: i64,
 ) -> Result<u64> {
-    let find_track = |sequence: &Value| -> Result<&Value> {
+    // Explicit lifetime is required: the returned track borrows its specific
+    // before/after snapshot, not a shared closure lifetime inferred from capture.
+    fn find_track<'a>(sequence: &'a Value, kind: &str, track_id: u64) -> Result<&'a Value> {
         sequence[kind].as_array()
             .and_then(|tracks| tracks.iter().find(|t| t["id"].as_u64() == Some(track_id)))
             .ok_or_else(|| EngineError::Other("UNKNOWN_NATIVE_VIDEO_OUTCOME: exact track is missing".into()))
-    };
-    let old_track = find_track(before)?;
-    let new_track = find_track(after)?;
+    }
+    let old_track = find_track(before, kind, track_id)?;
+    let new_track = find_track(after, kind, track_id)?;
     let old_items = old_track["items"].as_array().ok_or_else(|| EngineError::Other("native source items missing".into()))?;
     let new_items = new_track["items"].as_array().ok_or_else(|| EngineError::Other("native edited items missing".into()))?;
     let old_clip = old_items.iter().find(|c| c["clip"].as_u64() == Some(clip_id))
