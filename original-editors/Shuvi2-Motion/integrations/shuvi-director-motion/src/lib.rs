@@ -385,15 +385,26 @@ impl NativeOwner for EffectcraftNativeOwner<'_> {
 pub fn native_model_inventory(s:&Session)->Value{
     let mut comps=BTreeSet::<u64>::new();
     let mut layers=BTreeSet::<u64>::new();
+    let mut masks=BTreeSet::<u64>::new();
+    let mut effects=BTreeSet::<u64>::new();
     for (id,item) in &s.project.items {
         if let Some(comp)=item.as_comp(){
             comps.insert(id.0);
-            for l in &comp.layers {layers.insert(l.id.0);}
+            for l in &comp.layers {
+                layers.insert(l.id.0);
+                if let Some(groups)=l.masks(){
+                    for m in groups.groups(){masks.insert(m.uid);}
+                }
+                if let Some(groups)=l.effects(){
+                    for fx in groups.groups(){effects.insert(fx.uid);}
+                }
+            }
         }
     }
     json!({"compIds":comps.into_iter().collect::<Vec<_>>(),
         "layerIds":layers.into_iter().collect::<Vec<_>>(),
-        "maskIds":[],"effectIds":[]})
+        "maskIds":masks.into_iter().collect::<Vec<_>>(),
+        "effectIds":effects.into_iter().collect::<Vec<_>>()})
 }
 
 #[cfg(test)]
@@ -819,6 +830,9 @@ mod tests{
                     if (v[0]-100.0).abs()<1e-5&&(v[1]-80.0).abs()<1e-5));
         }).unwrap();
         assert_eq!(tmp.open().recovery("realmotion1234").unwrap(),vec!["verified","verified"]);
+        let inventory=gate.native_inventory().unwrap();
+        assert_eq!(inventory["effectIds"].as_array().unwrap().len(),1);
+        assert_eq!(inventory["maskIds"].as_array().unwrap().len(),0);
     }
 
     #[test]
