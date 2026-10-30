@@ -208,6 +208,13 @@ async function test(){
         assert.ok(png.subarray(0,8).equals(Buffer.from("89504e470d0a1a0a","hex")),
           "native image sequence frame is not actual PNG");
         assert.ok(png.length>100);
+        if(i===0){
+          assert.ok(exportedPng,"native PNG sequence requires previous owner-exported frame");
+          assert.deepEqual(png,exportedPng,
+            "First native PNG sequence frame differs from same-time single-frame EffectCraft export");
+          result.sequenceFirstSha256=createHash("sha256").update(png).digest("hex");
+          assert.equal(result.sequenceFirstSha256,result.exportSha256);
+        }
       }
       await click("#motion-export-sequence");
       await waitFor("existing sequence folder rejected",async()=>{
