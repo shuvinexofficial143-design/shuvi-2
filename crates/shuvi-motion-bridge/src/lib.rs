@@ -20,6 +20,8 @@ mod advanced;
 pub use advanced::{MaskProperty,MaskSettings,EffectParameterState};
 mod history;
 pub use history::{HistorySnapshot,HistoryReceipt};
+mod sequence;
+pub use sequence::SequenceReceipt;
 
 /// Approved basic composition parameters, rather than arbitrary AI-authored engine JSON.
 #[derive(Debug, Clone)]
