@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 UI = Path("original-editors/Shuvi2-Motion/crates/ui-egui/src")
@@ -75,11 +76,18 @@ def main():
     # Deliberately inventory other direct Session calls rather than claiming
     # the current manual gate covers all editor mutating paths.
     unresolved = []
+    runtime = []
+    test_only = []
     for path in sorted(UI.rglob("*.rs")):
         rel = path.relative_to(UI).as_posix()
         if rel in MIGRATED:
             continue
         content = path.read_text(encoding="utf-8")
+        # Distinguish actual runtime source from independent Rust test code;
+        # test-only occurrences must not inflate unresolved shipping routes.
+        mod_tests = re.search(r"(?m)^\s*#\[cfg\(test\)\]\s*\n\s*mod\s+tests\b", content)
+        first_test_line = content[:mod_tests.start()].count("\n") + 1 if mod_tests else None
+        test_file = path.name == "tests.rs" or "tests" in path.relative_to(UI).parts
         for no, line in enumerate(content.splitlines(), 1):
             stripped = line.strip()
             if stripped.startswith("//") or stripped.startswith("///"):
@@ -89,7 +97,12 @@ def main():
                 "self.session.execute(", "self.session.execute_checked(",
                 "app.session.project =", "self.session.project =",
             )):
-                unresolved.append({"file":rel,"line":no,"source":stripped[:160]})
+                finding={"file":rel,"line":no,"source":stripped[:160]}
+                unresolved.append(finding)
+                if test_file or (first_test_line is not None and no >= first_test_line):
+                    test_only.append(finding)
+                else:
+                    runtime.append(finding)
     # All source strings are auditable and no run artifact includes credentials.
     evidence = {
         "schemaVersion": 1,
@@ -99,6 +112,8 @@ def main():
         "guardedManualCommandMeasured": sum(measured.values()),
         "guardedSources": measured,
         "remainingDirectSessionCalls": unresolved,
+        "unresolvedRuntimeSourceCalls": runtime,
+        "unresolvedTestOnlyCalls": test_only,
         "completeDesktopMutationLock": False,
         "productionAiEditingEnabled": False,
         "ciGates": "static source routes only; Windows compilation and runtime tests separately required",
@@ -109,6 +124,8 @@ def main():
     dest.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Owner gate static audit: {sum(measured.values())} routed manual commands in {len(measured)} original UI files")
     print(f"Unresolved possible direct Session calls: {len(unresolved)} (NOT claimed secured)")
+    print(f"  runtime source candidate calls: {len(runtime)}")
+    print(f"  test-only calls (not shipping): {len(test_only)}")
     print("Evidence SHA256:", hashlib.sha256(dest.read_bytes()).hexdigest())
     for item in errors:
         print("ERROR:", item)

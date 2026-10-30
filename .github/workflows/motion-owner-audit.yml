@@ -36,7 +36,8 @@ jobs:
           assert data['productionAiEditingEnabled'] is False
           assert data['completeDesktopMutationLock'] is False
           assert data['guardedManualCommandMeasured'] >= 106
-          print("Explicit remaining bypass candidates:",len(data['remainingDirectSessionCalls']))
+          print("Outstanding runtime source candidates:",len(data["unresolvedRuntimeSourceCalls"]))
+          print("Test-only direct Session fixtures:",len(data["unresolvedTestOnlyCalls"]))
           PY
       - name: Publish source-linked audit of guarded and unresolved native mutation routes
         uses: actions/upload-artifact@v4
