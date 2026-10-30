@@ -19,12 +19,17 @@ function fixture() {
     enginePins:{filmcraft:'c49efe070fab862df6c21d61a503605eb6f07105',effectcraft:'fa9cf47175834162806b6b03d83fb2f4bdaeeafa'}},
     video:{...shared,outputSha256:hash,projectSha256:hash,outputBytes:500,previewWidth:64,previewHeight:64,
       outputProbe:{duration:120,video:{codec:'h264',width:64,height:64}}},
-    motion:{...shared,pngSha256:hash,reopenedPngSha256:hash}};
+    motion:{...shared,pngSha256:hash,reopenedPngSha256:hash},
+    unified:{...shared,steps:['synthetic-ui-click','synthetic-native-project','synthetic-motion-create',
+      'synthetic-native-save','synthetic-cold-reopen'],videoNativeReadbackVerified:true,nativeMotionRenderVerified:true,
+      videoProjectSha256:hash,motionProjectSha256:hash,motionPngSha256:hash,reopenedPngSha256:hash,
+      videoPreview:{width:64,height:64},motionPreview:{width:360,height:360}}};
 }
 test('complete editing receipts never imply provider AI or full release readiness',()=>{
   const result=validateReceipts(fixture(),sha);
   assert.equal(result.editingSliceVerified,true);assert.equal(result.releaseReady,false);
   assert.equal(result.aiProviderEditVerified,false);
+  assert.equal(result.unifiedNativeReadbackVerified,true);
 });
 for(const [label,change] of [
   ['stale install',f=>f.install.checkpoint='c'.repeat(40)],
@@ -37,6 +42,11 @@ for(const [label,change] of [
   ['missing no overwrite',f=>delete f.video.noOverwriteVerified],
   ['non-H264 output',f=>f.video.outputProbe.video.codec='vp9'],
   ['changed engine pin',f=>f.install.enginePins.effectcraft='c'.repeat(40)],
+  ['missing Unified proof',f=>delete f.unified],
+  ['failed Unified native Motion readback',f=>f.unified.nativeMotionRenderVerified=false],
+  ['different Unified Video project',f=>f.unified.videoProjectSha256='c'.repeat(64)],
+  ['changed Unified cold restart PNG',f=>f.unified.reopenedPngSha256='c'.repeat(64)],
+  ['missing Unified cold process restart',f=>f.unified.coldRestartVerified=false],
   ['different compiled EXE',f=>f.install.builtBinarySha256='c'.repeat(64)],
   ['different staged sidecar',f=>f.install.stagedSidecarSha256='c'.repeat(64)],
   ['failed executable integrity assertion',f=>f.install.binaryHashMatched=false],
@@ -45,7 +55,8 @@ for(const [label,change] of [
 ]) test(`release proof rejects ${label}`,()=>{const f=fixture();change(f);assert.throws(()=>validateReceipts(f,sha));});
 test('both GUI programs parse before any expensive Windows build',()=>{
   for(const script of ['tests/motion/desktop-e2e.mjs','scripts/release/video-installed-e2e.mjs',
-    'scripts/release/webdriver.mjs','scripts/release/verify-installed-proof.mjs']) {
+    'scripts/release/webdriver.mjs','scripts/release/verify-installed-proof.mjs',
+    'scripts/release/unified-installed-e2e.mjs']) {
     const result=spawnSync(process.execPath,['--check',script],{encoding:'utf8'});
     assert.equal(result.status,0,script+'\n'+result.stderr);
   }
@@ -60,13 +71,18 @@ test('evidence verifier rejects altered media and missing screenshots on physica
     f.install.installedSidecarPath=file;f.install.installedSidecarSha256=fingerprint;
     f.video.output=file;f.video.outputSha256=fingerprint;f.video.project=file;f.video.projectSha256=fingerprint;
     f.motion.projectDir=root;f.motion.pngSha256=fingerprint;await writeFile(path.join(root,'webview_e2e.png'),data);
-    await assert.rejects(()=>verifyFiles(f,root,root),/ENOENT/);
+    f.unified.motionProject=file;f.unified.motionProjectSha256=fingerprint;
+    f.unified.motionPng=file;f.unified.motionPngSha256=fingerprint;
+    f.unified.reopenedPngSha256=fingerprint;
+    await assert.rejects(()=>verifyFiles(f,root,root,root),/ENOENT/);
     const png=Buffer.alloc(120);Buffer.from('89504e470d0a1a0a','hex').copy(png);
     for(const name of ['video-native-timeline.png','video-export.png','video-cold-reopen.png',
-      'm11_01-native-shape.png','m11_02-effect-mask.png','m11_03-cold-reopened-project.png','motion-windows-webview2.png']) await writeFile(path.join(root,name),png);
-    await verifyFiles(f,root,root);
+      'm11_01-native-shape.png','m11_02-effect-mask.png','m11_03-cold-reopened-project.png','motion-windows-webview2.png',
+      'unified-01-single-window.png','unified-02-filmcraft-native-timeline.png',
+      'unified-03-effectcraft-native-render.png','unified-04-effectcraft-cold-reopened.png']) await writeFile(path.join(root,name),png);
+    await verifyFiles(f,root,root,root);
     await writeFile(file,'tampered');
-    await assert.rejects(()=>verifyFiles(f,root,root),/Evidence bytes changed/);
+    await assert.rejects(()=>verifyFiles(f,root,root,root),/Evidence bytes changed/);
   } finally {await rm(root,{recursive:true,force:true});}
 });
 

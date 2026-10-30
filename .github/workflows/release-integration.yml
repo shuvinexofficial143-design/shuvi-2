@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: shuvi2-release-integration-${{ github.ref }}
+  group: shuvi2-release-integration-v05-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   integrated-windows-native-and-e2e:
@@ -112,6 +112,7 @@ jobs:
             proof/video-desktop/
             proof/release/
             proof/motion-desktop/
+            proof/unified-desktop/
           if-no-files-found: warn
           retention-days: 7
 

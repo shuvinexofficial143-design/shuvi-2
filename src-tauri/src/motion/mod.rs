@@ -13,6 +13,8 @@ pub enum MotionRequest{
     Status,
     CreateComposition { name:String,width:u32,height:u32,fps:f64,duration_seconds:f64 },
     ListLayers { comp_id:u64 },
+    // Read-only native composition inspection needed by Unified Workspace recovery.
+    InspectComposition { comp_id:u64 },
     AddText { comp_id:u64,name:String,text:String,x:f64,y:f64,size:f64 },
     EditText { comp_id:u64,layer_id:u64,text:String },
     AddShape { comp_id:u64,name:String,kind:String,x:f64,y:f64,width:f64,height:f64,fill:String },
@@ -144,6 +146,12 @@ fn apply(e:&mut MotionBridge,request:MotionRequest)->Result<Value,String>{
             Ok(json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
                 "fps":c.fps,"durationSeconds":c.duration_seconds,"revision":c.project_revision}))
         }
+        MotionRequest::InspectComposition{comp_id}=>{
+            let c=e.inspect_composition(comp_id)?;
+            Ok(json!({"id":c.id,"name":c.name,"width":c.width,"height":c.height,
+                "fps":c.fps,"durationSeconds":c.duration_seconds,
+                "revision":c.project_revision,"source":"native-effectcraft"}))
+        }
         MotionRequest::ListLayers{comp_id}=>Ok(Value::Array(e.list_layers(comp_id)?
             .into_iter().map(layer_json).collect())),
         MotionRequest::AddText{comp_id,name,text,x,y,size}=>
@@ -243,6 +251,22 @@ pub async fn motion_command(
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn unified_inspect_composition_reads_current_native_worker_revision() {
+        let host=MotionHost::new();
+        let initial=host.execute(MotionRequest::CreateComposition {
+            name:"Unified inspect native".into(),width:640,height:360,fps:30.0,
+            duration_seconds:5.0
+        }).unwrap();
+        let id=initial["id"].as_u64().unwrap();
+        let readback=host.execute(MotionRequest::InspectComposition{comp_id:id}).unwrap();
+        let status=host.execute(MotionRequest::Status).unwrap();
+        assert_eq!(readback["name"],"Unified inspect native");
+        assert_eq!(readback["revision"],initial["revision"]);
+        assert_eq!(readback["revision"],status["projectRevision"]);
+        assert_eq!(readback["source"],"native-effectcraft");
+        assert!(host.execute(MotionRequest::InspectComposition{comp_id:id+1000}).is_err());
+    }
     #[test]
     fn same_worker_preserves_live_engine_state_and_native_preview(){
         let host=MotionHost::new();

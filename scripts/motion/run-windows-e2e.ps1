@@ -63,7 +63,13 @@ try {
     node tests/motion/desktop-e2e.mjs
     if ($LASTEXITCODE -ne 0) { throw "Real Windows WebView2 native editing E2E FAILED" }
     if ($videoExit -ne 0) { throw 'Installed Video E2E failed; Motion ran independently; see both receipts' }
-    Write-Host "PASS: real native WebView2 click-to-edit verified"
+    if ($VideoFirst) {
+        node --check scripts/release/unified-installed-e2e.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'Unified installed desktop script has syntax errors' }
+        node scripts/release/unified-installed-e2e.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'Installed Unified real WebView2 Video/Motion cold-reopen E2E FAILED' }
+    }
+    Write-Host "PASS: installed classic Video, Motion and native Unified WebView2 E2E"
 } finally {
     if ($service -and !$service.HasExited) { Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue }
 }
