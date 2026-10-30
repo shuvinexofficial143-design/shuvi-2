@@ -79,13 +79,69 @@ async function freePort(){
     });
   });
 }
+/** Capture user-visible action result, including explicit errors; never wait two
+ * minutes on a failed native Tauri request just because success didn't appear.
+ */
 async function visibleStatus(fragment, timeout=120000){
-  await page.waitForFunction(
-    expected => document.querySelector('.v-editor [data-v="status"]')?.textContent?.includes(expected),
-    fragment,{timeout},
-  );
-  const result=await page.locator('.v-editor [data-v="status"]').textContent();
-  if(!result?.includes(fragment))throw Error("Unexpected native status: "+result);
+  let observed;
+  try{
+    observed=await page.waitForFunction(expected=>{
+      const node=document.querySelector('.v-editor [data-v="status"]');
+      if(!node)return null;
+      const text=node.textContent??"";
+      if(text.includes(expected))return {ok:true,text};
+      if(node.classList.contains("v-error"))return {ok:false,text};
+      return null;
+    },fragment,{timeout});
+  }catch(error){
+    const state=await captureEditorStatus();
+    throw Error("Native action timed out waiting for "+fragment+
+      "; current actual WebView2 status: "+JSON.stringify(state)+
+      "; original timeout: "+String(error));
+  }
+  const result=await observed.jsonValue();
+  if(!result.ok)throw Error("Native FilmCraft UI reported failure while expecting "+
+    fragment+": "+result.text);
+  return result.text;
+}
+async function captureEditorStatus(){
+  if(!page)return {state:"no-webview-page"};
+  try{
+    return await page.evaluate(()=>{
+      const find=k=>document.querySelector('.v-editor [data-v="'+k+'"]');
+      const status=find("status");
+      const buttons=[...document.querySelectorAll(".v-editor button[data-action]")];
+      return {
+        status:status?.textContent??null,
+        statusIsError:status?.classList.contains("v-error")??null,
+        health:find("health")?.textContent??null,
+        meta:find("meta")?.textContent??null,
+        history:document.querySelector('.v-lanes [data-v="history"]')?.textContent??null,
+        busyButtons:buttons.filter(el=>el.disabled).map(el=>el.dataset.action),
+        activeButtons:buttons.filter(el=>!el.disabled).map(el=>el.dataset.action),
+        timelineClips:document.querySelectorAll(".v-lanes .v-clip").length,
+        realTracks:document.querySelectorAll(".v-lanes .v-track-row").length
+      };
+    });
+  }catch(error){return {state:"webview-unavailable",error:String(error)};}
+}
+function inspectNativeOnFailure(){
+  const result={projectExists:existsSync(project)};
+  if(!result.projectExists)return result;
+  try{
+    const raw=execFileSync(staged,["--compact","--project",project,"inspect","project"],
+      {encoding:"utf8",timeout:20000,maxBuffer:512000});
+    const parsed=JSON.parse(raw);
+    result.project={revision:parsed.revision,activeSequence:parsed.activeSequence,
+      keys:Object.keys(parsed).slice(0,20)};
+  }catch(error){result.projectError=String(error).slice(0,300);}
+  try{
+    const raw=execFileSync(staged,["--compact","--project",project,"inspect","sequence"],
+      {encoding:"utf8",timeout:20000,maxBuffer:512000});
+    const parsed=JSON.parse(raw);
+    result.sequence={videoTracks:parsed.video?.length,audioTracks:parsed.audio?.length,
+      markers:parsed.markers?.length};
+  }catch(error){result.sequenceError=String(error).slice(0,300);}
   return result;
 }
 async function clickAction(action,expected,timeout=120000){
@@ -134,6 +190,16 @@ try{
     await sleep(250);
   }
   if(!page)throw Error("Native WebView2 did not render the Video Studio DOM");
+  report.browserErrors=[];
+  page.on("pageerror",error=>{
+    if(report.browserErrors.length<18)report.browserErrors.push({
+      kind:"pageerror",message:String(error).slice(0,500)
+    });
+  });
+  page.on("console",message=>{
+    if(message.type()==="error" && report.browserErrors.length<18)
+      report.browserErrors.push({kind:"console",message:message.text().slice(0,500)});
+  });
   await page.locator(".v-editor").waitFor({state:"visible",timeout:15000});
   note("window","Real Windows app and WebView2 Video Studio DOM visible");
 
@@ -150,6 +216,13 @@ try{
   note("import-file","Actual FilmCraft project on disk: "+statSync(project).size+" bytes");
 
   await clickAction("sequence","Verified createSequence",120000);
+  const independentSequence=inspectNativeOnFailure();
+  if(!Number.isInteger(independentSequence.sequence?.videoTracks) ||
+     independentSequence.sequence.videoTracks<1)
+    throw Error("Native FilmCraft CLI could not independently inspect a saved sequence: "+
+      JSON.stringify(independentSequence));
+  note("sequence-file","Independently reopened real .fcproj: "+
+    JSON.stringify(independentSequence.sequence));
   const select=page.locator('[data-v="media"]');
   if(await select.locator("option").count()<2)throw Error("Media bin has no imported FilmCraft item");
   await select.selectOption({index:1});
@@ -319,6 +392,10 @@ try{
   report.status="pass";
 }catch(error){
   report.status="fail";report.error=String(error?.stack??error);
+  report.uiAtFailure=await captureEditorStatus();
+  report.realFilmCraftAtFailure=inspectNativeOnFailure();
+  console.error("WebView2 UI state:",JSON.stringify(report.uiAtFailure));
+  console.error("FilmCraft independently inspected state:",JSON.stringify(report.realFilmCraftAtFailure));
   console.error("ACTUAL WINDOWS E2E FAILED:",report.error);
   if(page){try{await page.screenshot({path:shotPath,timeout:6000});}catch{}}
   process.exitCode=1;

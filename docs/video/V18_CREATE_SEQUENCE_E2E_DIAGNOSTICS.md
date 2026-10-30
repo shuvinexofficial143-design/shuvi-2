@@ -1,0 +1,7 @@
+# V18.2 — Exact Windows Create Sequence E2E failure diagnostics
+
+GitHub run 41016666349 verified real NSIS (~14.9 MB), Windows HWND launch, CI-only WebView2 CDP attach, and real imported MP4. The UI E2E then timed out on Create Sequence after 120s. That is **not** a WebView2 connection failure. All underlying real Rust/FilmCraft import, sequence, preview, export, and history tests passed separately.
+New native UI E2E collects actual status text, v-error flag, health/meta/history, disabled action buttons, and timeline track/clip counts when a user-visible action fails. Explicit UI errors fail immediately rather than spending 120s waiting for a success string. On any failure the test independently invokes the pinned FilmCraft CLI to inspect the saved project revision/activeSequence and real sequence track counts, to discriminate persisted edit vs renderer/readback/IPC errors.
+WebView2 page console errors and page exceptions are captured into the existing CI diagnostic JSON. No API key, media bytes, root paths, passwords or private chat messages are exposed in the new data fields. The existing test still MUST complete Import→Sequence→Place→Undo/Redo→Drag→Chat→Ruler→PNG→MP4.
+The production installer was built and archived before the separate instrumented browser-test executable; no debug flags are shipped with the user installer.
+Do NOT claim fully verified desktop E2E while the exact-head run is failing.
