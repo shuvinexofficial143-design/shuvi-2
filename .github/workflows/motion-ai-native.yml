@@ -1,4 +1,4 @@
-name: Shuvi 2 Motion M-AI01 Native Build
+name: Shuvi 2 Motion Native AI Integration (M-AI04)
 on:
   push:
     branches:
@@ -51,6 +51,24 @@ jobs:
       - name: Test real native guarded motion mutation adapter
         shell: pwsh
         run: cargo test --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft-ui-egui --lib shuvi_motion_owner::tests -- --nocapture
+      - name: Check out exact authoritative 2.0.3 AI Director source (temporary, NOT merged)
+        uses: actions/checkout@v4
+        with:
+          repository: shuvinexofficial143-design/shuvi-2
+          ref: 64bf23e4cb9b4c95ca88b2f07ce9d57f7c2fa3e4
+          path: director-source
+          persist-credentials: false
+          sparse-checkout: src-tauri/src/ai_director
+      - name: Stage trusted Director crate for isolated Motion integration test
+        shell: pwsh
+        run: |
+          $from = "director-source/src-tauri/src/ai_director"
+          $to = "original-editors/Shuvi2-Motion/integrations/ai-provider"
+          if (!(Test-Path "$from/Cargo.toml")) { throw "Pinned native ledger missing" }
+          Copy-Item $from $to -Recurse -Force
+      - name: Test real EffectCraft Session through 2.0.3 SQLite guarded native host
+        shell: pwsh
+        run: cargo test --manifest-path original-editors/Shuvi2-Motion/integrations/shuvi-director-motion/Cargo.toml -- --nocapture
       - name: Build native Windows EffectCraft from OWN branch source
         shell: pwsh
         run: cargo build --release --locked --manifest-path original-editors/Shuvi2-Motion/Cargo.toml --package effectcraft
@@ -65,12 +83,12 @@ jobs:
             Copy-Item "original-editors/Shuvi2-Motion/$f" own-motion
           }
           Get-FileHash own-motion/Shuvi2-Motion.exe -Algorithm SHA256 | Format-List
-          Compress-Archive -Path own-motion/* -DestinationPath Shuvi2-Motion-MAI01-Win64.zip -Force
+          Compress-Archive -Path own-motion/* -DestinationPath Shuvi2-Motion-MAI04-Win64.zip -Force
           if ((Get-Item Shuvi2-Motion-MAI01-Win64.zip).Length -lt 5000000) { throw "Invalid ZIP" }
       - name: Upload OWN Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Shuvi2-Motion-MAI01-NativeProbe-Windows-x64
+          name: Shuvi2-Motion-MAI04-BridgeTest-Windows-x64
           path: Shuvi2-Motion-MAI01-Win64.zip
           retention-days: 14
           if-no-files-found: error

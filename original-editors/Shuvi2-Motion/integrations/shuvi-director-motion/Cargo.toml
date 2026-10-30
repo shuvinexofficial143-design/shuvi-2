@@ -1,0 +1,15 @@
+[package]
+name = "shuvi-director-motion-integration"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# An ISOLATED integration harness, not part of the EffectCraft release.
+# CI copies the exact pinned 2.0.3 provider crate into ../ai-provider.
+[workspace]
+
+[dependencies]
+shuvi-ai-provider = { path = "../ai-provider" }
+effectcraft-engine = { path = "../../crates/engine" }
+serde_json = "1"
+sha2 = "0.10"
